@@ -46,12 +46,18 @@ router.post('/', authMiddleware, async (req, res) => {
 
     const domain = req.body.email ? req.body.email.split('@')[1] || null : null;
 
-    const client = await prisma.client.create({
-      data: { code, ...req.body, emailDomain: domain },
-    });
+    const data = { code, ...req.body, emailDomain: domain };
+
+    if (data.defaultSellerId) {
+      const seller = await prisma.user.findUnique({ where: { id: data.defaultSellerId } });
+      if (!seller) data.defaultSellerId = null;
+    }
+
+    const client = await prisma.client.create({ data });
     res.status(201).json(client);
   } catch (err) {
-    res.status(500).json({ error: 'Error al crear cliente' });
+    console.error('Error creating client:', err);
+    res.status(500).json({ error: err.message || 'Error al crear cliente' });
   }
 });
 

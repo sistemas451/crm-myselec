@@ -273,34 +273,74 @@ function LogisticsView({ onOpen }) {
 
 // ---------- Clients ----------
 function Clients({ readonly=false }) {
-  const [sel, setSel] = useState(CLIENTS[0].code);
-  const cli = CLIENTS.find(c => c.code === sel);
-  const seller = USERS.find(u => u.id === cli.seller);
+  const { openModal, clients, users } = useApp();
+  const [sel, setSel] = useState('');
+  const [search, setSearch] = useState('');
+  const [filterSeller, setFilterSeller] = useState('');
+  const [filterZone, setFilterZone] = useState('');
+  const [filterProv, setFilterProv] = useState('');
 
-  const cliQuotes = QUOTES.filter(q => q.client === cli.code);
-  const cliOrders = ORDERS.filter(o => o.client === cli.code);
+  const filteredClients = clients.filter(c => {
+    const q = search.toLowerCase();
+    const matchSearch = !q ||
+      c.name?.toLowerCase().includes(q) ||
+      c.cuit?.includes(q) ||
+      c.email?.toLowerCase().includes(q) ||
+      c.city?.toLowerCase().includes(q);
+    const matchSeller = !filterSeller || c.seller === filterSeller;
+    const matchZone = !filterZone || c.zone === filterZone;
+    const matchProv = !filterProv || c.prov === filterProv;
+    return matchSearch && matchSeller && matchZone && matchProv;
+  });
+  const hasFilters = !!(search || filterSeller || filterZone || filterProv);
+  const activeSel = sel || filteredClients[0]?.code || '';
+  const cli = clients.find(c => c.code === activeSel);
+  const seller = users.find(u => u.id === cli?.seller);
+
+  const cliQuotes = QUOTES.filter(q => q.client === cli?.code);
+  const cliOrders = ORDERS.filter(o => o.client === cli?.code);
 
   return (
     <div>
       <PageHead
         subtitle={readonly ? 'Directorio · solo lectura' : 'Directorio de clientes'}
         title="Clientes"
-        description={`${CLIENTS.length} clientes registrados · 8 activos este mes`}
+        description={hasFilters ? `${filteredClients.length} de ${clients.length} clientes` : `${clients.length} clientes registrados`}
         actions={
           <>
             <div className="relative">
               <Icon name="search" size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-400"/>
-              <input className="inp pl-8 py-1.5 w-56 text-xs" placeholder="Buscar razón social o CUIT…"/>
+              <input className="inp pl-8 py-1.5 w-56 text-xs" placeholder="Buscar razón social o CUIT…"
+                value={search} onChange={e=>setSearch(e.target.value)}/>
             </div>
-            {!readonly && <button className="btn-primary"><Icon name="plus" size={14}/>Nuevo cliente</button>}
+            <select className="inp text-xs py-1.5" value={filterSeller} onChange={e=>setFilterSeller(e.target.value)}>
+              <option value="">Todos los vendedores</option>
+              {users.filter(u=>u.role==='Vendedor'||u.role==='Administrador').map(u=>(
+                <option key={u.id} value={u.id}>{u.name}</option>
+              ))}
+            </select>
+            <select className="inp text-xs py-1.5" value={filterZone} onChange={e=>setFilterZone(e.target.value)}>
+              <option value="">Todas las zonas</option>
+              {ZONES.map(z=><option key={z} value={z}>{z}</option>)}
+            </select>
+            <select className="inp text-xs py-1.5" value={filterProv} onChange={e=>setFilterProv(e.target.value)}>
+              <option value="">Todas las provincias</option>
+              {PROVINCES.map(p=><option key={p} value={p}>{p}</option>)}
+            </select>
+            {hasFilters && (
+              <button className="btn-ghost text-xs" onClick={()=>{setSearch('');setFilterSeller('');setFilterZone('');setFilterProv('');}}>
+                <Icon name="x" size={12}/>Limpiar
+              </button>
+            )}
+            {!readonly && <button className="btn-primary" onClick={()=>openModal('newClient')}><Icon name="plus" size={14}/>Nuevo cliente</button>}
           </>
         }
       />
       <div className="grid grid-cols-[340px_1fr] gap-0 h-[calc(100vh-136px)]">
         {/* list */}
         <div className="border-r border-line bg-white overflow-y-auto scroll-thin">
-          {CLIENTS.map(c => {
-            const s = USERS.find(u=>u.id===c.seller);
+          {filteredClients.map(c => {
+            const s = users.find(u=>u.id===c.seller);
             const active = c.code === sel;
             return (
               <button key={c.code}
@@ -314,7 +354,7 @@ function Clients({ readonly=false }) {
                   <div className="text-[13px] font-semibold text-ink-900 truncate">{c.name}</div>
                   <div className="text-[11px] text-ink-500 truncate">{c.city}, {c.prov}</div>
                   <div className="text-[10.5px] text-ink-500 mt-1.5 flex items-center gap-1.5">
-                    <Avatar name={s.name} size={14}/><span>{s.name.split(' ')[0]}</span>
+                    <Avatar name={s?.name||'?'} size={14}/><span>{s?.name?.split(' ')?.[0]||'—'}</span>
                     <span className="text-ink-300">·</span>
                     <span className="mono">{c.code}</span>
                   </div>
@@ -326,6 +366,9 @@ function Clients({ readonly=false }) {
 
         {/* detail */}
         <div className="overflow-y-auto scroll-thin p-6 space-y-5">
+          {!cli ? (
+            <div className="flex items-center justify-center h-64 text-ink-400 text-[13px]">Sin resultados para los filtros aplicados.</div>
+          ) : <>
           <div className="flex items-start gap-4">
             <div className="w-16 h-16 rounded-xl bg-navy-900 text-white flex items-center justify-center text-lg font-bold shrink-0">
               {cli.name.slice(0,2)}
@@ -348,7 +391,7 @@ function Clients({ readonly=false }) {
             <Field label="Actividad" value={cli.activity}/>
             <Field label="Zona" value={cli.zone}/>
             <Field label="Vendedor asignado">
-              <div className="flex items-center gap-2"><Avatar name={seller.name} size={20}/>{seller.name}</div>
+              <div className="flex items-center gap-2"><Avatar name={seller?.name||'?'} size={20}/>{seller?.name||'—'}</div>
             </Field>
             <Field label="Email" value={cli.email}/>
             <Field label="Teléfono" mono value={cli.phone}/>
@@ -386,13 +429,13 @@ function Clients({ readonly=false }) {
               <tbody>
                 {cliQuotes.map(q => {
                   const stg = STAGES_F1.find(s=>s.id===q.stage);
-                  const s = USERS.find(u=>u.id===q.seller);
+                  const s = users.find(u=>u.id===q.seller);
                   return (
                     <tr key={q.code}>
                       <td><Badge tone="slate">COT</Badge></td>
                       <td className="mono">{q.code}</td>
                       <td><Badge tone={stg.tone} dot>{stg.label}</Badge></td>
-                      <td>{s.name.split(' ')[0]}</td>
+                      <td>{s?.name?.split(' ')?.[0]||'—'}</td>
                       <td className="mono text-[12px]">{fmtDate(q.ingreso)}</td>
                       <td className="text-right mono">{fmtMoney(q.monto)}</td>
                     </tr>
@@ -400,13 +443,13 @@ function Clients({ readonly=false }) {
                 })}
                 {cliOrders.map(o => {
                   const stg = STAGES_F2.find(s=>s.id===o.stage);
-                  const s = USERS.find(u=>u.id===o.seller);
+                  const s = users.find(u=>u.id===o.seller);
                   return (
                     <tr key={o.code}>
                       <td><Badge tone="navy">OC</Badge></td>
                       <td className="mono">{o.code}</td>
                       <td><Badge tone={stg.tone} dot>{stg.label}</Badge></td>
-                      <td>{s.name.split(' ')[0]}</td>
+                      <td>{s?.name?.split(' ')?.[0]||'—'}</td>
                       <td className="mono text-[12px]">{fmtDate(o.fecha)}</td>
                       <td className="text-right mono">—</td>
                     </tr>
@@ -415,6 +458,7 @@ function Clients({ readonly=false }) {
               </tbody>
             </table>
           </div>
+          </>}
         </div>
       </div>
     </div>

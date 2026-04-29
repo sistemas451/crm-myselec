@@ -242,4 +242,24 @@ router.post('/:id/notes', authMiddleware, async (req, res) => {
   }
 });
 
+// DELETE /api/quotes/:id
+router.delete('/:id', authMiddleware, async (req, res) => {
+  try {
+    const quote = await prisma.quote.findUnique({
+      where: { id: req.params.id },
+    });
+    if (!quote) return res.status(404).json({ error: 'No encontrada' });
+
+    if (req.user.role !== 'ADMIN') {
+      return res.status(403).json({ error: 'Solo administradores pueden eliminar cotizaciones' });
+    }
+
+    await prisma.quote.delete({ where: { id: req.params.id } });
+    res.json({ ok: true, code: quote.code });
+  } catch (err) {
+    console.error('Error deleting quote:', err);
+    res.status(500).json({ error: 'Error al eliminar' });
+  }
+});
+
 module.exports = router;

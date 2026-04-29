@@ -54,6 +54,7 @@ const CrmApi = {
     method: 'PATCH', body: JSON.stringify({ sellerId })
   }),
   getQuoteDetail: (id) => apiFetch(`/quotes/${id}/detail`),
+  deleteQuote: (id) => apiFetch(`/quotes/${id}`, { method: 'DELETE' }),
   addQuoteNote: (id, text) => apiFetch(`/quotes/${id}/notes`, {
     method: 'POST', body: JSON.stringify({ text })
   }),

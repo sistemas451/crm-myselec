@@ -73,7 +73,7 @@ function TabBar({ tabs, active, onChange }) {
 }
 
 function QuoteDetail({ code, onClose, canReassign }) {
-  const { quotes, clients, users, moveQuoteStage, setQuotes, pushToast } = useApp();
+  const { quotes, clients, users, moveQuoteStage, setQuotes, pushToast, closeModal } = useApp();
   const q = quotes.find(x => x.code === code);
   if (!q) return null;
   const cli = clients.find(c=>c.code===q.client);
@@ -135,6 +135,18 @@ function QuoteDetail({ code, onClose, canReassign }) {
     }
   };
 
+  const handleDelete = async () => {
+    if (!window.confirm(`¿Eliminar la cotización ${q.code}? Esta acción no se puede deshacer.`)) return;
+    try {
+      await CrmApi.deleteQuote(q.id);
+      setQuotes(qs => qs.filter(x => x.id !== q.id));
+      pushToast('Cotización eliminada');
+      closeModal();
+    } catch (err) {
+      pushToast(err.message || 'Error al eliminar', 'bad');
+    }
+  };
+
   const items = [
     { sku:'LME-25/4',    desc:'Cable subterráneo Synthenax 4x25 mm² — bobina 100m', qty:3, pu:980,  pt:2940 },
     { sku:'TAB-PV400',   desc:'Tablero de transferencia automática PV-400 3F+N',    qty:1, pu:8900, pt:8900 },
@@ -169,6 +181,11 @@ function QuoteDetail({ code, onClose, canReassign }) {
       width={960}
       headerExtras={
         <div className="flex items-center gap-2">
+          {CrmAuth.getUser()?.role === 'ADMIN' && (
+            <button className="btn-ghost text-bad border-red-200 hover:bg-red-50" onClick={handleDelete}>
+              <Icon name="trash-2" size={13}/>Eliminar
+            </button>
+          )}
           <Badge tone={stg.tone} dot>{stg.label}</Badge>
           <button className="btn-ghost"><Icon name="download" size={13}/>PDF</button>
           {canReassign && (

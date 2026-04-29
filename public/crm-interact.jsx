@@ -194,7 +194,7 @@ function AppProvider({ children }) {
   const closeAllModals = useCallback(() => setModals([]), []);
 
   const value = {
-    quotes, setQuotes, orders, setOrders, clients, users, activity, comments, notifications,
+    quotes, setQuotes, orders, setOrders, clients, setClients, users, activity, comments, notifications,
     quoteFilters, setQuoteFilters, orderFilters, setOrderFilters,
     currentUserId, setCurrentUserId, roleKey, setRoleKey,
     addQuote, addOrder, addClient, updateQuote, updateOrder,
@@ -496,22 +496,55 @@ function NewOrderModal() {
 
 // --- 3. Nuevo Cliente ---
 function NewClientModal() {
-  const { closeModal, addClient, users } = useApp();
+  const { closeModal, users, setClients, pushToast } = useApp();
   const [form, setForm] = useS({
-    name:'', cuit:'', address:'', city:'', prov:'', zone:'', cp:'', activity:'', phone:'', email:'', seller:'u-lp'
+    name:'', cuit:'', address:'', city:'', prov:'', zone:'', cp:'', activity:'', phone:'', email:'', seller:''
   });
+  const [saving, setSaving] = useS(false);
   const set = (k,v) => setForm(f => ({...f, [k]:v}));
-  const canSubmit = form.name && form.cuit;
+  const canSubmit = form.name;
 
-  const submit = () => { addClient(form); closeModal(); };
+  const submit = async () => {
+    setSaving(true);
+    try {
+      await CrmApi.createClient({
+        name: form.name,
+        cuit: form.cuit || null,
+        email: form.email || null,
+        phone: form.phone || null,
+        address: form.address || null,
+        city: form.city || null,
+        province: form.prov || null,
+        zone: form.zone || null,
+        activity: form.activity || null,
+        defaultSellerId: form.seller || null,
+      });
+      const clients = await CrmApi.getClients();
+      const mapped = clients.map(c => ({
+        id: c.id, code: c.code, name: c.name, cuit: c.cuit || '',
+        city: c.city || '', prov: c.province || '', zone: c.zone || '',
+        activity: c.activity || '', seller: c.defaultSellerId || '',
+        sellerName: c.defaultSeller?.name || '', email: c.email || '',
+        phone: c.phone || '', address: c.address || '',
+      }));
+      setClients(mapped);
+      pushToast('Cliente creado correctamente');
+      closeModal();
+    } catch (err) {
+      pushToast(err.message || 'Error al crear cliente', 'bad');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <Modal onClose={closeModal} subtitle="Directorio de clientes" title="Nuevo cliente" width={680}
       footer={
         <>
-          <button className="btn-ghost" onClick={closeModal}>Cancelar</button>
-          <button className="btn-primary" disabled={!canSubmit} onClick={submit} style={!canSubmit?{opacity:.45, cursor:'not-allowed'}:{}}>
-            <Icon name="check" size={13}/>Guardar cliente
+          <button className="btn-ghost" onClick={closeModal} disabled={saving}>Cancelar</button>
+          <button className="btn-primary" disabled={!canSubmit || saving} onClick={submit}
+            style={!canSubmit || saving ? {opacity:.45, cursor:'not-allowed'} : {}}>
+            <Icon name="check" size={13}/>{saving ? 'Guardando...' : 'Guardar cliente'}
           </button>
         </>
       }
