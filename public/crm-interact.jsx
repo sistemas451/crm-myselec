@@ -390,7 +390,7 @@ function NewQuoteModal({ defaultClient }) {
 
 // --- 2. Nueva OC ---
 function NewOrderModal() {
-  const { closeModal, addOrder, quotes, clients } = useApp();
+  const { closeModal, quotes, clients, setOrders, pushToast } = useApp();
   const accepted = quotes.filter(q => q.stage === 'aceptada');
   const [form, setForm] = useS({
     fromQuote: accepted[0]?.code || '',
@@ -401,34 +401,43 @@ function NewOrderModal() {
     fecha: new Date().toISOString().slice(0,10),
     observaciones: '',
   });
+  const [saving, setSaving] = useS(false);
   const set = (k,v) => setForm(f => ({...f, [k]: v}));
   const q = quotes.find(x => x.code === form.fromQuote);
   const cli = q && clients.find(c => c.code === q.client);
   const canSubmit = form.fromQuote && form.ocCliente;
 
-  const submit = () => {
+  const submit = async () => {
     if (!q) return;
-    addOrder({
-      client: q.client,
-      seller: q.seller,
-      fromQuote: q.code,
-      entrega: form.entrega,
-      transp: form.entrega==='AMBA' ? 'Propio' : (form.transp || '—'),
-      flexxus: form.flexxus || '—',
-      fecha: form.fecha,
-      ocCliente: form.ocCliente,
-      observaciones: form.observaciones,
-    });
-    closeModal();
+    setSaving(true);
+    try {
+      await CrmApi.createOrder({
+        fromQuoteId: q.id,
+        clientOCCode: form.ocCliente,
+        flexxusCode: form.flexxus || null,
+        deliveryType: form.entrega,
+        carrier: form.entrega === 'Interior' ? form.transp : null,
+        estimatedDate: form.fecha || null,
+      });
+      const freshOrders = await CrmApi.getOrders();
+      setOrders(freshOrders);
+      pushToast('Orden de compra creada correctamente');
+      closeModal();
+    } catch (err) {
+      pushToast(err.message || 'Error al crear OC', 'bad');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
     <Modal onClose={closeModal} subtitle="Fase 2 · OC Recibida" title="Nueva orden de compra" width={620}
       footer={
         <>
-          <button className="btn-ghost" onClick={closeModal}>Cancelar</button>
-          <button className="btn-primary" disabled={!canSubmit} onClick={submit} style={!canSubmit?{opacity:.45, cursor:'not-allowed'}:{}}>
-            <Icon name="plus" size={13}/>Crear OC
+          <button className="btn-ghost" onClick={closeModal} disabled={saving}>Cancelar</button>
+          <button className="btn-primary" disabled={!canSubmit || saving} onClick={submit}
+            style={!canSubmit || saving ? {opacity:.45, cursor:'not-allowed'} : {}}>
+            <Icon name="plus" size={13}/>{saving ? 'Guardando...' : 'Crear OC'}
           </button>
         </>
       }

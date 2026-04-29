@@ -73,7 +73,7 @@ function TabBar({ tabs, active, onChange }) {
 }
 
 function QuoteDetail({ code, onClose, canReassign }) {
-  const { quotes, clients, users, comments: commentsMap, moveQuoteStage, setQuotes, pushToast } = useApp();
+  const { quotes, clients, users, moveQuoteStage, setQuotes, pushToast } = useApp();
   const q = quotes.find(x => x.code === code);
   if (!q) return null;
   const cli = clients.find(c=>c.code===q.client);
@@ -84,6 +84,10 @@ function QuoteDetail({ code, onClose, canReassign }) {
   const [rejectPending, setRejectPending] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
   const [rejectNotes, setRejectNotes] = useState('');
+  const [notes, setNotes] = useState([]);
+  const [notesLoading, setNotesLoading] = useState(true);
+  const [newNote, setNewNote] = useState('');
+  const [savingNote, setSavingNote] = useState(false);
 
   const handleQuoteStage = (stageId) => {
     setStageOpen(false);
@@ -109,6 +113,28 @@ function QuoteDetail({ code, onClose, canReassign }) {
     }
   };
 
+  useEffect(() => {
+    setNotesLoading(true);
+    CrmApi.getQuoteDetail(q.id)
+      .then(detail => { setNotes(detail.notes || []); setNotesLoading(false); })
+      .catch(() => setNotesLoading(false));
+  }, [q.id]);
+
+  const handleAddNote = async () => {
+    if (!newNote.trim()) return;
+    setSavingNote(true);
+    try {
+      const nota = await CrmApi.addQuoteNote(q.id, newNote.trim());
+      setNotes(ns => [...ns, nota]);
+      setNewNote('');
+      setQuotes(qs => qs.map(x => x.id === q.id ? {...x, notas: (x.notas||0)+1} : x));
+    } catch (err) {
+      pushToast(err.message || 'Error al guardar nota', 'bad');
+    } finally {
+      setSavingNote(false);
+    }
+  };
+
   const items = [
     { sku:'LME-25/4',    desc:'Cable subterráneo Synthenax 4x25 mm² — bobina 100m', qty:3, pu:980,  pt:2940 },
     { sku:'TAB-PV400',   desc:'Tablero de transferencia automática PV-400 3F+N',    qty:1, pu:8900, pt:8900 },
@@ -126,8 +152,6 @@ function QuoteDetail({ code, onClose, canReassign }) {
     { name:'presupuesto-COT-2026-041.pdf',      kind:'pdf',   size:'221 KB', by:'Luciano', at:'2026-04-22' },
     { name:'lista-precios-prov-abril.pdf',      kind:'pdf',   size:'1.1 MB', by:'Luciano', at:'2026-04-21' },
   ];
-  const comments = commentsMap[code] || [];
-
   const history = [
     { stage:'recibida',  at:'2026-04-20 09:12', by:'Sistema',  note:'Mail de solicitud ingresado desde ventas@myselec.com.ar' },
     { stage:'asignada',  at:'2026-04-20 10:15', by:'Victoria', note:'Asignada a Luciano · zona AMBA Norte' },
@@ -198,12 +222,23 @@ function QuoteDetail({ code, onClose, canReassign }) {
         </div>
       </div>
 
+      {q.source === 'EMAIL' && q.emailSubject && (
+        <div className="mx-6 mb-4 px-4 py-3 bg-surface border border-line rounded-xl flex items-start gap-3">
+          <Icon name="mail" size={15} className="mt-0.5 text-ink-500 shrink-0"/>
+          <div className="min-w-0">
+            <div className="text-[11.5px] font-semibold text-ink-700 mb-0.5">Solicitud recibida por mail</div>
+            <div className="text-[12.5px] text-ink-900 truncate"><span className="text-ink-500">Asunto:</span> {q.emailSubject}</div>
+            <div className="text-[12px] text-ink-500 truncate"><span>De:</span> {q.emailFrom}</div>
+          </div>
+        </div>
+      )}
+
       <TabBar active={tab} onChange={setTab} tabs={[
         { id:'resumen',  label:'Resumen' },
         { id:'items',    label:'Ítems', count: items.length },
         { id:'adj',      label:'Adjuntos', count: attachments.length },
         { id:'historial',label:'Historial' },
-        { id:'notas',    label:'Notas', count: comments.length },
+        { id:'notas',    label:'Notas', count: notes.length },
       ]}/>
 
       {tab === 'resumen' && (
@@ -322,29 +357,33 @@ function QuoteDetail({ code, onClose, canReassign }) {
 
       {tab === 'notas' && (
         <div className="p-6 space-y-3">
-          {comments.map((c,i) => {
-            const u = users.find(x=>x.id===c.by);
-            return (
-              <div key={i} className="bg-white border border-line rounded-xl p-3 flex gap-3">
-                <Avatar name={u?.name||'?'} size={32}/>
-                <div className="flex-1">
-                  <div className="flex items-baseline gap-2">
-                    <span className="font-semibold text-[13px] text-ink-900">{u?.name}</span>
-                    <span className="text-[11px] text-ink-500 mono">{fmtDateTime(c.at)}</span>
-                  </div>
-                  <p className="text-[13px] text-ink-700 mt-1 leading-snug">{c.text}</p>
+          {notesLoading ? (
+            <div className="text-[13px] text-ink-400 py-4 text-center">Cargando notas…</div>
+          ) : notes.map((n, i) => (
+            <div key={n.id || i} className="bg-white border border-line rounded-xl p-3 flex gap-3">
+              <Avatar name={n.user?.name || '?'} size={32}/>
+              <div className="flex-1">
+                <div className="flex items-baseline gap-2">
+                  <span className="font-semibold text-[13px] text-ink-900">{n.user?.name}</span>
+                  <span className="text-[11px] text-ink-500 mono">{fmtDateTime(n.createdAt)}</span>
                 </div>
+                <p className="text-[13px] text-ink-700 mt-1 leading-snug">{n.text}</p>
               </div>
-            );
-          })}
+            </div>
+          ))}
           <div className="bg-white border border-line rounded-xl p-3">
-            <textarea rows="3" className="w-full outline-none text-[13px] placeholder:text-ink-400 resize-none" placeholder="Escribir una nota para el equipo…"/>
+            <textarea rows="3" value={newNote} onChange={e=>setNewNote(e.target.value)}
+              className="w-full outline-none text-[13px] placeholder:text-ink-400 resize-none" placeholder="Escribir una nota para el equipo…"/>
             <div className="flex items-center justify-between pt-2 border-t border-line">
               <div className="flex gap-1.5 text-ink-500">
                 <button className="w-7 h-7 rounded hover:bg-surface"><Icon name="paperclip" size={13}/></button>
                 <button className="w-7 h-7 rounded hover:bg-surface"><Icon name="at-sign" size={13}/></button>
               </div>
-              <button className="btn-primary text-xs py-1.5">Publicar</button>
+              <button className="btn-primary text-xs py-1.5" onClick={handleAddNote}
+                disabled={savingNote || !newNote.trim()}
+                style={savingNote || !newNote.trim() ? {opacity:.45,cursor:'not-allowed'} : {}}>
+                {savingNote ? 'Guardando…' : 'Publicar'}
+              </button>
             </div>
           </div>
         </div>

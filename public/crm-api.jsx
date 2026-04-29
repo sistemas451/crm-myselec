@@ -60,6 +60,7 @@ const CrmApi = {
 
   // Orders
   getOrders: () => apiFetch('/orders'),
+  createOrder: (data) => apiFetch('/orders', { method: 'POST', body: JSON.stringify(data) }),
   changeOrderStage: (id, stage) => apiFetch(`/orders/${id}/stage`, {
     method: 'PATCH', body: JSON.stringify({ stage })
   }),

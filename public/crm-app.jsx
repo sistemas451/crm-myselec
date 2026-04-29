@@ -118,7 +118,7 @@ function Login({ onLogin }) {
   };
 
   return (
-    <div className="min-h-screen flex items-stretch bg-navy-950 relative overflow-hidden">
+    <div className="min-h-screen flex items-center justify-center bg-navy-950 relative overflow-hidden">
       <div className="absolute inset-0 opacity-[0.08]" style={{
         backgroundImage:'radial-gradient(circle at 20% 30%, #3B82F6 0, transparent 40%), radial-gradient(circle at 80% 70%, #3B82F6 0, transparent 35%)'
       }}/>
@@ -127,36 +127,10 @@ function Login({ onLogin }) {
         backgroundSize:'40px 40px'
       }}/>
 
-      <div className="relative hidden md:flex flex-col justify-between w-[44%] p-12 text-white">
-        <div className="flex items-center gap-3">
-          <Logo size={40}/>
-          <div>
-            <div className="font-bold text-xl tracking-wide">MYSELEC</div>
-            <div className="text-[11px] uppercase tracking-[.2em] text-white/50">Sistema Comercial</div>
-          </div>
-        </div>
-        <div className="space-y-6 max-w-md">
-          <div className="text-[11px] font-mono uppercase tracking-[.2em] text-brand">Pipeline comercial v1</div>
-          <h1 className="text-4xl font-bold leading-tight">
-            Del mail a la entrega,<br/>con trazabilidad real.
-          </h1>
-          <p className="text-white/60 text-[15px]">
-            Gestioná cotizaciones, órdenes de compra y entregas en un solo lugar.
-            Cada estado, cada adjunto, cada nota — registrados.
-          </p>
-          <div className="flex gap-6 pt-4">
-            <div><div className="text-white font-semibold">2 fases</div><div className="text-white/40 text-[11px] uppercase tracking-wider">Cotización + OC</div></div>
-            <div><div className="text-white font-semibold">16 etapas</div><div className="text-white/40 text-[11px] uppercase tracking-wider">configurables</div></div>
-            <div><div className="text-white font-semibold">3 roles</div><div className="text-white/40 text-[11px] uppercase tracking-wider">Admin · Ventas · Logística</div></div>
-          </div>
-        </div>
-        <div className="text-[11px] text-white/40">© 2026 MySelec · Materiales eléctricos para el sector energético</div>
-      </div>
-
-      <div className="relative flex-1 flex items-center justify-center p-8">
+      <div className="relative flex items-center justify-center p-8">
         <form onSubmit={handleSubmit}
               className="w-full max-w-sm bg-white rounded-2xl shadow-pop p-8 border border-line">
-          <div className="md:hidden flex items-center gap-2 mb-6">
+          <div className="flex items-center gap-2 mb-6">
             <Logo size={28} tone="dark"/>
             <div className="font-bold tracking-wider">MYSELEC</div>
           </div>

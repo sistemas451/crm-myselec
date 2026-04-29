@@ -13,7 +13,7 @@ async function nextCode(model, prefix) {
 
 /**
  * Connects to Gmail via IMAP, reads unread emails,
- * matches sender domain to clients, and creates draft quotes.
+ * matches sender email to clients, and creates quotes.
  */
 async function syncMails() {
   if (!process.env.MAIL_USER || !process.env.MAIL_PASSWORD) {
@@ -128,38 +128,41 @@ async function processEmail(mailData, imap) {
     });
     if (existing) return null;
 
-    // Extract domain from sender
-    const domain = from.split('@')[1]?.toLowerCase();
-
-    // Try to match client by email domain
+    // Try to match client: first by email found in subject, then by sender
     let client = null;
-    if (domain) {
+    let matchSource = null;
+
+    const subjectEmailMatch = subject.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/);
+    const subjectEmail = subjectEmailMatch ? subjectEmailMatch[0] : null;
+
+    if (subjectEmail) {
       client = await prisma.client.findFirst({
-        where: { emailDomain: { equals: domain, mode: 'insensitive' } },
+        where: { email: { equals: subjectEmail, mode: 'insensitive' } },
         include: { defaultSeller: true },
       });
+      if (client) matchSource = 'asunto';
     }
 
-    // If no exact domain match, try matching by email directly
     if (!client && from) {
       client = await prisma.client.findFirst({
         where: { email: { equals: from, mode: 'insensitive' } },
         include: { defaultSeller: true },
       });
+      if (client) matchSource = 'remitente';
     }
 
     // Generate quote code
     const code = await nextCode(prisma.quote, 'COT-2026');
 
-    // Create quote as draft
+    console.log('   📝 Creando cotización:', { code, clientId: client?.id || null, subject });
     const quote = await prisma.quote.create({
       data: {
         code,
         clientId: client?.id || null,
         sellerId: client?.defaultSellerId || null,
-        stage: client?.defaultSellerId ? 'asignada' : 'recibida',
+        stage: client ? 'asignada' : 'recibida',
         source: 'EMAIL',
-        isDraft: !client, // Draft if we couldn't match the client
+        isDraft: false,
         emailSubject: subject.substring(0, 500),
         emailMessageId: messageId,
         emailFrom: from,
@@ -168,10 +171,16 @@ async function processEmail(mailData, imap) {
     });
 
     // Log activity
+    const activityDetail = matchSource === 'asunto'
+      ? `Cotización ${code} ingresada desde mail — ${client.name} (identificado por asunto)`
+      : matchSource === 'remitente'
+        ? `Cotización ${code} ingresada desde mail — ${client.name} (identificado por remitente)`
+        : `Cotización ${code} ingresada desde mail — cliente pendiente de asignar · Asunto: ${subject}`;
+
     await prisma.activity.create({
       data: {
         action: 'CREATED',
-        detail: `Cotización ${code} ingresada desde mail de ${fromName}${client ? ` (${client.name})` : ' — cliente no identificado — requiere revisión manual'}`,
+        detail: activityDetail,
         quoteId: quote.id,
       },
     });
@@ -196,7 +205,7 @@ async function processEmail(mailData, imap) {
       date: date.toISOString(),
     };
   } catch (err) {
-    console.error('Error processing email:', err.message);
+    console.error('Error processing email completo:', err);
     throw err;
   }
 }
