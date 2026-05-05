@@ -88,6 +88,31 @@ function QuoteDetail({ code, onClose, canReassign }) {
   const [notesLoading, setNotesLoading] = useState(true);
   const [newNote, setNewNote] = useState('');
   const [savingNote, setSavingNote] = useState(false);
+  const [history, setHistory] = useState([]);
+  const [assigningClient, setAssigningClient] = useState(false);
+  const [assignClientId, setAssignClientId] = useState('');
+  const [assignSellerId, setAssignSellerId] = useState('');
+  const [assignSaving, setAssignSaving] = useState(false);
+
+  const handleAssignClient = async () => {
+    if (!assignClientId) return;
+    setAssignSaving(true);
+    try {
+      await CrmApi.assignQuoteClient(q.id, {
+        clientId: assignClientId,
+        sellerId: assignSellerId || null,
+      });
+      const freshQuotes = await CrmApi.getQuotes();
+      setQuotes(freshQuotes);
+      pushToast('Cliente asignado correctamente');
+      setAssigningClient(false);
+      closeModal();
+    } catch (err) {
+      pushToast(err.message || 'Error al asignar cliente', 'bad');
+    } finally {
+      setAssignSaving(false);
+    }
+  };
 
   const handleQuoteStage = (stageId) => {
     setStageOpen(false);
@@ -116,7 +141,11 @@ function QuoteDetail({ code, onClose, canReassign }) {
   useEffect(() => {
     setNotesLoading(true);
     CrmApi.getQuoteDetail(q.id)
-      .then(detail => { setNotes(detail.notes || []); setNotesLoading(false); })
+      .then(detail => {
+        setNotes(detail.notes || []);
+        setHistory(detail.activities || []);
+        setNotesLoading(false);
+      })
       .catch(() => setNotesLoading(false));
   }, [q.id]);
 
@@ -164,20 +193,11 @@ function QuoteDetail({ code, onClose, canReassign }) {
     { name:'presupuesto-COT-2026-041.pdf',      kind:'pdf',   size:'221 KB', by:'Luciano', at:'2026-04-22' },
     { name:'lista-precios-prov-abril.pdf',      kind:'pdf',   size:'1.1 MB', by:'Luciano', at:'2026-04-21' },
   ];
-  const history = [
-    { stage:'recibida',  at:'2026-04-20 09:12', by:'Sistema',  note:'Mail de solicitud ingresado desde ventas@myselec.com.ar' },
-    { stage:'asignada',  at:'2026-04-20 10:15', by:'Victoria', note:'Asignada a Luciano · zona AMBA Norte' },
-    { stage:'armado',    at:'2026-04-20 11:02', by:'Luciano',  note:'Tomé el pedido, analizando lista de materiales' },
-    { stage:'proveedor', at:'2026-04-20 15:40', by:'Luciano',  note:'Pedido precios a Prysmian y Trefilcon' },
-    { stage:'oferta',    at:'2026-04-21 14:55', by:'Luciano',  note:'Oferta técnica definida, ajustando margen' },
-    { stage:'enviado',   at:'2026-04-22 16:18', by:'Luciano',  note:'Presupuesto enviado por mail al cliente' },
-  ];
-
   return (
     <>
     <Drawer onClose={onClose}
-      subtitle={`Fase 1 · Cotización · ${stg.label}`}
-      title={`${code} — ${cli.name}`}
+      subtitle={`Fase 1 · Cotización · ${stg?.label || q.stage}`}
+      title={`${code}${cli ? ` — ${cli.name}` : ''}`}
       width={960}
       headerExtras={
         <div className="flex items-center gap-2">
@@ -186,7 +206,7 @@ function QuoteDetail({ code, onClose, canReassign }) {
               <Icon name="trash-2" size={13}/>Eliminar
             </button>
           )}
-          <Badge tone={stg.tone} dot>{stg.label}</Badge>
+          <Badge tone={stg?.tone || 'gray'} dot>{stg?.label || q.stage}</Badge>
           <button className="btn-ghost"><Icon name="download" size={13}/>PDF</button>
           {canReassign && (
             <div className="relative">
@@ -220,22 +240,78 @@ function QuoteDetail({ code, onClose, canReassign }) {
         </>
       }
     >
+      {!cli && !assigningClient && (
+        <div className="mx-6 mt-4 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <Icon name="alert-triangle" size={16} className="text-amber-500 shrink-0"/>
+            <div>
+              <div className="text-[13px] font-semibold text-amber-900">Cliente pendiente de asignar</div>
+              <div className="text-[12px] text-amber-700">
+                {q.emailSubject || 'Cotización ingresada sin cliente'}
+                {q.emailFrom && ` · De: ${q.emailFrom}`}
+              </div>
+            </div>
+          </div>
+          <button className="btn-primary text-xs py-1.5 px-3 shrink-0"
+            onClick={() => setAssigningClient(true)}>
+            <Icon name="user-plus" size={13}/>Asignar cliente
+          </button>
+        </div>
+      )}
+
+      {!cli && assigningClient && (
+        <div className="mx-6 mt-4 px-4 py-4 bg-amber-50 border border-amber-200 rounded-xl">
+          <div className="text-[13px] font-semibold text-amber-900 mb-3">Asignar cliente a esta cotización</div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[11px] font-medium text-ink-700 mb-1 block">Cliente *</label>
+              <select className="inp w-full text-xs" value={assignClientId}
+                onChange={e => setAssignClientId(e.target.value)}>
+                <option value="">Seleccionar cliente…</option>
+                {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-[11px] font-medium text-ink-700 mb-1 block">Vendedor (opcional — se usa el del cliente)</label>
+              <select className="inp w-full text-xs" value={assignSellerId}
+                onChange={e => setAssignSellerId(e.target.value)}>
+                <option value="">Vendedor por defecto del cliente</option>
+                {users.filter(u => u.role==='Vendedor'||u.role==='Administrador')
+                  .map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="flex gap-2 mt-3 justify-end">
+            <button className="btn-ghost text-xs" onClick={() => setAssigningClient(false)}
+              disabled={assignSaving}>Cancelar</button>
+            <button className="btn-primary text-xs"
+              disabled={!assignClientId || assignSaving}
+              onClick={handleAssignClient}>
+              <Icon name={assignSaving ? 'loader' : 'check'} size={13}/>
+              {assignSaving ? 'Guardando...' : 'Confirmar asignación'}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Pipeline strip */}
       <div className="px-6 pt-5 pb-4 bg-gradient-to-b from-surface to-white">
         <StagePipeline stages={STAGES_F1} currentId={q.stage}/>
         <div className="mt-4 grid grid-cols-4 gap-4">
-          <Field label="Cliente" value={cli.name}/>
-          <Field label="CUIT" mono value={cli.cuit}/>
+          <Field label="Cliente" value={cli?.name || '—'}/>
+          <Field label="CUIT" mono value={cli?.cuit || '—'}/>
           <Field label="Vendedor">
-            <div className="flex items-center gap-2"><Avatar name={sel.name} size={20}/>{sel.name}</div>
+            {sel
+              ? <div className="flex items-center gap-2"><Avatar name={sel.name} size={20}/>{sel.name}</div>
+              : <span className="text-ink-400">Sin asignar</span>}
           </Field>
           <Field label="Ingreso">
             <span className="mono">{fmtDate(q.ingreso)} <span className="text-ink-500">· hace {q.dias}d</span></span>
           </Field>
-          <Field label="Monto cotizado" mono value={fmtMoney(q.monto)}/>
+          <Field label="Monto cotizado" mono value={q.monto != null ? fmtMoney(q.monto) : '—'}/>
           <Field label="Cod. Flexxus NP" mono value={q.flexxus || '—'}/>
-          <Field label="Zona de entrega" value={cli.zone}/>
-          <Field label="Contacto"><div className="text-[12.5px]">{cli.email}</div></Field>
+          <Field label="Zona de entrega" value={cli?.zone || '—'}/>
+          <Field label="Contacto"><div className="text-[12.5px]">{cli?.email || '—'}</div></Field>
         </div>
       </div>
 
@@ -351,24 +427,42 @@ function QuoteDetail({ code, onClose, canReassign }) {
 
       {tab === 'historial' && (
         <div className="p-6">
-          <div className="space-y-3">
-            {history.map((h, i) => {
-              const st = STAGES_F1.find(s=>s.id===h.stage);
-              return (
-                <div key={i} className="relative pl-8 stepline">
-                  <span className="absolute left-1 top-1 w-4 h-4 rounded-full border-2 bg-white" style={{borderColor: STAGE_DOT[st.tone]}}/>
-                  <div className="bg-white border border-line rounded-lg p-3">
-                    <div className="flex items-center gap-2">
-                      <Badge tone={st.tone} dot>{st.label}</Badge>
-                      <span className="text-[11px] text-ink-500 mono">{h.at}</span>
-                      <span className="text-[11px] text-ink-500">· por {h.by}</span>
+          {history.length === 0 ? (
+            <div className="text-[13px] text-ink-400 py-8 text-center">Sin actividad registrada</div>
+          ) : (
+            <div className="space-y-0">
+              {history.map((a, i) => {
+                const iconMap = {
+                  CREATED:      { name:'plus-circle',    cls:'text-emerald-600 bg-emerald-50' },
+                  STAGE_CHANGE: { name:'arrow-right',    cls:'text-brand bg-brandSoft' },
+                  NOTE_ADDED:   { name:'message-square', cls:'text-ink-500 bg-surface' },
+                  ASSIGNED:     { name:'user',           cls:'text-orange-600 bg-orange-50' },
+                };
+                const ic = iconMap[a.action] || { name:'activity', cls:'text-ink-500 bg-surface' };
+                const isLast = i === history.length - 1;
+                return (
+                  <div key={a.id || i} className="flex gap-3">
+                    <div className="flex flex-col items-center">
+                      <div className={cx('w-8 h-8 rounded-full flex items-center justify-center shrink-0', ic.cls)}>
+                        <Icon name={ic.name} size={14}/>
+                      </div>
+                      {!isLast && <div className="w-px flex-1 bg-line mt-1 mb-1"/>}
                     </div>
-                    <div className="text-[13px] text-ink-700 mt-1.5">{h.note}</div>
+                    <div className={cx('flex-1', isLast ? 'pb-0' : 'pb-4')}>
+                      <div className="bg-white border border-line rounded-xl px-4 py-3">
+                        <p className="text-[13px] text-ink-900 leading-snug">{a.detail}</p>
+                        <div className="flex items-center gap-2 mt-1.5 text-[11px] text-ink-500">
+                          <span className="font-medium">{a.user?.name || 'Sistema'}</span>
+                          <span>·</span>
+                          <span className="mono">{fmtDateTime(a.createdAt)}</span>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 

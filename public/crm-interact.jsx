@@ -25,13 +25,33 @@ function AppProvider({ children }) {
   const [users, setUsers]     = useS(() => [...USERS]);
   const [activity, setActivity] = useS(() => [...ACTIVITY]);
   const [comments, setComments] = useS(() => ({...COMMENTS}));
-  const [notifications, setNotifications] = useS(() => [
-    { id:1, kind:'bad',    text:'COT-2026-037 venció el plazo de armado (hace 2 días)', at:'2026-04-23T08:12:00', read:false, ref:{kind:'quote', code:'COT-2026-037'} },
-    { id:2, kind:'ok',     text:'ALPRE S.A. aceptó el presupuesto COT-2026-039', at:'2026-04-22T17:40:00', read:false, ref:{kind:'quote', code:'COT-2026-039'} },
-    { id:3, kind:'info',   text:'Santiago agregó nota en COT-2026-042', at:'2026-04-22T14:12:00', read:false, ref:{kind:'quote', code:'COT-2026-042'} },
-    { id:4, kind:'warn',   text:'OC-2026-018 lista para despacho', at:'2026-04-22T11:05:00', read:false, ref:{kind:'order', code:'OC-2026-018'} },
-    { id:5, kind:'info',   text:'Luciano creó COT-2026-041 para ARGENCRAFT S.A.', at:'2026-04-20T09:15:00', read:true, ref:{kind:'quote', code:'COT-2026-041'} },
-  ]);
+  const [notifications, setNotifications] = useS([]);
+
+  useEff(() => {
+    CrmApi.getActivity(30).then(activities => {
+      const notifs = activities.map(a => {
+        let kind = 'info';
+        if (a.action === 'STAGE_CHANGE') {
+          if (a.detail?.includes('rechazada')) kind = 'bad';
+          else if (a.detail?.includes('aceptada')) kind = 'ok';
+          else kind = 'info';
+        } else if (a.action === 'CREATED') {
+          kind = 'ok';
+        } else if (a.action === 'NOTE_ADDED') {
+          kind = 'info';
+        } else if (a.action === 'ASSIGNED') {
+          kind = 'info';
+        }
+        const ref = a.quoteCode
+          ? { kind: 'quote', code: a.quoteCode }
+          : a.orderCode
+            ? { kind: 'order', code: a.orderCode }
+            : null;
+        return { id: a.id, kind, text: a.detail, at: a.createdAt, read: false, ref, userName: a.userName };
+      });
+      setNotifications(notifs);
+    }).catch(() => setNotifications([]));
+  }, []);
 
   // Quote-level filters (shared by board)
   const [quoteFilters, setQuoteFilters] = useS({ seller:'', client:'', period:'30d', zone:'', activity:'', min:'', max:'' });
@@ -589,7 +609,113 @@ function NewClientModal() {
   );
 }
 
-// --- 4. Invitar Usuario ---
+// --- 4. Editar Cliente ---
+function EditClientModal({ clientId }) {
+  const { closeModal, clients, users, setClients, pushToast } = useApp();
+  const source = clients.find(c => c.id === clientId);
+  const [form, setForm] = useS({
+    name: source?.name || '',
+    cuit: source?.cuit || '',
+    address: source?.address || '',
+    city: source?.city || '',
+    prov: source?.prov || '',
+    zone: source?.zone || '',
+    cp: '',
+    activity: source?.activity || '',
+    phone: source?.phone || '',
+    email: source?.email || '',
+    seller: source?.seller || '',
+  });
+  const [saving, setSaving] = useS(false);
+  const set = (k, v) => setForm(f => ({...f, [k]: v}));
+  const canSubmit = !!form.name;
+
+  const submit = async () => {
+    setSaving(true);
+    try {
+      await CrmApi.updateClient(clientId, {
+        name: form.name,
+        cuit: form.cuit || null,
+        email: form.email || null,
+        phone: form.phone || null,
+        address: form.address || null,
+        city: form.city || null,
+        province: form.prov || null,
+        zone: form.zone || null,
+        activity: form.activity || null,
+        defaultSellerId: form.seller || null,
+      });
+      const updated = await CrmApi.getClients();
+      const mapped = updated.map(c => ({
+        id: c.id, code: c.code, name: c.name, cuit: c.cuit || '',
+        city: c.city || '', prov: c.province || '', zone: c.zone || '',
+        activity: c.activity || '', seller: c.defaultSellerId || '',
+        sellerName: c.defaultSeller?.name || '', email: c.email || '',
+        phone: c.phone || '', address: c.address || '',
+      }));
+      setClients(mapped);
+      pushToast('Cliente actualizado correctamente');
+      closeModal();
+    } catch (err) {
+      pushToast(err.message || 'Error al actualizar cliente', 'bad');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal onClose={closeModal} subtitle="Directorio de clientes" title="Editar cliente" width={680}
+      footer={
+        <>
+          <button className="btn-ghost" onClick={closeModal} disabled={saving}>Cancelar</button>
+          <button className="btn-primary" disabled={!canSubmit || saving} onClick={submit}
+            style={!canSubmit || saving ? {opacity:.45, cursor:'not-allowed'} : {}}>
+            <Icon name="check" size={13}/>{saving ? 'Guardando...' : 'Guardar cambios'}
+          </button>
+        </>
+      }
+    >
+      <div className="grid grid-cols-2 gap-4">
+        <FormGroup label="Razón social" required cols={2}>
+          <input className="inp w-full" value={form.name} onChange={e=>set('name',e.target.value)}/>
+        </FormGroup>
+        <FormGroup label="CUIT">
+          <input className="inp w-full mono" value={form.cuit} onChange={e=>set('cuit',e.target.value)}/>
+        </FormGroup>
+        <FormGroup label="Código postal">
+          <input className="inp w-full mono" value={form.cp} onChange={e=>set('cp',e.target.value)}/>
+        </FormGroup>
+        <FormGroup label="Dirección" cols={2}>
+          <input className="inp w-full" value={form.address} onChange={e=>set('address',e.target.value)}/>
+        </FormGroup>
+        <FormGroup label="Localidad">
+          <input className="inp w-full" value={form.city} onChange={e=>set('city',e.target.value)}/>
+        </FormGroup>
+        <FormGroup label="Provincia">
+          <Select value={form.prov} onChange={v=>set('prov',v)} options={PROVINCES}/>
+        </FormGroup>
+        <FormGroup label="Zona comercial">
+          <Select value={form.zone} onChange={v=>set('zone',v)} options={ZONES}/>
+        </FormGroup>
+        <FormGroup label="Tipo de actividad">
+          <Select value={form.activity} onChange={v=>set('activity',v)} options={ACTIVITIES}/>
+        </FormGroup>
+        <FormGroup label="Teléfono">
+          <input className="inp w-full mono" value={form.phone} onChange={e=>set('phone',e.target.value)}/>
+        </FormGroup>
+        <FormGroup label="Email">
+          <input className="inp w-full" value={form.email} onChange={e=>set('email',e.target.value)}/>
+        </FormGroup>
+        <FormGroup label="Vendedor asignado" cols={2}>
+          <Select value={form.seller} onChange={v=>set('seller',v)}
+            options={users.filter(u=>u.role==='Vendedor'||u.role==='Administrador').map(u => ({ value:u.id, label:`${u.name} · ${u.zone}` }))}/>
+        </FormGroup>
+      </div>
+    </Modal>
+  );
+}
+
+// --- 5. Invitar Usuario ---
 function InviteUserModal() {
   const { closeModal, inviteUser } = useApp();
   const [form, setForm] = useS({ name:'', email:'', role:'Vendedor', zone:'AMBA Norte' });
@@ -808,6 +934,7 @@ const MODAL_REGISTRY = {
   newQuote: NewQuoteModal,
   newOrder: NewOrderModal,
   newClient: NewClientModal,
+  editClient: EditClientModal,
   inviteUser: InviteUserModal,
   permissions: PermissionsModal,
   search: SearchPaletteModal,

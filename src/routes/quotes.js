@@ -262,4 +262,43 @@ router.delete('/:id', authMiddleware, async (req, res) => {
   }
 });
 
+// PATCH /api/quotes/:id/client — assign client (and optionally seller)
+router.patch('/:id/client', authMiddleware, async (req, res) => {
+  try {
+    const { clientId, sellerId } = req.body;
+
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      include: { defaultSeller: { select: { id: true, name: true } } },
+    });
+    if (!client) return res.status(404).json({ error: 'Cliente no encontrado' });
+
+    const updateData = { clientId };
+    const resolvedSellerId = sellerId || client.defaultSellerId || null;
+    if (resolvedSellerId) {
+      updateData.sellerId = resolvedSellerId;
+      updateData.stage = 'asignada';
+    }
+
+    const updated = await prisma.quote.update({
+      where: { id: req.params.id },
+      data: updateData,
+    });
+
+    await prisma.activity.create({
+      data: {
+        action: 'ASSIGNED',
+        detail: `Cliente asignado: ${client.name}${resolvedSellerId ? ` · Vendedor: ${client.defaultSeller?.name || ''}` : ''}`,
+        userId: req.user.id,
+        quoteId: req.params.id,
+      },
+    });
+
+    res.json(updated);
+  } catch (err) {
+    console.error('Error assigning client:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

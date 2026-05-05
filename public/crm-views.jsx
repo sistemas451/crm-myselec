@@ -17,8 +17,9 @@ function PageHead({ subtitle, title, description, actions }) {
 // ---------- Vendedor view ----------
 function MySalesView({ user, initialTab='quotes', onOpen }) {
   const [tab, setTab] = useState(initialTab);
-  const myQuotes = QUOTES.filter(q => q.seller === user.id);
-  const myOrders = ORDERS.filter(o => o.seller === user.id);
+  const { quotes, orders, clients, openModal } = useApp();
+  const myQuotes = quotes.filter(q => q.seller === user.id);
+  const myOrders = orders.filter(o => o.seller === user.id);
 
   // personal KPIs
   const activas   = myQuotes.filter(q => !['aceptada','rechazada'].includes(q.stage)).length;
@@ -35,7 +36,7 @@ function MySalesView({ user, initialTab='quotes', onOpen }) {
         actions={
           <>
             <button className="btn-ghost"><Icon name="download" size={14}/>Exportar</button>
-            <button className="btn-primary"><Icon name="plus" size={14}/>Nueva cotización</button>
+            <button className="btn-primary" onClick={() => openModal('newQuote')}><Icon name="plus" size={14}/>Nueva cotización</button>
           </>
         }
       />
@@ -82,8 +83,6 @@ function MySalesView({ user, initialTab='quotes', onOpen }) {
               ))}
             </div>
             <div className="flex items-center gap-2">
-              <FilterChip icon="funnel" label="Estado: todos"/>
-              <FilterChip icon="calendar" label="Abril"/>
               <div className="relative">
                 <Icon name="search" size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-400"/>
                 <input className="inp pl-8 text-xs py-1.5 w-48" placeholder="Buscar cliente…"/>
@@ -101,18 +100,18 @@ function MySalesView({ user, initialTab='quotes', onOpen }) {
               </tr></thead>
               <tbody>
                 {myQuotes.map(q => {
-                  const cli = CLIENTS.find(c=>c.code===q.client);
-                  const stg = STAGES_F1.find(s=>s.id===q.stage);
+                  const cli = clients.find(c => c.code === q.client);
+                  const stg = STAGES_F1.find(s => s.id === q.stage);
                   return (
                     <tr key={q.code} className="cursor-pointer" onClick={()=>onOpen(q.code,'quote')}>
                       <td className="mono text-[12px] font-semibold text-navy-900">{q.code}</td>
-                      <td className="font-medium">{cli.name}<div className="text-[11px] text-ink-500">{cli.city}</div></td>
-                      <td><Badge tone={stg.tone} dot>{stg.label}</Badge></td>
+                      <td className="font-medium">{cli?.name || '—'}<div className="text-[11px] text-ink-500">{cli?.city || ''}</div></td>
+                      <td>{stg ? <Badge tone={stg.tone} dot>{stg.label}</Badge> : q.stage}</td>
                       <td className="mono text-[12px]">{fmtDate(q.ingreso)}</td>
                       <td className="text-right mono">
-                        <span className={q.dias>=5?'text-bad font-semibold':''}>{q.dias}d</span>
+                        <span className={q.dias>=5?'text-bad font-semibold':''}>{q.dias != null ? `${q.dias}d` : '—'}</span>
                       </td>
-                      <td className="text-right mono">{fmtMoney(q.monto)}</td>
+                      <td className="text-right mono">{q.monto != null ? fmtMoney(q.monto) : '—'}</td>
                       <td className="mono text-[11px]">{q.flexxus || '—'}</td>
                       <td className="text-right">
                         <button className="text-ink-400 hover:text-ink-900"><Icon name="chevron-right" size={14}/></button>
@@ -131,16 +130,16 @@ function MySalesView({ user, initialTab='quotes', onOpen }) {
               </tr></thead>
               <tbody>
                 {myOrders.map(o => {
-                  const cli = CLIENTS.find(c=>c.code===o.client);
-                  const stg = STAGES_F2.find(s=>s.id===o.stage);
+                  const cli = clients.find(c => c.code === o.client);
+                  const stg = STAGES_F2.find(s => s.id === o.stage);
                   return (
                     <tr key={o.code} className="cursor-pointer" onClick={()=>onOpen(o.code,'order')}>
                       <td className="mono text-[12px] font-semibold text-navy-900">{o.code}</td>
-                      <td className="font-medium">{cli.name}</td>
-                      <td><Badge tone={stg.tone} dot>{stg.label}</Badge></td>
-                      <td><Badge tone={o.entrega==='AMBA'?'blue':'purple'}>{o.entrega}</Badge></td>
-                      <td className="text-[12px]">{o.transp}</td>
-                      <td className="mono text-[11px] text-ink-500">{o.fromQuote}</td>
+                      <td className="font-medium">{cli?.name || '—'}</td>
+                      <td>{stg ? <Badge tone={stg.tone} dot>{stg.label}</Badge> : o.stage}</td>
+                      <td>{o.entrega ? <Badge tone={o.entrega==='AMBA'?'blue':'purple'}>{o.entrega}</Badge> : '—'}</td>
+                      <td className="text-[12px]">{o.transp || '—'}</td>
+                      <td className="mono text-[11px] text-ink-500">{o.fromQuote || '—'}</td>
                       <td className="mono text-[12px]">{fmtDate(o.fecha)}</td>
                       <td className="text-right">
                         <button className="text-ink-400 hover:text-ink-900"><Icon name="chevron-right" size={14}/></button>
@@ -182,8 +181,6 @@ function LogisticsView({ onOpen }) {
         description="Seguimiento de órdenes de compra en curso. Actualizá el estado cuando confirmes facturación, despacho o entrega."
         actions={
           <>
-            <FilterChip icon="map-pin" label="Todas las zonas"/>
-            <FilterChip icon="truck" label="Transporte"/>
             <button className="btn-ghost"><Icon name="download" size={14}/>Exportar</button>
           </>
         }
@@ -380,7 +377,7 @@ function Clients({ readonly=false }) {
             </div>
             {!readonly && (
               <div className="flex gap-2">
-                <button className="btn-ghost"><Icon name="pencil" size={13}/>Editar</button>
+                <button className="btn-ghost" onClick={()=>openModal('editClient', { clientId: cli.id })}><Icon name="pencil" size={13}/>Editar</button>
                 <button className="btn-primary"><Icon name="file-plus" size={13}/>Nueva cotización</button>
               </div>
             )}
@@ -595,7 +592,86 @@ function Team() {
 
 // ---------- Config ----------
 function Config() {
+  const { pushToast } = useApp();
   const [tab, setTab] = useState('stages');
+  const [stagesData, setStagesData] = useState(null);
+  const [stagesLoading, setStagesLoading] = useState(true);
+
+  useEffect(() => {
+    CrmApi.getStagesFull()
+      .then(data => { setStagesData(data); setStagesLoading(false); })
+      .catch(() => setStagesLoading(false));
+  }, []);
+
+  const handleToggleMandatory = async (stage) => {
+    const newVal = !stage.mandatory;
+    setStagesData(sd => sd.map(s => s.id === stage.id ? {...s, mandatory: newVal} : s));
+    try {
+      await CrmApi.updateStage(stage.id, { mandatory: newVal });
+      pushToast(`${stage.label} — ${newVal ? 'marcada obligatoria' : 'marcada opcional'}`);
+    } catch (err) {
+      setStagesData(sd => sd.map(s => s.id === stage.id ? {...s, mandatory: !newVal} : s));
+      pushToast(err.message || 'Error al actualizar', 'bad');
+    }
+  };
+
+  const handleUpdateMaxHours = async (stage, value) => {
+    const hours = value ? parseInt(value) : null;
+    if (hours === stage.maxHours) return;
+    setStagesData(sd => sd.map(s => s.id === stage.id ? {...s, maxHours: hours} : s));
+    try {
+      await CrmApi.updateStage(stage.id, { maxHours: hours });
+      pushToast(`${stage.label} — tiempo máximo actualizado`);
+    } catch (err) {
+      pushToast(err.message || 'Error al actualizar', 'bad');
+    }
+  };
+
+  const f1 = stagesData?.filter(s => s.phase === 'COTIZACION') || [];
+  const f2 = stagesData?.filter(s => s.phase === 'ORDEN_COMPRA') || [];
+
+  const StageList = ({ stages, title }) => (
+    <div className="bg-white border border-line rounded-xl p-5">
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-sm font-semibold">{title}</div>
+      </div>
+      {stagesLoading ? (
+        <div className="text-[13px] text-ink-400 py-6 text-center">Cargando etapas…</div>
+      ) : (
+        <ul className="space-y-1.5">
+          {stages.map((s, i) => (
+            <li key={s.id} className="flex items-center gap-3 p-2.5 rounded-lg hover:bg-surface">
+              <Icon name="grip-vertical" size={14} className="text-ink-300"/>
+              <span className="w-6 text-right mono text-[11px] text-ink-500 font-semibold">{i+1}.</span>
+              <StageDot tone={s.tone}/>
+              <span className="flex-1 text-[13px] font-medium text-ink-900">{s.label}</span>
+              <div className="flex items-center gap-1.5 text-[11px] text-ink-500 shrink-0">
+                <span>Obligatoria</span>
+                <button
+                  onClick={() => handleToggleMandatory(s)}
+                  className={cx('w-8 h-4 rounded-full relative transition-colors shrink-0',
+                    s.mandatory ? 'bg-brand' : 'bg-ink-300')}>
+                  <div className={cx('absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-all',
+                    s.mandatory ? 'left-[18px]' : 'left-0.5')}/>
+                </button>
+              </div>
+              <input
+                type="number" min="1" placeholder="Sin límite"
+                value={s.maxHours || ''}
+                onChange={e => setStagesData(sd => sd.map(x =>
+                  x.id === s.id ? {...x, maxHours: e.target.value ? parseInt(e.target.value) : null} : x
+                ))}
+                onBlur={e => handleUpdateMaxHours(s, e.target.value)}
+                className="inp text-xs py-1 w-24 text-center"
+              />
+              <span className="text-[11px] text-ink-400">hs</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+
   return (
     <div>
       <PageHead
@@ -613,42 +689,8 @@ function Config() {
 
       {tab==='stages' && (
         <div className="p-6 grid grid-cols-2 gap-5">
-          <div className="bg-white border border-line rounded-xl p-5">
-            <div className="flex items-center justify-between mb-3">
-              <div className="text-sm font-semibold">Fase 1 · Cotizaciones</div>
-              <button className="btn-ghost text-xs py-1.5"><Icon name="plus" size={12}/>Agregar etapa</button>
-            </div>
-            <ul className="space-y-1.5">
-              {STAGES_F1.map((s,i)=>(
-                <li key={s.id} className="flex items-center gap-3 p-2.5 rounded-lg hover:bg-surface">
-                  <Icon name="grip-vertical" size={14} className="text-ink-300"/>
-                  <span className="w-6 text-right mono text-[11px] text-ink-500 font-semibold">{i+1}.</span>
-                  <StageDot tone={s.tone}/>
-                  <span className="flex-1 text-[13px] font-medium text-ink-900">{s.label}</span>
-                  <Badge tone={s.tone}>{s.tone}</Badge>
-                  <button className="text-ink-400"><Icon name="pencil" size={12}/></button>
-                </li>
-              ))}
-            </ul>
-          </div>
-          <div className="bg-white border border-line rounded-xl p-5">
-            <div className="flex items-center justify-between mb-3">
-              <div className="text-sm font-semibold">Fase 2 · Órdenes de Compra</div>
-              <button className="btn-ghost text-xs py-1.5"><Icon name="plus" size={12}/>Agregar etapa</button>
-            </div>
-            <ul className="space-y-1.5">
-              {STAGES_F2.map((s,i)=>(
-                <li key={s.id} className="flex items-center gap-3 p-2.5 rounded-lg hover:bg-surface">
-                  <Icon name="grip-vertical" size={14} className="text-ink-300"/>
-                  <span className="w-6 text-right mono text-[11px] text-ink-500 font-semibold">{i+1}.</span>
-                  <StageDot tone={s.tone}/>
-                  <span className="flex-1 text-[13px] font-medium text-ink-900">{s.label}</span>
-                  <Badge tone={s.tone}>{s.tone}</Badge>
-                  <button className="text-ink-400"><Icon name="pencil" size={12}/></button>
-                </li>
-              ))}
-            </ul>
-          </div>
+          <StageList stages={f1} title="Fase 1 · Cotizaciones"/>
+          <StageList stages={f2} title="Fase 2 · Órdenes de Compra"/>
         </div>
       )}
 

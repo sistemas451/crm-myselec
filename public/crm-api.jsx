@@ -53,6 +53,9 @@ const CrmApi = {
   assignQuote: (id, sellerId) => apiFetch(`/quotes/${id}/assign`, {
     method: 'PATCH', body: JSON.stringify({ sellerId })
   }),
+  assignQuoteClient: (id, data) => apiFetch(`/quotes/${id}/client`, {
+    method: 'PATCH', body: JSON.stringify(data)
+  }),
   getQuoteDetail: (id) => apiFetch(`/quotes/${id}/detail`),
   deleteQuote: (id) => apiFetch(`/quotes/${id}`, { method: 'DELETE' }),
   addQuoteNote: (id, text) => apiFetch(`/quotes/${id}/notes`, {
@@ -69,13 +72,21 @@ const CrmApi = {
   // Clients
   getClients: () => apiFetch('/clients'),
   createClient: (data) => apiFetch('/clients', { method: 'POST', body: JSON.stringify(data) }),
+  updateClient: (id, data) => apiFetch(`/clients/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
 
   // Data
   getUsers: () => apiFetch('/data/users'),
   getStages: () => apiFetch('/data/stages'),
+  getStagesFull: () => apiFetch('/data/stages/full'),
+  updateStage: (id, data) => apiFetch(`/data/stages/${id}`, {
+    method: 'PATCH', body: JSON.stringify(data)
+  }),
   getActivity: (limit = 20) => apiFetch(`/data/activity?limit=${limit}`),
   getDashboard: () => apiFetch('/data/dashboard'),
   getRejectionReasons: () => apiFetch('/data/rejection-reasons'),
+  getChartSellers: () => apiFetch('/data/charts/sellers'),
+  getChartStages:  () => apiFetch('/data/charts/stages'),
+  getChartMonthly: () => apiFetch('/data/charts/monthly'),
 
   // Mail
   syncMail: () => apiFetch('/mail/sync', { method: 'POST' }),

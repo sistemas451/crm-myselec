@@ -23,6 +23,8 @@ function QuoteCard({ q, onOpen, compact }) {
   const cli = clients.find(c=>c.code===q.client);
   const sel = users.find(u=>u.id===q.seller);
   const overdue = q.dias >= 5 && !['aceptada','rechazada'].includes(q.stage);
+  const displayName = cli?.name || q.emailSubject || 'Sin cliente asignado';
+  const displaySub  = cli ? `${cli.city || ''}${cli.city && cli.prov ? ', ' : ''}${cli.prov || ''}` : 'Cliente por asignar';
   return (
     <div
       onClick={onOpen}
@@ -35,8 +37,8 @@ function QuoteCard({ q, onOpen, compact }) {
           {overdue && <Badge tone="red" dot>{q.dias}d</Badge>}
         </div>
       </div>
-      <div className="text-[13px] font-semibold text-ink-900 mt-1 leading-snug truncate">{cli?.name}</div>
-      <div className="text-[11px] text-ink-500 truncate">{cli?.city}, {cli?.prov}</div>
+      <div className="text-[13px] font-semibold text-ink-900 mt-1 leading-snug truncate">{displayName}</div>
+      <div className="text-[11px] text-ink-500 truncate">{displaySub}</div>
 
       {q.monto != null && (
         <div className="mt-2.5 mono text-[13px] font-bold text-ink-900">{fmtMoney(q.monto)}</div>

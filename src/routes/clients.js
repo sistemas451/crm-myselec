@@ -61,4 +61,37 @@ router.post('/', authMiddleware, async (req, res) => {
   }
 });
 
+// PUT /api/clients/:id
+router.put('/:id', authMiddleware, async (req, res) => {
+  try {
+    const { name, cuit, email, phone, address, city, province,
+            zone, activity, defaultSellerId, postalCode } = req.body;
+
+    const emailDomain = email ? email.split('@')[1] || null : null;
+
+    let sellerId = defaultSellerId || null;
+    if (sellerId) {
+      const seller = await prisma.user.findUnique({ where: { id: sellerId } });
+      if (!seller) sellerId = null;
+    }
+
+    const client = await prisma.client.update({
+      where: { id: req.params.id },
+      data: {
+        name, cuit: cuit||null, email: email||null,
+        emailDomain, phone: phone||null, address: address||null,
+        city: city||null, province: province||null, zone: zone||null,
+        activity: activity||null, defaultSellerId: sellerId,
+        postalCode: postalCode||null,
+      },
+      include: { defaultSeller: { select: { id: true, name: true } } },
+    });
+
+    res.json(client);
+  } catch (err) {
+    console.error('Error updating client:', err);
+    res.status(500).json({ error: err.message || 'Error al actualizar cliente' });
+  }
+});
+
 module.exports = router;
