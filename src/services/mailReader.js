@@ -412,7 +412,7 @@ async function processEmail(mailData, imap) {
         code,
         clientId:       client?.id || null,
         sellerId:       client?.defaultSellerId || null,
-        stage:          client ? 'asignada' : 'recibida',
+        stage:          mailType === 'PRESUPUESTO' ? 'enviado' : (client ? 'asignada' : 'recibida'),
         source:         'EMAIL',
         mailType,
         flexxusCode:    flexxusData?.npCode || null,
