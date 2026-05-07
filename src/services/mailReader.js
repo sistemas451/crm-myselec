@@ -45,20 +45,35 @@ function stripHtml(html) {
 // ─── Tipos de adjunto que ignoramos (firmas de mail, imágenes inline) ───
 const IMAGE_MIME_PREFIXES = ['image/'];
 const IGNORED_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg', '.ico'];
-// Extensiones que clasifican un adjunto como posible OC
-const OC_EXTENSIONS = ['.pdf', '.doc', '.docx'];
+
+// MIME types que sabemos que son documentos reales → conservar aunque no tengan filename
+const DOCUMENT_MIME_PREFIXES = [
+  'application/pdf',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats',   // xlsx, docx, pptx
+  'application/msword',
+  'application/vnd.oasis',            // ods, odt
+  'application/zip',
+  'application/octet-stream',
+  'text/csv',
+  'text/plain',
+];
 
 function isImageAttachment(att) {
   if (!att) return true;
   const ct = (att.contentType || '').toLowerCase();
+  // Claramente una imagen por MIME type → ignorar
   if (IMAGE_MIME_PREFIXES.some(p => ct.startsWith(p))) return true;
+  // Tiene filename: verificar extensión
   if (att.filename) {
     const ext = path.extname(att.filename).toLowerCase();
     if (IGNORED_EXTENSIONS.includes(ext)) return true;
+    return false; // tiene filename no-imagen → conservar
   }
-  // Inline embebidos (firma) sin filename real también los ignoramos
-  if (!att.filename) return true;
-  return false;
+  // Sin filename: conservar solo si el MIME type es de un documento conocido
+  if (DOCUMENT_MIME_PREFIXES.some(p => ct.startsWith(p))) return false;
+  // Sin filename y MIME desconocido → probablemente firma inline → ignorar
+  return true;
 }
 
 function isOCAttachment(att) {
@@ -557,7 +572,8 @@ async function processEmail(mailData, imap) {
     // ── Guardar adjuntos reales (no imágenes) ─────────────────────────────
     for (const att of realAttachments) {
       try {
-        const safeName = `${quote.id}-${att.filename.replace(/[^a-zA-Z0-9._\-]/g, '_')}`;
+        const rawName = att.filename || att.name || `adjunto-${Date.now()}`;
+        const safeName = `${quote.id}-${rawName.replace(/[^a-zA-Z0-9._\-]/g, '_')}`;
         const filePath = path.join(UPLOADS_DIR, safeName);
         fs.writeFileSync(filePath, att.content);
 
