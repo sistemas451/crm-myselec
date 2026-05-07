@@ -145,6 +145,11 @@ async function processEmail(mailData, imap) {
     const date        = parsed.date || new Date();
     const messageId   = parsed.messageId || `uid-${mailData.uid}`;
 
+    // Header de threading: apunta al mail al que se responde
+    const inReplyTo = parsed.inReplyTo
+      ? parsed.inReplyTo.replace(/[<>]/g, '').trim()
+      : null;
+
     // Texto plano del cuerpo (fallback a HTML sin tags)
     const bodyText = parsed.text
       || (parsed.html ? parsed.html.replace(/<[^>]+>/g, ' ').replace(/\s{2,}/g, ' ').trim() : '');
@@ -255,30 +260,61 @@ async function processEmail(mailData, imap) {
         emailMessageId: messageId,
         emailFrom:      originalSender,
         emailBody:      bodyText.substring(0, 20000),
+        inReplyTo:      inReplyTo,
         createdAt:      date,
       },
     });
 
     // ── Auto-vincular PRESUPUESTO con SOLICITUD existente ────────────────
-    if (mailType === 'PRESUPUESTO' && client) {
+    if (mailType === 'PRESUPUESTO') {
       try {
-        const solicitudes = await prisma.quote.findMany({
-          where: {
-            clientId:      client.id,
-            mailType:      'SOLICITUD',
-            linkedQuoteId: null,          // sin vincular aún
-            stage:         { notIn: ['rechazada', 'aceptada'] },
-          },
-          orderBy: { createdAt: 'desc' },
-        });
+        let solicitudTarget = null;
 
-        if (solicitudes.length === 1) {
-          // Vínculo automático: exactamente una solicitud abierta
-          await prisma.quote.update({ where: { id: quote.id },          data: { linkedQuoteId: solicitudes[0].id } });
-          await prisma.quote.update({ where: { id: solicitudes[0].id }, data: { linkedQuoteId: quote.id } });
-          console.log(`   🔗 Auto-vinculado con ${solicitudes[0].code}`);
-        } else if (solicitudes.length > 1) {
-          console.log(`   ⚠️  ${solicitudes.length} solicitudes abiertas — vínculo manual requerido`);
+        // 1. Match por hilo de email (In-Reply-To → emailMessageId) ← más fuerte
+        if (inReplyTo) {
+          solicitudTarget = await prisma.quote.findFirst({
+            where: { emailMessageId: inReplyTo, mailType: 'SOLICITUD', linkedQuoteId: null },
+          });
+          if (solicitudTarget) console.log(`   🔗 Match por hilo email: ${solicitudTarget.code}`);
+        }
+
+        // 2. Fallback: mismo cliente, solicitud abierta, últimos 90 días
+        if (!solicitudTarget && client) {
+          const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 90);
+          const candidatas = await prisma.quote.findMany({
+            where: {
+              clientId:      client.id,
+              mailType:      'SOLICITUD',
+              linkedQuoteId: null,
+              stage:         { notIn: ['rechazada', 'aceptada'] },
+              createdAt:     { gte: cutoff },
+            },
+            orderBy: { createdAt: 'desc' },
+          });
+
+          if (candidatas.length === 1) {
+            solicitudTarget = candidatas[0];
+            console.log(`   🔗 Match por cliente único: ${solicitudTarget.code}`);
+          } else if (candidatas.length > 1) {
+            console.log(`   ⚠️  ${candidatas.length} solicitudes abiertas del cliente — vínculo manual requerido`);
+          }
+        }
+
+        // Vincular + propagar flexxusCode a la SOLICITUD
+        if (solicitudTarget) {
+          const npCode = flexxusData?.npCode || null;
+          await prisma.quote.update({
+            where: { id: quote.id },
+            data:  { linkedQuoteId: solicitudTarget.id },
+          });
+          await prisma.quote.update({
+            where: { id: solicitudTarget.id },
+            data:  {
+              linkedQuoteId: quote.id,
+              ...(npCode ? { flexxusCode: npCode } : {}),  // propagar NP a la SOLICITUD
+            },
+          });
+          console.log(`   🔗 Vinculado ${quote.code} ↔ ${solicitudTarget.code}${npCode ? ` | NP propagado: ${npCode}` : ''}`);
         }
       } catch (e) {
         console.error('   ❌ Error al auto-vincular:', e.message);

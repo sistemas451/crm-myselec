@@ -217,14 +217,31 @@ router.get('/:id/detail', authMiddleware, async (req, res) => {
         seller: { select: { id: true, name: true, email: true } },
         notes: { include: { user: { select: { name: true } } }, orderBy: { createdAt: 'asc' } },
         attachments: { orderBy: { createdAt: 'desc' } },
-        activities: { include: { user: { select: { name: true } } }, orderBy: { createdAt: 'desc' } },
+        activities: { include: { user: { select: { name: true } } }, orderBy: { createdAt: 'asc' } },
         items: { orderBy: { sortOrder: 'asc' } },
-        linkedQuote: { select: { id: true, code: true, mailType: true, stage: true, flexxusCode: true, createdAt: true, emailSubject: true, amount: true } },
-        linkedBy:    { select: { id: true, code: true, mailType: true, stage: true, flexxusCode: true, createdAt: true, emailSubject: true, amount: true }, take: 5 },
+        linkedQuote: {
+          select: { id: true, code: true, mailType: true, stage: true, flexxusCode: true, createdAt: true, emailSubject: true, amount: true },
+          include: { activities: { include: { user: { select: { name: true } } }, orderBy: { createdAt: 'asc' } } },
+        },
+        linkedBy: {
+          select: { id: true, code: true, mailType: true, stage: true, flexxusCode: true, createdAt: true, emailSubject: true, amount: true },
+          include: { activities: { include: { user: { select: { name: true } } }, orderBy: { createdAt: 'asc' } } },
+          take: 5,
+        },
       },
     });
     if (!quote) return res.status(404).json({ error: 'No encontrada' });
-    res.json(quote);
+
+    // ── Historial unificado: mezclar actividades de ambas quotes ──────────
+    const ownActivities = (quote.activities || []).map(a => ({ ...a, _fromCode: quote.code, _fromType: quote.mailType }));
+    const linked = quote.linkedQuote || quote.linkedBy?.[0];
+    const linkedActivities = linked
+      ? (linked.activities || []).map(a => ({ ...a, _fromCode: linked.code, _fromType: linked.mailType }))
+      : [];
+    const unifiedHistory = [...ownActivities, ...linkedActivities]
+      .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+
+    res.json({ ...quote, unifiedHistory });
   } catch (err) {
     res.status(500).json({ error: 'Error' });
   }
@@ -357,7 +374,15 @@ router.patch('/:id/link', authMiddleware, async (req, res) => {
       if (!target) return res.status(404).json({ error: 'Cotización destino no encontrada' });
     }
 
-    // Actualizar vínculo en ambas cotizaciones
+    // Determinar cuál es PRESUPUESTO y cuál SOLICITUD para propagar NP
+    let presupuesto = null, solicitud = null;
+    if (target) {
+      presupuesto = quote.mailType === 'PRESUPUESTO' ? quote : (target.mailType === 'PRESUPUESTO' ? target : null);
+      solicitud   = quote.mailType === 'SOLICITUD'   ? quote : (target.mailType === 'SOLICITUD'   ? target : null);
+    }
+    const npToPropagate = presupuesto?.flexxusCode || null;
+
+    // Actualizar vínculo en ambas cotizaciones + propagar flexxusCode a la SOLICITUD
     await prisma.quote.update({
       where: { id: req.params.id },
       data: { linkedQuoteId: linkedQuoteId || null },
@@ -365,17 +390,34 @@ router.patch('/:id/link', authMiddleware, async (req, res) => {
     if (target) {
       await prisma.quote.update({
         where: { id: target.id },
-        data: { linkedQuoteId: req.params.id },
+        data: {
+          linkedQuoteId: req.params.id,
+          ...(solicitud?.id === target.id && npToPropagate ? { flexxusCode: npToPropagate } : {}),
+        },
       });
+      // Si la solicitud es la quote actual, propagar NP a ella
+      if (solicitud?.id === req.params.id && npToPropagate) {
+        await prisma.quote.update({ where: { id: req.params.id }, data: { flexxusCode: npToPropagate } });
+      }
     }
 
-    // Log actividad
+    // Log actividad en ambas
     const detail = target
-      ? `Vinculada con ${target.code} (${target.mailType || target.source})`
+      ? `Vinculada con ${target.code} (${target.mailType || target.source})${npToPropagate ? ` · NP ${npToPropagate}` : ''}`
       : 'Vínculo eliminado';
     await prisma.activity.create({
       data: { action: 'LINKED', detail, userId: req.user.id, quoteId: req.params.id },
     });
+    if (target) {
+      await prisma.activity.create({
+        data: {
+          action: 'LINKED',
+          detail: `Vinculada con ${quote.code} (${quote.mailType || quote.source})${npToPropagate ? ` · NP ${npToPropagate}` : ''}`,
+          userId: req.user.id,
+          quoteId: target.id,
+        },
+      });
+    }
 
     res.json({ ok: true });
   } catch (err) {

@@ -155,7 +155,7 @@ function QuoteDetail({ code, onClose, canReassign }) {
     CrmApi.getQuoteDetail(q.id)
       .then(detail => {
         setNotes(detail.notes || []);
-        setHistory(detail.activities || []);
+        setHistory(detail.unifiedHistory || detail.activities || []);
         setDetailItems(detail.items || []);
         setDetailAttachments(detail.attachments || []);
         setDetailEmailBody(detail.emailBody || '');
@@ -789,19 +789,31 @@ function QuoteDetail({ code, onClose, canReassign }) {
                   STAGE_CHANGE: { name:'arrow-right',    cls:'text-brand bg-brandSoft' },
                   NOTE_ADDED:   { name:'message-square', cls:'text-ink-500 bg-surface' },
                   ASSIGNED:     { name:'user',           cls:'text-orange-600 bg-orange-50' },
+                  LINKED:       { name:'link',           cls:'text-violet-600 bg-violet-50' },
                 };
                 const ic = iconMap[a.action] || { name:'activity', cls:'text-ink-500 bg-surface' };
                 const isLast = i === history.length - 1;
+                // ¿Este evento viene de la quote vinculada?
+                const isFromLinked = a._fromCode && a._fromCode !== q.code;
+                const linkedTypeTone = a._fromType === 'SOLICITUD' ? 'sky' : a._fromType === 'PRESUPUESTO' ? 'blue' : 'gray';
                 return (
-                  <div key={a.id || i} className="flex gap-3">
+                  <div key={`${a.id||i}-${a._fromCode||''}`} className="flex gap-3">
                     <div className="flex flex-col items-center">
-                      <div className={cx('w-8 h-8 rounded-full flex items-center justify-center shrink-0', ic.cls)}>
+                      <div className={cx('w-8 h-8 rounded-full flex items-center justify-center shrink-0',
+                        isFromLinked ? 'ring-2 ring-offset-1 ring-violet-200 ' + ic.cls : ic.cls)}>
                         <Icon name={ic.name} size={14}/>
                       </div>
                       {!isLast && <div className="w-px flex-1 bg-line mt-1 mb-1"/>}
                     </div>
                     <div className={cx('flex-1', isLast ? 'pb-0' : 'pb-4')}>
-                      <div className="bg-white border border-line rounded-xl px-4 py-3">
+                      <div className={cx('border rounded-xl px-4 py-3', isFromLinked ? 'bg-violet-50/40 border-violet-100' : 'bg-white border-line')}>
+                        {isFromLinked && (
+                          <div className="flex items-center gap-1.5 mb-1.5">
+                            <Icon name="link" size={11} className="text-violet-400"/>
+                            <span className="text-[10.5px] font-semibold text-violet-500 mono">{a._fromCode}</span>
+                            <Badge tone={linkedTypeTone} className="text-[9px]">{a._fromType}</Badge>
+                          </div>
+                        )}
                         <p className="text-[13px] text-ink-900 leading-snug">{a.detail}</p>
                         <div className="flex items-center gap-2 mt-1.5 text-[11px] text-ink-500">
                           <span className="font-medium">{a.user?.name || 'Sistema'}</span>
