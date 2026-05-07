@@ -227,19 +227,11 @@ async function processEmail(mailData, imap) {
       ? parsed.inReplyTo.replace(/[<>]/g, '').trim()
       : null;
 
-    // ── Chequeo de duplicado ──────────────────────────────────────────────
-    const existing = await prisma.quote.findFirst({ where: { emailMessageId: messageId } });
-    if (existing) {
-      console.log(`   ⏭️  Ya procesado: ${messageId}`);
-      return null;
-    }
-
     // ── Extraer texto del cuerpo (múltiples estrategias) ─────────────────
     let bodyText = parsed.text
       || (parsed.html ? stripHtml(parsed.html) : '');
 
     // Si el cuerpo sigue vacío, buscar en mensajes embebidos (message/rfc822)
-    // Gmail a veces empaqueta el email original como adjunto de tipo message/rfc822
     let embeddedFrom = '';
     if (!bodyText.trim()) {
       const embeddedMsg = (parsed.attachments || []).find(a =>
@@ -255,6 +247,64 @@ async function processEmail(mailData, imap) {
           console.error('   ⚠️  Error parseando mensaje embebido:', e.message);
         }
       }
+    }
+
+    // ── Chequeo de duplicado ──────────────────────────────────────────────
+    // Si ya existe, intentar recuperar body e ítems que pudieron haber fallado
+    const existing = await prisma.quote.findFirst({
+      where: { emailMessageId: messageId },
+      include: { _count: { select: { items: true } } },
+    });
+    if (existing) {
+      const updates = {};
+      if (!existing.emailBody?.trim() && bodyText.trim()) {
+        updates.emailBody = bodyText.substring(0, 20000);
+        console.log(`   📝 Body recuperado para ${existing.code} (${bodyText.length} chars)`);
+      }
+
+      if (Object.keys(updates).length > 0) {
+        await prisma.quote.update({ where: { id: existing.id }, data: updates });
+      }
+
+      // Si es PRESUPUESTO sin ítems → intentar re-parsear el PDF adjunto
+      if (existing.mailType === 'PRESUPUESTO' && existing._count.items === 0) {
+        const realAtts = (parsed.attachments || []).filter(a => !isImageAttachment(a));
+        const flexxusAtt = realAtts.find(a => isFlexxusPDF(a));
+        if (flexxusAtt) {
+          try {
+            const fd = await parseFlexxusPDF(flexxusAtt.content);
+            if (fd?.items?.length) {
+              await prisma.quoteItem.createMany({
+                data: fd.items.map((item, i) => ({
+                  quoteId:     existing.id,
+                  sku:         item.sku || null,
+                  description: (item.description || '').substring(0, 500),
+                  quantity:    item.quantity || 0,
+                  unit:        item.unit || null,
+                  unitPrice:   item.unitPrice || null,
+                  total:       item.total || null,
+                  accepted:    item.accepted !== false,
+                  sortOrder:   i,
+                })),
+              });
+              const total = fd.items.filter(i => i.accepted !== false).reduce((s, i) => s + (i.total || 0), 0);
+              if (total > 0) await prisma.quote.update({ where: { id: existing.id }, data: { amount: total } });
+              console.log(`   📋 ${fd.items.length} ítems recuperados para ${existing.code}`);
+            }
+          } catch (e) {
+            console.error(`   ❌ Error recuperando ítems para ${existing.code}:`, e.message);
+          }
+        }
+      }
+
+      // Marcar como leído para no volver a procesar
+      if (mailData.uid) {
+        imap.addFlags(mailData.uid, ['\\Seen'], (err) => {
+          if (err) console.error('Error marking as seen:', err.message);
+        });
+      }
+      console.log(`   ⏭️  Ya existente: ${existing.code} — datos actualizados`);
+      return null;
     }
 
     // ── Extraer remitente real (puede ser un reenvío) ─────────────────────
@@ -481,14 +531,16 @@ async function processEmail(mailData, imap) {
     if (flexxusData?.items?.length) {
       try {
         await prisma.quoteItem.createMany({
-          data: flexxusData.items.map(item => ({
+          data: flexxusData.items.map((item, i) => ({
             quoteId:     quote.id,
-            description: item.description.substring(0, 500),
+            sku:         item.sku || null,
+            description: (item.description || '').substring(0, 500),
             quantity:    item.quantity || 0,
+            unit:        item.unit || null,
             unitPrice:   item.unitPrice || null,
             total:       item.total || null,
             accepted:    item.accepted !== false,
-            sortOrder:   item.sortOrder || 0,
+            sortOrder:   i,
           })),
         });
         console.log(`   📋 ${flexxusData.items.length} ítems creados para ${code}`);

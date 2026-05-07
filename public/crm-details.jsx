@@ -866,31 +866,7 @@ function QuoteDetail({ code, onClose, canReassign }) {
                   {detailEmailBody}
                 </pre>
               ) : (
-                <div className="flex flex-col items-center gap-3 py-8">
-                  <div className="text-[13px] text-ink-400">Sin cuerpo de mail guardado</div>
-                  {q.source === 'EMAIL' && (
-                    <button
-                      disabled={uploading}
-                      onClick={async () => {
-                        setUploading(true);
-                        try {
-                          await CrmApi.resyncQuoteEmail(q.id);
-                          // Reload detail to get updated fields
-                          const detail = await CrmApi.getQuoteDetail(q.id);
-                          setDetailEmailBody(detail.emailBody || '');
-                          pushToast('Email re-sincronizado');
-                        } catch (e) {
-                          pushToast(e.message || 'Error al re-sincronizar', 'bad');
-                        } finally {
-                          setUploading(false);
-                        }
-                      }}
-                      className="btn-ghost text-[12px] py-1.5 px-3 flex items-center gap-1.5">
-                      {uploading ? <Spinner size={12}/> : <Icon name="refresh-cw" size={12}/>}
-                      {uploading ? 'Sincronizando…' : 'Re-sincronizar desde Gmail'}
-                    </button>
-                  )}
-                </div>
+                <div className="text-[13px] text-ink-400 py-8 text-center">Sin cuerpo de mail guardado</div>
               )}
             </div>
           </div>
@@ -961,30 +937,7 @@ function QuoteDetail({ code, onClose, canReassign }) {
             <div className="grid grid-cols-3 gap-5">
               <div className="col-span-2 bg-white border border-line rounded-xl p-5">
                 <div className="text-sm font-semibold mb-2 text-ink-900">Presupuesto</div>
-                <div className="flex flex-col items-center gap-3 py-6">
-                  <div className="text-[13px] text-ink-400">Sin ítems de presupuesto todavía</div>
-                  {q.source === 'EMAIL' && (
-                    <button
-                      disabled={uploading}
-                      onClick={async () => {
-                        setUploading(true);
-                        try {
-                          const res = await CrmApi.reparseItems(q.id);
-                          const detail = await CrmApi.getQuoteDetail(q.id);
-                          setDetailItems(detail.items || []);
-                          pushToast(`${res.itemCount} ítems recuperados del PDF`);
-                        } catch (e) {
-                          pushToast(e.message || 'Error al re-parsear PDF', 'bad');
-                        } finally {
-                          setUploading(false);
-                        }
-                      }}
-                      className="btn-ghost text-[12px] py-1.5 px-3 flex items-center gap-1.5">
-                      {uploading ? <Spinner size={12}/> : <Icon name="refresh-cw" size={12}/>}
-                      {uploading ? 'Re-parseando…' : 'Re-parsear PDF Flexxus'}
-                    </button>
-                  )}
-                </div>
+                <div className="text-[13px] text-ink-400 py-6 text-center">Sin ítems de presupuesto todavía</div>
               </div>
               <div className="space-y-4">
                 <div className="bg-white border border-line rounded-xl p-4">
