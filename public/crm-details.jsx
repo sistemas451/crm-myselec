@@ -73,7 +73,7 @@ function TabBar({ tabs, active, onChange }) {
 }
 
 function QuoteDetail({ code, onClose, canReassign }) {
-  const { quotes, clients, users, moveQuoteStage, setQuotes, pushToast, closeModal } = useApp();
+  const { quotes, clients, users, moveQuoteStage, setQuotes, pushToast, closeModal, openModal } = useApp();
   const q = quotes.find(x => x.code === code);
   if (!q) return null;
   const cli = clients.find(c=>c.code===q.client);
@@ -94,6 +94,8 @@ function QuoteDetail({ code, onClose, canReassign }) {
   const [assignClientId, setAssignClientId] = useState('');
   const [assignSellerId, setAssignSellerId] = useState('');
   const [assignSaving, setAssignSaving] = useState(false);
+  const [clientSearch, setClientSearch] = useState('');
+  const [clientDropOpen, setClientDropOpen] = useState(false);
   const [detailItems, setDetailItems] = useState([]);
   const [detailAttachments, setDetailAttachments] = useState([]);
   const [detailEmailBody, setDetailEmailBody] = useState('');
@@ -273,40 +275,106 @@ function QuoteDetail({ code, onClose, canReassign }) {
         </div>
       )}
 
-      {!cli && assigningClient && (
-        <div className="mx-6 mt-4 px-4 py-4 bg-amber-50 border border-amber-200 rounded-xl">
-          <div className="text-[13px] font-semibold text-amber-900 mb-3">Asignar cliente a esta cotización</div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-[11px] font-medium text-ink-700 mb-1 block">Cliente *</label>
-              <select className="inp w-full text-xs" value={assignClientId}
-                onChange={e => setAssignClientId(e.target.value)}>
-                <option value="">Seleccionar cliente…</option>
-                {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
+      {!cli && assigningClient && (() => {
+        const selectedClientObj = clients.find(c => c.id === assignClientId);
+        const filteredClients = clients.filter(c =>
+          !clientSearch ||
+          c.name.toLowerCase().includes(clientSearch.toLowerCase()) ||
+          (c.cuit || '').includes(clientSearch) ||
+          (c.email || '').toLowerCase().includes(clientSearch.toLowerCase())
+        );
+        return (
+          <div className="mx-6 mt-4 px-4 py-4 bg-amber-50 border border-amber-200 rounded-xl">
+            <div className="text-[13px] font-semibold text-amber-900 mb-3">Asignar cliente a esta cotización</div>
+            <div className="grid grid-cols-2 gap-3">
+
+              {/* ── Buscador de cliente ── */}
+              <div>
+                <label className="text-[11px] font-medium text-ink-700 mb-1 block">Cliente *</label>
+                <div className="relative">
+                  <input
+                    className="inp w-full text-xs"
+                    placeholder="Buscar por nombre, CUIT o email…"
+                    value={clientDropOpen ? clientSearch : (selectedClientObj?.name || '')}
+                    onFocus={() => { setClientDropOpen(true); setClientSearch(''); }}
+                    onChange={e => { setClientSearch(e.target.value); setAssignClientId(''); }}
+                  />
+                  {selectedClientObj && !clientDropOpen && (
+                    <button
+                      title="Editar cliente"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-ink-400 hover:text-brand"
+                      onClick={() => openModal('editClient', { clientId: assignClientId })}>
+                      <Icon name="pencil" size={12}/>
+                    </button>
+                  )}
+                  {clientDropOpen && (
+                    <>
+                      <div className="fixed inset-0 z-10" onClick={() => setClientDropOpen(false)}/>
+                      <div className="absolute z-20 mt-1 w-full bg-white border border-line rounded-xl shadow-pop max-h-56 overflow-y-auto scroll-thin">
+                        {filteredClients.slice(0, 25).map(c => (
+                          <button key={c.id}
+                            className="w-full text-left px-3 py-2 hover:bg-surface border-b border-line last:border-b-0 flex items-start justify-between gap-2"
+                            onClick={() => { setAssignClientId(c.id); setClientDropOpen(false); setClientSearch(''); }}>
+                            <div>
+                              <div className="text-[12.5px] font-medium text-ink-900">{c.name}</div>
+                              {c.cuit && <div className="text-[11px] text-ink-400 mono">{c.cuit}</div>}
+                            </div>
+                            {c.email && <span className="text-[11px] text-ink-400 shrink-0">{c.email}</span>}
+                          </button>
+                        ))}
+                        {filteredClients.length === 0 && (
+                          <div className="px-3 py-3 text-[12.5px] text-ink-400 text-center">Sin resultados</div>
+                        )}
+                        {/* Opción nuevo cliente */}
+                        <button
+                          className="w-full text-left px-3 py-2.5 text-[12.5px] text-brand font-medium hover:bg-brandSoft border-t border-line flex items-center gap-2"
+                          onClick={() => { setClientDropOpen(false); setAssigningClient(false); openModal('newClient'); }}>
+                          <Icon name="plus" size={12}/>Nuevo cliente
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+                {/* Info + botón editar del cliente seleccionado */}
+                {selectedClientObj && (
+                  <div className="mt-1.5 flex items-center justify-between bg-white border border-line rounded-lg px-2.5 py-1.5 text-[11.5px]">
+                    <span className="text-ink-700 truncate">
+                      {selectedClientObj.email || selectedClientObj.city || 'Sin email registrado'}
+                    </span>
+                    <button className="ml-2 flex items-center gap-1 text-brand hover:underline shrink-0"
+                      onClick={() => openModal('editClient', { clientId: assignClientId })}>
+                      <Icon name="pencil" size={11}/>Editar
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* ── Selector de vendedor ── */}
+              <div>
+                <label className="text-[11px] font-medium text-ink-700 mb-1 block">Vendedor (opcional — se usa el del cliente)</label>
+                <select className="inp w-full text-xs" value={assignSellerId}
+                  onChange={e => setAssignSellerId(e.target.value)}>
+                  <option value="">Vendedor por defecto del cliente</option>
+                  {users.filter(u => u.role==='Vendedor'||u.role==='Administrador')
+                    .map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                </select>
+              </div>
             </div>
-            <div>
-              <label className="text-[11px] font-medium text-ink-700 mb-1 block">Vendedor (opcional — se usa el del cliente)</label>
-              <select className="inp w-full text-xs" value={assignSellerId}
-                onChange={e => setAssignSellerId(e.target.value)}>
-                <option value="">Vendedor por defecto del cliente</option>
-                {users.filter(u => u.role==='Vendedor'||u.role==='Administrador')
-                  .map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-              </select>
+
+            <div className="flex gap-2 mt-3 justify-end">
+              <button className="btn-ghost text-xs" onClick={() => { setAssigningClient(false); setClientDropOpen(false); }}
+                disabled={assignSaving}>Cancelar</button>
+              <button className="btn-primary text-xs"
+                disabled={!assignClientId || assignSaving}
+                onClick={handleAssignClient}
+                style={!assignClientId || assignSaving ? {opacity:.45,cursor:'not-allowed'} : {}}>
+                <Icon name={assignSaving ? 'loader' : 'check'} size={13}/>
+                {assignSaving ? 'Guardando...' : 'Confirmar asignación'}
+              </button>
             </div>
           </div>
-          <div className="flex gap-2 mt-3 justify-end">
-            <button className="btn-ghost text-xs" onClick={() => setAssigningClient(false)}
-              disabled={assignSaving}>Cancelar</button>
-            <button className="btn-primary text-xs"
-              disabled={!assignClientId || assignSaving}
-              onClick={handleAssignClient}>
-              <Icon name={assignSaving ? 'loader' : 'check'} size={13}/>
-              {assignSaving ? 'Guardando...' : 'Confirmar asignación'}
-            </button>
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Pipeline strip */}
       <div className="px-6 pt-5 pb-4 bg-gradient-to-b from-surface to-white">

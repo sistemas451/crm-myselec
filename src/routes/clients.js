@@ -94,4 +94,43 @@ router.put('/:id', authMiddleware, async (req, res) => {
   }
 });
 
+// GET /api/clients/:id/emails — lista emails de matcheo
+router.get('/:id/emails', authMiddleware, async (req, res) => {
+  try {
+    const emails = await prisma.clientEmail.findMany({
+      where: { clientId: req.params.id },
+      orderBy: { createdAt: 'asc' },
+    });
+    res.json(emails);
+  } catch (err) {
+    res.status(500).json({ error: 'Error' });
+  }
+});
+
+// POST /api/clients/:id/emails — agregar email de matcheo
+router.post('/:id/emails', authMiddleware, async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email requerido' });
+    const record = await prisma.clientEmail.upsert({
+      where: { email_clientId: { email: email.toLowerCase().trim(), clientId: req.params.id } },
+      update: {},
+      create: { email: email.toLowerCase().trim(), clientId: req.params.id },
+    });
+    res.status(201).json(record);
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Error al agregar email' });
+  }
+});
+
+// DELETE /api/clients/:id/emails/:emailId — eliminar email de matcheo
+router.delete('/:id/emails/:emailId', authMiddleware, async (req, res) => {
+  try {
+    await prisma.clientEmail.delete({ where: { id: req.params.emailId } });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Error al eliminar email' });
+  }
+});
+
 module.exports = router;

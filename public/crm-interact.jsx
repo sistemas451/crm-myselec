@@ -630,6 +630,41 @@ function EditClientModal({ clientId }) {
   const set = (k, v) => setForm(f => ({...f, [k]: v}));
   const canSubmit = !!form.name;
 
+  // ── Emails de matcheo ──
+  const [clientEmails, setClientEmails] = useS([]);
+  const [newEmail, setNewEmail] = useS('');
+  const [emailSaving, setEmailSaving] = useS(false);
+
+  React.useEffect(() => {
+    if (!clientId) return;
+    CrmApi.getClientEmails(clientId).then(setClientEmails).catch(() => {});
+  }, [clientId]);
+
+  const handleAddEmail = async () => {
+    if (!newEmail.trim()) return;
+    setEmailSaving(true);
+    try {
+      const record = await CrmApi.addClientEmail(clientId, newEmail.trim());
+      setClientEmails(prev => [...prev, record]);
+      setNewEmail('');
+      pushToast('Email agregado');
+    } catch (err) {
+      pushToast(err.message || 'Error al agregar email', 'bad');
+    } finally {
+      setEmailSaving(false);
+    }
+  };
+
+  const handleRemoveEmail = async (emailId) => {
+    try {
+      await CrmApi.removeClientEmail(clientId, emailId);
+      setClientEmails(prev => prev.filter(e => e.id !== emailId));
+      pushToast('Email eliminado');
+    } catch (err) {
+      pushToast('Error al eliminar email', 'bad');
+    }
+  };
+
   const submit = async () => {
     setSaving(true);
     try {
@@ -703,13 +738,48 @@ function EditClientModal({ clientId }) {
         <FormGroup label="Teléfono">
           <input className="inp w-full mono" value={form.phone} onChange={e=>set('phone',e.target.value)}/>
         </FormGroup>
-        <FormGroup label="Email">
+        <FormGroup label="Email principal">
           <input className="inp w-full" value={form.email} onChange={e=>set('email',e.target.value)}/>
         </FormGroup>
         <FormGroup label="Vendedor asignado" cols={2}>
           <Select value={form.seller} onChange={v=>set('seller',v)}
             options={users.filter(u=>u.role==='Vendedor'||u.role==='Administrador').map(u => ({ value:u.id, label:`${u.name} · ${u.zone}` }))}/>
         </FormGroup>
+
+        {/* ── Emails de matcheo automático ── */}
+        <div className="col-span-2 pt-2 border-t border-line">
+          <div className="text-[11px] uppercase tracking-wider font-semibold text-ink-500 mb-2">
+            Emails de matcheo automático
+          </div>
+          <div className="text-[11.5px] text-ink-400 mb-3">
+            Cuando llegue un mail de alguno de estos remitentes, se vincula automáticamente a este cliente.
+          </div>
+          {/* Lista de emails registrados */}
+          <div className="space-y-1.5 mb-3">
+            {clientEmails.length === 0 && (
+              <div className="text-[12px] text-ink-400 py-2">Sin emails adicionales registrados</div>
+            )}
+            {clientEmails.map(e => (
+              <div key={e.id} className="flex items-center justify-between bg-surface border border-line rounded-lg px-3 py-2">
+                <span className="text-[12.5px] text-ink-900 mono">{e.email}</span>
+                <button onClick={() => handleRemoveEmail(e.id)}
+                  className="w-6 h-6 rounded hover:bg-red-50 text-ink-400 hover:text-bad flex items-center justify-center">
+                  <Icon name="x" size={12}/>
+                </button>
+              </div>
+            ))}
+          </div>
+          {/* Agregar nuevo email */}
+          <div className="flex gap-2">
+            <input className="inp flex-1 text-xs mono" placeholder="nuevo@email.com"
+              value={newEmail} onChange={e => setNewEmail(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleAddEmail()}/>
+            <button className="btn-ghost text-xs" onClick={handleAddEmail}
+              disabled={!newEmail.trim() || emailSaving}>
+              <Icon name="plus" size={12}/>{emailSaving ? 'Agregando…' : 'Agregar'}
+            </button>
+          </div>
+        </div>
       </div>
     </Modal>
   );

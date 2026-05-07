@@ -76,6 +76,11 @@ const CrmApi = {
   getClients: () => apiFetch('/clients'),
   createClient: (data) => apiFetch('/clients', { method: 'POST', body: JSON.stringify(data) }),
   updateClient: (id, data) => apiFetch(`/clients/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  getClientEmails: (id) => apiFetch(`/clients/${id}/emails`),
+  addClientEmail: (id, email) => apiFetch(`/clients/${id}/emails`, {
+    method: 'POST', body: JSON.stringify({ email })
+  }),
+  removeClientEmail: (id, emailId) => apiFetch(`/clients/${id}/emails/${emailId}`, { method: 'DELETE' }),
 
   // Data
   getUsers: () => apiFetch('/data/users'),
