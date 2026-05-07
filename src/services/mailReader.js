@@ -1,8 +1,36 @@
 const Imap = require('imap');
 const { simpleParser } = require('mailparser');
 const { PrismaClient } = require('@prisma/client');
+const fs = require('fs');
+const path = require('path');
 
 const prisma = new PrismaClient();
+
+const UPLOADS_DIR = path.join(__dirname, '..', '..', 'uploads', 'attachments');
+if (!fs.existsSync(UPLOADS_DIR)) {
+  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+}
+
+// ─── Regex: extrae email del remitente original en reenvíos Outlook ───
+// Formato: "De: Nombre < email@dominio.com >" (con o sin espacios)
+const OUTLOOK_FORWARD_RE = /De:\s*.+?<\s*([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})\s*>/i;
+
+// ─── Tipos de adjunto que ignoramos (firmas de mail, imágenes inline) ───
+const IMAGE_MIME_PREFIXES = ['image/'];
+const IGNORED_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg', '.ico'];
+
+function isImageAttachment(att) {
+  if (!att) return true;
+  const ct = (att.contentType || '').toLowerCase();
+  if (IMAGE_MIME_PREFIXES.some(p => ct.startsWith(p))) return true;
+  if (att.filename) {
+    const ext = path.extname(att.filename).toLowerCase();
+    if (IGNORED_EXTENSIONS.includes(ext)) return true;
+  }
+  // Inline embebidos (firma) sin filename real también los ignoramos
+  if (!att.filename) return true;
+  return false;
+}
 
 async function nextCode(model, prefix) {
   const all = await model.findMany({ select: { code: true } });
@@ -12,8 +40,8 @@ async function nextCode(model, prefix) {
 }
 
 /**
- * Connects to Gmail via IMAP, reads unread emails,
- * matches sender email to clients, and creates quotes.
+ * Conecta a Gmail vía IMAP, lee mails no leídos,
+ * matchea remitente con clientes y crea cotizaciones.
  */
 async function syncMails() {
   if (!process.env.MAIL_USER || !process.env.MAIL_PASSWORD) {
@@ -34,14 +62,13 @@ async function syncMails() {
     });
 
     imap.once('ready', () => {
-      imap.openBox('INBOX', false, (err, box) => {
+      imap.openBox('INBOX', false, (err) => {
         if (err) {
           results.errors.push(`Error opening INBOX: ${err.message}`);
           imap.end();
           return resolve(results);
         }
 
-        // Search for unseen emails
         imap.search(['UNSEEN'], (err, uids) => {
           if (err) {
             results.errors.push(`Error searching: ${err.message}`);
@@ -60,19 +87,15 @@ async function syncMails() {
           const fetch = imap.fetch(uids, { bodies: '', markSeen: false });
           const mailPromises = [];
 
-          fetch.on('message', (msg, seqno) => {
+          fetch.on('message', (msg) => {
             let buffer = '';
             const mailData = { uid: null };
 
-            msg.on('attributes', (attrs) => {
-              mailData.uid = attrs.uid;
-            });
-
+            msg.on('attributes', (attrs) => { mailData.uid = attrs.uid; });
             msg.on('body', (stream) => {
               stream.on('data', (chunk) => { buffer += chunk.toString('utf8'); });
               stream.on('end', () => { mailData.raw = buffer; });
             });
-
             msg.once('end', () => {
               mailPromises.push(processEmail(mailData, imap));
             });
@@ -100,7 +123,7 @@ async function syncMails() {
     });
 
     imap.once('error', (err) => {
-      results.errors.push(`IMAP connection error: ${err.message}`);
+      results.errors.push(`IMAP error: ${err.message}`);
       resolve(results);
     });
 
@@ -116,107 +139,152 @@ async function processEmail(mailData, imap) {
   try {
     const parsed = await simpleParser(mailData.raw);
 
-    const from = parsed.from?.value?.[0]?.address || '';
-    const fromName = parsed.from?.value?.[0]?.name || from;
-    const subject = parsed.subject || '(sin asunto)';
-    const date = parsed.date || new Date();
-    const messageId = parsed.messageId || `uid-${mailData.uid}`;
+    const directFrom  = parsed.from?.value?.[0]?.address || '';
+    const subject     = parsed.subject || '(sin asunto)';
+    const date        = parsed.date || new Date();
+    const messageId   = parsed.messageId || `uid-${mailData.uid}`;
 
-    // Check if already processed
-    const existing = await prisma.quote.findFirst({
-      where: { emailMessageId: messageId },
-    });
-    if (existing) return null;
+    // Texto plano del cuerpo (fallback a HTML sin tags)
+    const bodyText = parsed.text
+      || (parsed.html ? parsed.html.replace(/<[^>]+>/g, ' ').replace(/\s{2,}/g, ' ').trim() : '');
 
-    // Try to match client: first by email found in subject, then by sender
+    // ── Chequeo de duplicado ──────────────────────────────────────────────
+    const existing = await prisma.quote.findFirst({ where: { emailMessageId: messageId } });
+    if (existing) {
+      console.log(`   ⏭️  Ya procesado: ${messageId}`);
+      return null;
+    }
+
+    // ── Extraer remitente real (puede ser un reenvío de Outlook) ──────────
+    const forwardMatch = bodyText.match(OUTLOOK_FORWARD_RE)
+      || subject.match(OUTLOOK_FORWARD_RE);
+    const originalSender = (forwardMatch?.[1] || directFrom).toLowerCase().trim();
+
+    // ── Filtrar adjuntos reales (ignorar imágenes/firmas) ─────────────────
+    const realAttachments = (parsed.attachments || []).filter(a => !isImageAttachment(a));
+
+    // ── Clasificar tipo de mail ───────────────────────────────────────────
+    // Por ahora: sin adjuntos reales = SOLICITUD
+    // (PRESUPUESTO y OC se agregan cuando tengamos flexxusParser)
+    const mailType = 'SOLICITUD';
+
+    console.log(`   📩 ${subject} | from: ${originalSender} | adjuntos reales: ${realAttachments.length} | tipo: ${mailType}`);
+
+    // ── Matcheo de cliente (orden de prioridad) ───────────────────────────
     let client = null;
-    let matchSource = null;
 
-    const subjectEmailMatch = subject.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/);
-    const subjectEmail = subjectEmailMatch ? subjectEmailMatch[0] : null;
+    // 1. ClientEmail exacto
+    try {
+      const ce = await prisma.clientEmail.findFirst({
+        where: { email: originalSender },
+        include: { client: { include: { defaultSeller: true } } },
+      });
+      if (ce) { client = ce.client; console.log(`   ✅ Match ClientEmail: ${client.name}`); }
+    } catch (_) { /* ClientEmail puede no existir en esquemas viejos */ }
 
-    if (subjectEmail) {
+    // 2. Client.email exacto
+    if (!client) {
       client = await prisma.client.findFirst({
-        where: { email: { equals: subjectEmail, mode: 'insensitive' } },
+        where: { email: { equals: originalSender, mode: 'insensitive' } },
         include: { defaultSeller: true },
       });
-      if (client) matchSource = 'asunto';
+      if (client) console.log(`   ✅ Match Client.email: ${client.name}`);
     }
 
-    if (!client && from) {
+    // 3. Dominio del remitente vs Client.emailDomain
+    if (!client && originalSender.includes('@')) {
+      const domain = originalSender.split('@')[1];
       client = await prisma.client.findFirst({
-        where: { email: { equals: from, mode: 'insensitive' } },
+        where: { emailDomain: { equals: domain, mode: 'insensitive' } },
         include: { defaultSeller: true },
       });
-      if (client) matchSource = 'remitente';
+      if (client) console.log(`   ✅ Match dominio @${domain}: ${client.name}`);
     }
 
-    // Generate quote code
+    if (!client) console.log(`   ⚠️  Sin match de cliente para ${originalSender}`);
+
+    // ── Crear cotización ──────────────────────────────────────────────────
     const code = await nextCode(prisma.quote, 'COT-2026');
 
-    console.log('   📝 Creando cotización:', { code, clientId: client?.id || null, subject });
     const quote = await prisma.quote.create({
       data: {
         code,
-        clientId: client?.id || null,
-        sellerId: client?.defaultSellerId || null,
-        stage: client ? 'asignada' : 'recibida',
-        source: 'EMAIL',
-        isDraft: false,
-        emailSubject: subject.substring(0, 500),
+        clientId:      client?.id || null,
+        sellerId:      client?.defaultSellerId || null,
+        stage:         client ? 'asignada' : 'recibida',
+        source:        'EMAIL',
+        mailType,
+        emailSubject:  subject.substring(0, 500),
         emailMessageId: messageId,
-        emailFrom: from,
-        createdAt: date,
+        emailFrom:     originalSender,
+        emailBody:     bodyText.substring(0, 20000),
+        createdAt:     date,
       },
     });
 
-    // Log activity
-    const activityDetail = matchSource === 'asunto'
-      ? `Cotización ${code} ingresada desde mail — ${client.name} (identificado por asunto)`
-      : matchSource === 'remitente'
-        ? `Cotización ${code} ingresada desde mail — ${client.name} (identificado por remitente)`
-        : `Cotización ${code} ingresada desde mail — cliente pendiente de asignar · Asunto: ${subject}`;
+    // ── Guardar adjuntos reales (no imágenes) ─────────────────────────────
+    for (const att of realAttachments) {
+      try {
+        const safeName = `${quote.id}-${att.filename.replace(/[^a-zA-Z0-9._\-]/g, '_')}`;
+        const filePath = path.join(UPLOADS_DIR, safeName);
+        fs.writeFileSync(filePath, att.content);
 
+        await prisma.attachment.create({
+          data: {
+            filename: safeName,
+            path:     filePath,
+            size:     att.size || att.content?.length || null,
+            mimeType: att.contentType || null,
+            quoteId:  quote.id,
+          },
+        });
+        console.log(`   📎 Adjunto guardado: ${safeName}`);
+      } catch (e) {
+        console.error(`   ❌ Error guardando adjunto ${att.filename}:`, e.message);
+      }
+    }
+
+    // ── Log de actividad ──────────────────────────────────────────────────
     await prisma.activity.create({
       data: {
         action: 'CREATED',
-        detail: activityDetail,
+        detail: client
+          ? `Cotización ${code} ingresada desde mail — ${client.name} (${originalSender})`
+          : `Cotización ${code} ingresada desde mail — cliente sin asignar · ${originalSender}`,
         quoteId: quote.id,
       },
     });
 
-    // Mark as seen in IMAP
+    // ── Marcar como leído en IMAP ─────────────────────────────────────────
     if (mailData.uid) {
       imap.addFlags(mailData.uid, ['\\Seen'], (err) => {
         if (err) console.error('Error marking as seen:', err.message);
       });
     }
 
-    console.log(`   ✅ Created ${code} from ${from} → ${client?.name || 'Unknown client'}`);
+    console.log(`   ✅ Creada ${code} ← ${originalSender} → ${client?.name || 'sin cliente'}`);
 
     return {
-      code: quote.code,
-      from,
-      fromName,
+      code:       quote.code,
+      from:       originalSender,
       subject,
+      mailType,
       clientName: client?.name || null,
       sellerName: client?.defaultSeller?.name || null,
-      isDraft: quote.isDraft,
-      date: date.toISOString(),
+      date:       date.toISOString(),
     };
+
   } catch (err) {
-    console.error('Error processing email completo:', err);
+    console.error('Error procesando email:', err);
     throw err;
   }
 }
 
 /**
- * List recent emails without processing them (for the inbox view)
+ * Lista mails recientes sin procesarlos (para la vista de bandeja)
  */
 async function listRecentMails(limit = 20) {
-  if (!process.env.MAIL_USER || !process.env.MAIL_PASSWORD) {
-    return [];
-  }
+  if (!process.env.MAIL_USER || !process.env.MAIL_PASSWORD) return [];
 
   return new Promise((resolve) => {
     const mails = [];
@@ -236,15 +304,17 @@ async function listRecentMails(limit = 20) {
 
         const total = box.messages.total;
         const start = Math.max(1, total - limit + 1);
-        const range = `${start}:${total}`;
 
-        const fetch = imap.fetch(range, { bodies: ['HEADER.FIELDS (FROM SUBJECT DATE)'], struct: true });
-        
+        const fetch = imap.fetch(`${start}:${total}`, {
+          bodies: ['HEADER.FIELDS (FROM SUBJECT DATE)'],
+          struct: true,
+        });
+
         fetch.on('message', (msg) => {
           const mailInfo = { seen: false };
-          
+
           msg.on('attributes', (attrs) => {
-            mailInfo.uid = attrs.uid;
+            mailInfo.uid  = attrs.uid;
             mailInfo.seen = attrs.flags?.includes('\\Seen') || false;
             mailInfo.date = attrs.date;
           });
@@ -253,9 +323,9 @@ async function listRecentMails(limit = 20) {
             let buffer = '';
             stream.on('data', (chunk) => { buffer += chunk.toString('utf8'); });
             stream.on('end', () => {
-              const fromMatch = buffer.match(/From:\s*(.+)/i);
+              const fromMatch    = buffer.match(/From:\s*(.+)/i);
               const subjectMatch = buffer.match(/Subject:\s*(.+)/i);
-              mailInfo.from = fromMatch ? fromMatch[1].trim() : '';
+              mailInfo.from    = fromMatch    ? fromMatch[1].trim()    : '';
               mailInfo.subject = subjectMatch ? subjectMatch[1].trim() : '(sin asunto)';
             });
           });
@@ -263,15 +333,8 @@ async function listRecentMails(limit = 20) {
           msg.once('end', () => { mails.push(mailInfo); });
         });
 
-        fetch.once('end', () => {
-          imap.end();
-          resolve(mails.reverse());
-        });
-
-        fetch.once('error', () => {
-          imap.end();
-          resolve([]);
-        });
+        fetch.once('end',   () => { imap.end(); resolve(mails.reverse()); });
+        fetch.once('error', () => { imap.end(); resolve([]); });
       });
     });
 

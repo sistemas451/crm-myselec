@@ -79,7 +79,8 @@ function QuoteDetail({ code, onClose, canReassign }) {
   const cli = clients.find(c=>c.code===q.client);
   const sel = users.find(u=>u.id===q.seller);
   const stg = STAGES_F1.find(s=>s.id===q.stage);
-  const [tab, setTab] = useState('resumen');
+  const isSolicitud = q.mailType === 'SOLICITUD' || (q.source === 'EMAIL' && !q.mailType);
+  const [tab, setTab] = useState(isSolicitud ? 'mail' : 'resumen');
   const [stageOpen, setStageOpen] = useState(false);
   const [rejectPending, setRejectPending] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
@@ -338,7 +339,7 @@ function QuoteDetail({ code, onClose, canReassign }) {
         </div>
       )}
 
-      {q.source === 'EMAIL' && q.emailSubject && (
+      {q.source === 'EMAIL' && q.emailSubject && !isSolicitud && (
         <div className="mx-6 mb-4">
           <div className="px-4 py-3 bg-surface border border-line rounded-xl flex items-start gap-3">
             <Icon name="mail" size={15} className="mt-0.5 text-ink-500 shrink-0"/>
@@ -363,15 +364,58 @@ function QuoteDetail({ code, onClose, canReassign }) {
         </div>
       )}
 
-      <TabBar active={tab} onChange={setTab} tabs={[
-        { id:'resumen',  label:'Resumen' },
-        { id:'items',    label:'Ítems', count: detailItems.length > 0 ? detailItems.length : null },
-        { id:'adj',      label:'Adjuntos', count: detailAttachments.length > 0 ? detailAttachments.length : null },
-        { id:'historial',label:'Historial' },
-        { id:'notas',    label:'Notas', count: notes.length > 0 ? notes.length : null },
-      ]}/>
+      {(() => {
+        const nonImageAdj = detailAttachments.filter(a => !a.mimeType?.startsWith('image/'));
+        const tabs = isSolicitud
+          ? [
+              { id:'mail',     label:'Mail' },
+              { id:'adj',      label:'Adjuntos', count: nonImageAdj.length > 0 ? nonImageAdj.length : null },
+              { id:'historial',label:'Historial' },
+              { id:'notas',    label:'Notas', count: notes.length > 0 ? notes.length : null },
+            ]
+          : [
+              { id:'resumen',  label:'Resumen' },
+              { id:'items',    label:'Ítems', count: detailItems.length > 0 ? detailItems.length : null },
+              { id:'adj',      label:'Adjuntos', count: nonImageAdj.length > 0 ? nonImageAdj.length : null },
+              { id:'historial',label:'Historial' },
+              { id:'notas',    label:'Notas', count: notes.length > 0 ? notes.length : null },
+            ];
+        return <TabBar active={tab} onChange={setTab} tabs={tabs}/>;
+      })()}
 
-      {tab === 'resumen' && (
+      {tab === 'mail' && (
+        <div className="p-6">
+          <div className="bg-white border border-line rounded-xl overflow-hidden">
+            {/* Header del mail */}
+            <div className="px-5 py-4 border-b border-line space-y-2.5">
+              <div className="flex items-start gap-3">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-ink-500 w-16 shrink-0 pt-0.5">Asunto</span>
+                <span className="text-[14px] font-semibold text-ink-900 leading-snug">{q.emailSubject || '(sin asunto)'}</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-ink-500 w-16 shrink-0">De</span>
+                <span className="text-[13px] text-ink-700 mono">{q.emailFrom || '—'}</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-ink-500 w-16 shrink-0">Ingreso</span>
+                <span className="text-[13px] text-ink-500">{fmtDate(q.ingreso)} · hace {q.dias}d</span>
+              </div>
+            </div>
+            {/* Cuerpo */}
+            <div className="px-5 py-4">
+              {detailEmailBody ? (
+                <pre className="text-[12.5px] text-ink-700 whitespace-pre-wrap font-sans leading-relaxed max-h-[480px] overflow-y-auto scroll-thin">
+                  {detailEmailBody}
+                </pre>
+              ) : (
+                <div className="text-[13px] text-ink-400 py-8 text-center">Sin cuerpo de mail guardado</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tab === 'resumen' && !isSolicitud && (
         <div className="p-6">
           {detailItems.length > 0 ? (
             <div className="grid grid-cols-3 gap-5">
@@ -452,7 +496,7 @@ function QuoteDetail({ code, onClose, canReassign }) {
         </div>
       )}
 
-      {tab === 'items' && (
+      {tab === 'items' && !isSolicitud && (
         <div className="p-6">
           {detailItems.length === 0 ? (
             <div className="text-[13px] text-ink-400 py-8 text-center">Sin ítems registrados</div>
@@ -503,29 +547,32 @@ function QuoteDetail({ code, onClose, canReassign }) {
 
       {tab === 'adj' && (
         <div className="p-6 grid grid-cols-2 gap-3">
-          {detailAttachments.length === 0 && (
-            <div className="col-span-2 text-[13px] text-ink-400 py-6 text-center">Sin adjuntos</div>
-          )}
-          {detailAttachments.map(a => {
-            const ext = extOf(a.filename, a.mimeType);
-            return (
-              <div key={a.id} className="bg-white border border-line rounded-xl p-3 flex items-center gap-3">
-                <div className={cx('w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold text-[11px] shrink-0', extBg(ext))}>
-                  {ext.toUpperCase().slice(0,4)}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-[13px] font-medium text-ink-900 truncate">{a.filename}</div>
-                  <div className="text-[11px] text-ink-500">
-                    {fmtBytes(a.size)}{a.size ? ' · ' : ''}{fmtDate(a.createdAt)}
-                  </div>
-                </div>
-                <a href={`/uploads/attachments/${a.filename}`} target="_blank" rel="noopener noreferrer"
-                  className="w-8 h-8 rounded-lg hover:bg-surface text-ink-500 flex items-center justify-center">
-                  <Icon name="download" size={14}/>
-                </a>
-              </div>
+          {(() => {
+            const visibleAdj = detailAttachments.filter(a => !a.mimeType?.startsWith('image/'));
+            if (visibleAdj.length === 0) return (
+              <div className="col-span-2 text-[13px] text-ink-400 py-6 text-center">Sin adjuntos</div>
             );
-          })}
+            return visibleAdj.map(a => {
+              const ext = extOf(a.filename, a.mimeType);
+              return (
+                <div key={a.id} className="bg-white border border-line rounded-xl p-3 flex items-center gap-3">
+                  <div className={cx('w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold text-[11px] shrink-0', extBg(ext))}>
+                    {ext.toUpperCase().slice(0,4)}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[13px] font-medium text-ink-900 truncate">{a.filename}</div>
+                    <div className="text-[11px] text-ink-500">
+                      {fmtBytes(a.size)}{a.size ? ' · ' : ''}{fmtDate(a.createdAt)}
+                    </div>
+                  </div>
+                  <a href={`/uploads/attachments/${a.filename}`} target="_blank" rel="noopener noreferrer"
+                    className="w-8 h-8 rounded-lg hover:bg-surface text-ink-500 flex items-center justify-center">
+                    <Icon name="download" size={14}/>
+                  </a>
+                </div>
+              );
+            });
+          })()}
           <button className="col-span-2 py-6 border-2 border-dashed border-line rounded-xl text-ink-500 hover:bg-surface">
             <Icon name="plus" size={14} className="inline mr-1"/> Subir adjunto
           </button>
