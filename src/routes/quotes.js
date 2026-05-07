@@ -51,6 +51,8 @@ router.get('/', authMiddleware, async (req, res) => {
       isDraft: q.isDraft,
       emailSubject: q.emailSubject,
       emailFrom: q.emailFrom,
+      mailType: q.mailType || null,
+      followUpDate: q.followUpDate?.toISOString() || null,
       rejectReason: q.rejectReason,
     }));
 
@@ -119,6 +121,11 @@ router.patch('/:id/stage', authMiddleware, async (req, res) => {
     if (stage === 'rechazada' && rejectReason) {
       updateData.rejectReason = rejectReason;
       updateData.rejectNotes = rejectNotes || null;
+    }
+    if (stage === 'enviado') {
+      const d = new Date();
+      d.setDate(d.getDate() + 4);
+      updateData.followUpDate = d;
     }
 
     const updated = await prisma.quote.update({
@@ -205,6 +212,7 @@ router.get('/:id/detail', authMiddleware, async (req, res) => {
         notes: { include: { user: { select: { name: true } } }, orderBy: { createdAt: 'asc' } },
         attachments: { orderBy: { createdAt: 'desc' } },
         activities: { include: { user: { select: { name: true } } }, orderBy: { createdAt: 'desc' } },
+        items: { orderBy: { sortOrder: 'asc' } },
       },
     });
     if (!quote) return res.status(404).json({ error: 'No encontrada' });
@@ -262,6 +270,20 @@ router.delete('/:id', authMiddleware, async (req, res) => {
   }
 });
 
+// PATCH /api/quotes/:id/items/:itemId — update item accepted status
+router.patch('/:id/items/:itemId', authMiddleware, async (req, res) => {
+  try {
+    const { accepted } = req.body;
+    const item = await prisma.quoteItem.update({
+      where: { id: req.params.itemId },
+      data: { accepted: Boolean(accepted) },
+    });
+    res.json(item);
+  } catch (err) {
+    res.status(500).json({ error: 'Error al actualizar ítem' });
+  }
+});
+
 // PATCH /api/quotes/:id/client — assign client (and optionally seller)
 router.patch('/:id/client', authMiddleware, async (req, res) => {
   try {
@@ -293,6 +315,17 @@ router.patch('/:id/client', authMiddleware, async (req, res) => {
         quoteId: req.params.id,
       },
     });
+
+    // Retroalimentación: guardar emailFrom en ClientEmail para matcheo futuro
+    const quote = await prisma.quote.findUnique({ where: { id: req.params.id }, select: { emailFrom: true } });
+    if (quote?.emailFrom) {
+      const emailFrom = quote.emailFrom.toLowerCase().trim();
+      await prisma.clientEmail.upsert({
+        where: { email_clientId: { email: emailFrom, clientId } },
+        update: {},
+        create: { email: emailFrom, clientId, isPrimary: false },
+      }).catch(() => {}); // silenciar si ya existe
+    }
 
     res.json(updated);
   } catch (err) {

@@ -93,6 +93,10 @@ function QuoteDetail({ code, onClose, canReassign }) {
   const [assignClientId, setAssignClientId] = useState('');
   const [assignSellerId, setAssignSellerId] = useState('');
   const [assignSaving, setAssignSaving] = useState(false);
+  const [detailItems, setDetailItems] = useState([]);
+  const [detailAttachments, setDetailAttachments] = useState([]);
+  const [detailEmailBody, setDetailEmailBody] = useState('');
+  const [emailBodyOpen, setEmailBodyOpen] = useState(false);
 
   const handleAssignClient = async () => {
     if (!assignClientId) return;
@@ -144,6 +148,9 @@ function QuoteDetail({ code, onClose, canReassign }) {
       .then(detail => {
         setNotes(detail.notes || []);
         setHistory(detail.activities || []);
+        setDetailItems(detail.items || []);
+        setDetailAttachments(detail.attachments || []);
+        setDetailEmailBody(detail.emailBody || '');
         setNotesLoading(false);
       })
       .catch(() => setNotesLoading(false));
@@ -176,23 +183,24 @@ function QuoteDetail({ code, onClose, canReassign }) {
     }
   };
 
-  const items = [
-    { sku:'LME-25/4',    desc:'Cable subterráneo Synthenax 4x25 mm² — bobina 100m', qty:3, pu:980,  pt:2940 },
-    { sku:'TAB-PV400',   desc:'Tablero de transferencia automática PV-400 3F+N',    qty:1, pu:8900, pt:8900 },
-    { sku:'IEC-C16',     desc:'Interruptor termomagnético IEC C16 3P',               qty:12,pu:64,   pt:768 },
-    { sku:'MED-TRF-50',  desc:'Medidor trifásico clase 0.5S — 50/5A',                qty:4, pu:1320, pt:5280 },
-    { sku:'BR-CU16',     desc:'Barra de cobre 16mm² — m',                            qty:80,pu:11,   pt:880 },
-  ];
-  const subtotal = items.reduce((a,b)=>a+b.pt,0);
-  const iva = Math.round(subtotal*0.21);
-  const total = subtotal + iva;
+  const fmtBytes = (b) => {
+    if (!b) return '';
+    return b >= 1024*1024 ? `${(b/(1024*1024)).toFixed(1)} MB` : `${Math.round(b/1024)} KB`;
+  };
+  const extOf = (filename, mimeType) => {
+    if (filename && filename.includes('.')) return filename.split('.').pop().toLowerCase();
+    if (mimeType === 'application/pdf') return 'pdf';
+    if (mimeType?.includes('spreadsheet') || mimeType?.includes('excel')) return 'xlsx';
+    if (mimeType?.includes('wordprocessing') || mimeType?.includes('word')) return 'docx';
+    return 'file';
+  };
+  const extBg = (ext) => {
+    if (ext === 'pdf') return 'bg-red-500';
+    if (['xlsx','xls','csv'].includes(ext)) return 'bg-emerald-600';
+    if (['docx','doc'].includes(ext)) return 'bg-blue-500';
+    return 'bg-slate-500';
+  };
 
-  const attachments = [
-    { name:'solicitud-cliente-argencraft.pdf',  kind:'pdf',   size:'412 KB', by:'Luciano', at:'2026-04-20' },
-    { name:'planilla-tecnica-v2.xlsx',          kind:'xlsx',  size:'86 KB',  by:'Luciano', at:'2026-04-21' },
-    { name:'presupuesto-COT-2026-041.pdf',      kind:'pdf',   size:'221 KB', by:'Luciano', at:'2026-04-22' },
-    { name:'lista-precios-prov-abril.pdf',      kind:'pdf',   size:'1.1 MB', by:'Luciano', at:'2026-04-21' },
-  ];
   return (
     <>
     <Drawer onClose={onClose}
@@ -207,6 +215,11 @@ function QuoteDetail({ code, onClose, canReassign }) {
             </button>
           )}
           <Badge tone={stg?.tone || 'gray'} dot>{stg?.label || q.stage}</Badge>
+          {q.mailType && (
+            <Badge tone={q.mailType==='SOLICITUD'?'sky':q.mailType==='PRESUPUESTO'?'blue':'purple'}>
+              {q.mailType}
+            </Badge>
+          )}
           <button className="btn-ghost"><Icon name="download" size={13}/>PDF</button>
           {canReassign && (
             <div className="relative">
@@ -315,110 +328,204 @@ function QuoteDetail({ code, onClose, canReassign }) {
         </div>
       </div>
 
+      {q.followUpDate && new Date(q.followUpDate) < new Date() && q.stage === 'enviado' && (
+        <div className="mx-6 mb-3 px-4 py-2.5 bg-orange-50 border border-orange-200 rounded-xl flex items-center gap-3">
+          <Icon name="clock" size={15} className="text-orange-500 shrink-0"/>
+          <span className="text-[12.5px] text-orange-900">
+            <span className="font-semibold">Seguimiento pendiente</span>
+            {' · Alerta desde '}{fmtDate(q.followUpDate)}
+          </span>
+        </div>
+      )}
+
       {q.source === 'EMAIL' && q.emailSubject && (
-        <div className="mx-6 mb-4 px-4 py-3 bg-surface border border-line rounded-xl flex items-start gap-3">
-          <Icon name="mail" size={15} className="mt-0.5 text-ink-500 shrink-0"/>
-          <div className="min-w-0">
-            <div className="text-[11.5px] font-semibold text-ink-700 mb-0.5">Solicitud recibida por mail</div>
-            <div className="text-[12.5px] text-ink-900 truncate"><span className="text-ink-500">Asunto:</span> {q.emailSubject}</div>
-            <div className="text-[12px] text-ink-500 truncate"><span>De:</span> {q.emailFrom}</div>
+        <div className="mx-6 mb-4">
+          <div className="px-4 py-3 bg-surface border border-line rounded-xl flex items-start gap-3">
+            <Icon name="mail" size={15} className="mt-0.5 text-ink-500 shrink-0"/>
+            <div className="min-w-0 flex-1">
+              <div className="text-[11.5px] font-semibold text-ink-700 mb-0.5">Solicitud recibida por mail</div>
+              <div className="text-[12.5px] text-ink-900 truncate"><span className="text-ink-500">Asunto:</span> {q.emailSubject}</div>
+              <div className="text-[12px] text-ink-500 mt-0.5"><span>De:</span> {q.emailFrom}</div>
+              {detailEmailBody && (
+                <button onClick={() => setEmailBodyOpen(o => !o)}
+                  className="mt-2 text-[11.5px] text-brand hover:underline flex items-center gap-1">
+                  <Icon name={emailBodyOpen ? 'chevron-up' : 'chevron-down'} size={11}/>
+                  {emailBodyOpen ? 'Ocultar cuerpo del mail' : 'Ver cuerpo del mail'}
+                </button>
+              )}
+            </div>
           </div>
+          {emailBodyOpen && detailEmailBody && (
+            <div className="mt-1 p-3 bg-surface border border-line rounded-b-xl text-[11.5px] text-ink-700 whitespace-pre-wrap font-mono max-h-48 overflow-y-auto scroll-thin">
+              {detailEmailBody}
+            </div>
+          )}
         </div>
       )}
 
       <TabBar active={tab} onChange={setTab} tabs={[
         { id:'resumen',  label:'Resumen' },
-        { id:'items',    label:'Ítems', count: items.length },
-        { id:'adj',      label:'Adjuntos', count: attachments.length },
+        { id:'items',    label:'Ítems', count: detailItems.length > 0 ? detailItems.length : null },
+        { id:'adj',      label:'Adjuntos', count: detailAttachments.length > 0 ? detailAttachments.length : null },
         { id:'historial',label:'Historial' },
-        { id:'notas',    label:'Notas', count: notes.length },
+        { id:'notas',    label:'Notas', count: notes.length > 0 ? notes.length : null },
       ]}/>
 
       {tab === 'resumen' && (
-        <div className="p-6 grid grid-cols-3 gap-5">
-          <div className="col-span-2 bg-white border border-line rounded-xl p-5">
-            <div className="text-sm font-semibold mb-3 text-ink-900">Presupuesto</div>
-            <table className="w-full text-[12.5px]">
-              <thead><tr className="text-left text-ink-500">
-                <th className="font-semibold pb-2">SKU</th><th className="font-semibold pb-2">Descripción</th>
-                <th className="font-semibold pb-2 text-right">Cant.</th>
-                <th className="font-semibold pb-2 text-right">P. Unit.</th>
-                <th className="font-semibold pb-2 text-right">Total</th>
-              </tr></thead>
-              <tbody>
-                {items.map(it => (
-                  <tr key={it.sku} className="border-t border-line">
-                    <td className="py-2 mono text-ink-700">{it.sku}</td>
-                    <td className="py-2">{it.desc}</td>
-                    <td className="py-2 mono text-right">{it.qty}</td>
-                    <td className="py-2 mono text-right">{it.pu.toLocaleString('es-AR')}</td>
-                    <td className="py-2 mono text-right font-semibold">{it.pt.toLocaleString('es-AR')}</td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr className="border-t-2 border-ink-900"><td colSpan="4" className="text-right pt-3 text-ink-500">Subtotal</td><td className="text-right pt-3 mono font-semibold">{subtotal.toLocaleString('es-AR')}</td></tr>
-                <tr><td colSpan="4" className="text-right pt-1 text-ink-500">IVA 21%</td><td className="text-right pt-1 mono">{iva.toLocaleString('es-AR')}</td></tr>
-                <tr><td colSpan="4" className="text-right pt-1 font-bold">TOTAL (USD)</td><td className="text-right pt-1 mono font-bold text-base">{total.toLocaleString('es-AR')}</td></tr>
-              </tfoot>
-            </table>
-          </div>
-
-          <div className="space-y-4">
-            <div className="bg-white border border-line rounded-xl p-4">
-              <div className="text-[11px] uppercase tracking-wider text-ink-500 font-semibold mb-2">Próxima acción</div>
-              <div className="text-sm text-ink-900 leading-snug">Esperar confirmación del cliente — seguimiento pactado viernes 26.</div>
-              <div className="mt-3 flex gap-2">
-                <button className="btn-ghost text-xs"><Icon name="phone" size={12}/>Llamar</button>
-                <button className="btn-ghost text-xs"><Icon name="mail" size={12}/>Email</button>
+        <div className="p-6">
+          {detailItems.length > 0 ? (
+            <div className="grid grid-cols-3 gap-5">
+              <div className="col-span-2 bg-white border border-line rounded-xl p-5">
+                <div className="text-sm font-semibold mb-3 text-ink-900">Presupuesto Flexxus</div>
+                <table className="w-full text-[12.5px]">
+                  <thead><tr className="text-left text-ink-500">
+                    <th className="font-semibold pb-2">SKU</th>
+                    <th className="font-semibold pb-2">Descripción</th>
+                    <th className="font-semibold pb-2 text-right">Cant.</th>
+                    <th className="font-semibold pb-2 text-right">P. Unit.</th>
+                    <th className="font-semibold pb-2 text-right">Total</th>
+                  </tr></thead>
+                  <tbody>
+                    {detailItems.filter(i => i.accepted).map((it, idx) => (
+                      <tr key={it.id || idx} className="border-t border-line">
+                        <td className="py-2 mono text-ink-700">{it.sku || '—'}</td>
+                        <td className="py-2">{it.description}</td>
+                        <td className="py-2 mono text-right">{it.quantity}</td>
+                        <td className="py-2 mono text-right">{it.unitPrice != null ? it.unitPrice.toLocaleString('es-AR') : '—'}</td>
+                        <td className="py-2 mono text-right font-semibold">{it.total != null ? it.total.toLocaleString('es-AR') : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  {q.monto != null && (
+                    <tfoot>
+                      <tr className="border-t-2 border-ink-900">
+                        <td colSpan="4" className="text-right pt-3 font-bold">TOTAL</td>
+                        <td className="text-right pt-3 mono font-bold text-base">{q.monto.toLocaleString('es-AR')}</td>
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+                {detailItems.filter(i => !i.accepted).length > 0 && (
+                  <div className="mt-4 pt-4 border-t border-line">
+                    <div className="text-[11px] uppercase tracking-wider font-semibold text-ink-500 mb-2">No Cotiza</div>
+                    <div className="space-y-1">
+                      {detailItems.filter(i => !i.accepted).map((it, idx) => (
+                        <div key={it.id || idx} className="flex items-center gap-3 text-[12px] text-ink-400 line-through">
+                          <span className="mono">{it.sku || '—'}</span>
+                          <span>{it.description}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="space-y-4">
+                <div className="bg-white border border-line rounded-xl p-4">
+                  <div className="text-[11px] uppercase tracking-wider text-ink-500 font-semibold mb-2">Resumen</div>
+                  <ul className="text-[12.5px] space-y-1.5">
+                    <li className="flex justify-between"><span className="text-ink-500">Cliente</span><span className="font-medium">{cli?.name || '—'}</span></li>
+                    {q.flexxus && <li className="flex justify-between"><span className="text-ink-500">NP Flexxus</span><span className="mono">{q.flexxus}</span></li>}
+                    {q.monto != null && <li className="flex justify-between"><span className="text-ink-500">Total</span><span className="mono font-semibold">{fmtMoney(q.monto)}</span></li>}
+                    <li className="flex justify-between"><span className="text-ink-500">Ítems</span><span>{detailItems.filter(i=>i.accepted).length} cotizados{detailItems.filter(i=>!i.accepted).length > 0 ? `, ${detailItems.filter(i=>!i.accepted).length} NC` : ''}</span></li>
+                  </ul>
+                </div>
               </div>
             </div>
-            <div className="bg-white border border-line rounded-xl p-4">
-              <div className="text-[11px] uppercase tracking-wider text-ink-500 font-semibold mb-2">Plazos</div>
-              <ul className="text-[12.5px] space-y-1.5">
-                <li className="flex justify-between"><span className="text-ink-500">Validez oferta</span><span className="mono">15 días</span></li>
-                <li className="flex justify-between"><span className="text-ink-500">Forma de pago</span><span>30 días FF</span></li>
-                <li className="flex justify-between"><span className="text-ink-500">Entrega</span><span>15-20 días</span></li>
-                <li className="flex justify-between"><span className="text-ink-500">Incoterm</span><span>DDP AMBA</span></li>
-              </ul>
+          ) : (
+            <div className="grid grid-cols-3 gap-5">
+              <div className="col-span-2 bg-white border border-line rounded-xl p-5">
+                <div className="text-sm font-semibold mb-2 text-ink-900">Presupuesto</div>
+                <div className="text-[13px] text-ink-400 py-6 text-center">Sin ítems de presupuesto todavía</div>
+              </div>
+              <div className="space-y-4">
+                <div className="bg-white border border-line rounded-xl p-4">
+                  <div className="text-[11px] uppercase tracking-wider text-ink-500 font-semibold mb-2">Resumen</div>
+                  <ul className="text-[12.5px] space-y-1.5">
+                    <li className="flex justify-between"><span className="text-ink-500">Cliente</span><span className="font-medium">{cli?.name || '—'}</span></li>
+                    <li className="flex justify-between"><span className="text-ink-500">Monto</span><span className="mono">{q.monto != null ? fmtMoney(q.monto) : '—'}</span></li>
+                    <li className="flex justify-between"><span className="text-ink-500">Ingreso</span><span className="mono">{fmtDate(q.ingreso)}</span></li>
+                  </ul>
+                </div>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       )}
 
       {tab === 'items' && (
         <div className="p-6">
-          <table className="tbl w-full bg-white border border-line rounded-xl overflow-hidden">
-            <thead><tr>
-              <th>SKU</th><th>Descripción</th><th className="!text-right">Cant.</th><th className="!text-right">P. Unit.</th><th className="!text-right">Total</th>
-            </tr></thead>
-            <tbody>
-              {items.map(it => (
-                <tr key={it.sku}>
-                  <td className="mono">{it.sku}</td><td>{it.desc}</td>
-                  <td className="mono text-right">{it.qty}</td>
-                  <td className="mono text-right">{it.pu.toLocaleString('es-AR')}</td>
-                  <td className="mono text-right font-semibold">{it.pt.toLocaleString('es-AR')}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          {detailItems.length === 0 ? (
+            <div className="text-[13px] text-ink-400 py-8 text-center">Sin ítems registrados</div>
+          ) : (
+            <>
+              {q.mailType === 'OC' && (
+                <div className="text-[12px] text-ink-500 mb-3">Marcá los ítems confirmados por el cliente en esta OC:</div>
+              )}
+              <table className="tbl w-full bg-white border border-line rounded-xl overflow-hidden">
+                <thead><tr>
+                  {q.mailType === 'OC' && <th className="w-10"></th>}
+                  <th>SKU</th><th>Descripción</th>
+                  <th className="!text-right">Cant.</th>
+                  <th className="!text-right">P. Unit.</th>
+                  <th className="!text-right">Total</th>
+                </tr></thead>
+                <tbody>
+                  {detailItems.map((it, idx) => (
+                    <tr key={it.id || idx} className={cx(!it.accepted && 'opacity-40')}>
+                      {q.mailType === 'OC' && (
+                        <td>
+                          <input type="checkbox" checked={it.accepted} className="cursor-pointer"
+                            onChange={async () => {
+                              const newVal = !it.accepted;
+                              setDetailItems(prev => prev.map(i => i.id === it.id ? {...i, accepted: newVal} : i));
+                              try {
+                                await CrmApi.updateQuoteItem(q.id, it.id, { accepted: newVal });
+                              } catch {
+                                setDetailItems(prev => prev.map(i => i.id === it.id ? {...i, accepted: !newVal} : i));
+                              }
+                            }}
+                          />
+                        </td>
+                      )}
+                      <td className="mono">{it.sku || '—'}</td>
+                      <td>{it.description}</td>
+                      <td className="mono text-right">{it.quantity}</td>
+                      <td className="mono text-right">{it.unitPrice != null ? it.unitPrice.toLocaleString('es-AR') : '—'}</td>
+                      <td className="mono text-right font-semibold">{it.total != null ? it.total.toLocaleString('es-AR') : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
         </div>
       )}
 
       {tab === 'adj' && (
         <div className="p-6 grid grid-cols-2 gap-3">
-          {attachments.map(a => (
-            <div key={a.name} className="bg-white border border-line rounded-xl p-3 flex items-center gap-3">
-              <div className={cx('w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold text-[11px]',
-                a.kind==='pdf' ? 'bg-red-500' : 'bg-emerald-600')}>{a.kind.toUpperCase()}</div>
-              <div className="flex-1 min-w-0">
-                <div className="text-[13px] font-medium text-ink-900 truncate">{a.name}</div>
-                <div className="text-[11px] text-ink-500">{a.size} · subido por {a.by} · {fmtDate(a.at)}</div>
+          {detailAttachments.length === 0 && (
+            <div className="col-span-2 text-[13px] text-ink-400 py-6 text-center">Sin adjuntos</div>
+          )}
+          {detailAttachments.map(a => {
+            const ext = extOf(a.filename, a.mimeType);
+            return (
+              <div key={a.id} className="bg-white border border-line rounded-xl p-3 flex items-center gap-3">
+                <div className={cx('w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold text-[11px] shrink-0', extBg(ext))}>
+                  {ext.toUpperCase().slice(0,4)}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[13px] font-medium text-ink-900 truncate">{a.filename}</div>
+                  <div className="text-[11px] text-ink-500">
+                    {fmtBytes(a.size)}{a.size ? ' · ' : ''}{fmtDate(a.createdAt)}
+                  </div>
+                </div>
+                <a href={`/uploads/attachments/${a.filename}`} target="_blank" rel="noopener noreferrer"
+                  className="w-8 h-8 rounded-lg hover:bg-surface text-ink-500 flex items-center justify-center">
+                  <Icon name="download" size={14}/>
+                </a>
               </div>
-              <button className="w-8 h-8 rounded-lg hover:bg-surface text-ink-500"><Icon name="download" size={14}/></button>
-            </div>
-          ))}
+            );
+          })}
           <button className="col-span-2 py-6 border-2 border-dashed border-line rounded-xl text-ink-500 hover:bg-surface">
             <Icon name="plus" size={14} className="inline mr-1"/> Subir adjunto
           </button>

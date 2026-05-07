@@ -61,6 +61,9 @@ const CrmApi = {
   addQuoteNote: (id, text) => apiFetch(`/quotes/${id}/notes`, {
     method: 'POST', body: JSON.stringify({ text })
   }),
+  updateQuoteItem: (quoteId, itemId, data) => apiFetch(`/quotes/${quoteId}/items/${itemId}`, {
+    method: 'PATCH', body: JSON.stringify(data)
+  }),
 
   // Orders
   getOrders: () => apiFetch('/orders'),

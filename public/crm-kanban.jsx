@@ -33,6 +33,9 @@ function QuoteCard({ q, onOpen, compact }) {
       <div className="flex items-start justify-between gap-2">
         <div className="mono text-[11px] font-semibold text-navy-900">{q.code}</div>
         <div className="flex items-center gap-1">
+          {q.mailType === 'SOLICITUD'   && <Badge tone="sky">SOL</Badge>}
+          {q.mailType === 'PRESUPUESTO' && <Badge tone="blue">PRES</Badge>}
+          {q.mailType === 'OC'          && <Badge tone="purple">OC</Badge>}
           {q.flexxus && <Badge tone="slate">NP</Badge>}
           {overdue && <Badge tone="red" dot>{q.dias}d</Badge>}
         </div>

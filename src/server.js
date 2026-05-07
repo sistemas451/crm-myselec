@@ -13,6 +13,9 @@ app.use(express.json({ limit: '10mb' }));
 // Serve frontend static files
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
+// Serve uploaded attachments
+app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
+
 // API Routes
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/quotes', require('./routes/quotes'));

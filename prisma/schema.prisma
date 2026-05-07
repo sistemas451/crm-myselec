@@ -53,6 +53,20 @@ model Client {
 
   quotes         Quote[]
   orders         Order[]
+  emails         ClientEmail[]
+}
+
+// ─── Emails de clientes (1:N) — para matcheo automático por mail ───
+model ClientEmail {
+  id        String   @id @default(uuid())
+  email     String
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  isPrimary Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@unique([email, clientId])
+  @@index([email])
 }
 
 // ─── Definición de Etapas (configurables) ───
@@ -94,6 +108,9 @@ model Quote {
   emailSubject   String?                    // Asunto del mail original
   emailMessageId String?                    // ID de Gmail (evitar duplicados)
   emailFrom      String?                    // Remitente del mail
+  emailBody      String?   @db.Text         // Cuerpo del mail
+  mailType       String?                    // SOLICITUD | PRESUPUESTO | OC
+  followUpDate   DateTime?                  // Alerta a los 4 días del paso 2
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
@@ -101,6 +118,25 @@ model Quote {
   attachments    Attachment[] @relation("QuoteAttachments")
   activities     Activity[] @relation("QuoteActivities")
   orders         Order[]   @relation("OrderFromQuote")
+  items          QuoteItem[]
+}
+
+// ─── Ítems / productos del presupuesto Flexxus ───
+model QuoteItem {
+  id          String   @id @default(uuid())
+  quoteId     String
+  quote       Quote    @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  sku         String?
+  description String
+  quantity    Float    @default(1)
+  unit        String?
+  unitPrice   Float?
+  total       Float?
+  accepted    Boolean  @default(true)   // false para ítems NC (No Cotiza)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  @@index([quoteId])
 }
 
 // ─── Órdenes de Compra (Fase 2) ───
