@@ -123,63 +123,24 @@ async function syncMails() {
     });
 
     imap.once('ready', () => {
-      imap.openBox('INBOX', false, (err) => {
+      // [Gmail]/All Mail incluye todos los mails independientemente del label/inbox
+      // Así capturamos emails filtrados directamente a un label sin pasar por Inbox
+      const GMAIL_ALL = process.env.MAIL_ALL_FOLDER || '[Gmail]/All Mail';
+      imap.openBox(GMAIL_ALL, false, (err) => {
         if (err) {
-          results.errors.push(`Error opening INBOX: ${err.message}`);
-          imap.end();
-          return resolve(results);
+          // Fallback a INBOX si el folder no existe (cuentas no-Gmail)
+          console.warn(`⚠️  No se pudo abrir ${GMAIL_ALL}, usando INBOX: ${err.message}`);
+          imap.openBox('INBOX', false, (err2) => {
+            if (err2) {
+              results.errors.push(`Error opening INBOX: ${err2.message}`);
+              imap.end();
+              return resolve(results);
+            }
+            runSearch(imap, results, resolve);
+          });
+          return;
         }
-
-        imap.search(['UNSEEN'], (err, uids) => {
-          if (err) {
-            results.errors.push(`Error searching: ${err.message}`);
-            imap.end();
-            return resolve(results);
-          }
-
-          if (!uids || uids.length === 0) {
-            console.log('📧 No new emails found');
-            imap.end();
-            return resolve(results);
-          }
-
-          console.log(`📧 Found ${uids.length} new email(s)`);
-
-          const fetch = imap.fetch(uids, { bodies: '', markSeen: false });
-          const mailPromises = [];
-
-          fetch.on('message', (msg) => {
-            let buffer = '';
-            const mailData = { uid: null };
-
-            msg.on('attributes', (attrs) => { mailData.uid = attrs.uid; });
-            msg.on('body', (stream) => {
-              stream.on('data', (chunk) => { buffer += chunk.toString('utf8'); });
-              stream.on('end', () => { mailData.raw = buffer; });
-            });
-            msg.once('end', () => {
-              mailPromises.push(processEmail(mailData, imap));
-            });
-          });
-
-          fetch.once('error', (err) => {
-            results.errors.push(`Fetch error: ${err.message}`);
-          });
-
-          fetch.once('end', async () => {
-            const processed = await Promise.allSettled(mailPromises);
-            processed.forEach(p => {
-              if (p.status === 'fulfilled' && p.value) {
-                results.synced++;
-                results.mails.push(p.value);
-              } else if (p.status === 'rejected') {
-                results.errors.push(p.reason?.message || 'Unknown error');
-              }
-            });
-            imap.end();
-            resolve(results);
-          });
-        });
+        runSearch(imap, results, resolve);
       });
     });
 
@@ -193,6 +154,59 @@ async function syncMails() {
     });
 
     imap.connect();
+  });
+}
+
+function runSearch(imap, results, resolve) {
+  imap.search(['UNSEEN'], (err, uids) => {
+    if (err) {
+      results.errors.push(`Error searching: ${err.message}`);
+      imap.end();
+      return resolve(results);
+    }
+
+    if (!uids || uids.length === 0) {
+      console.log('📧 No new emails found');
+      imap.end();
+      return resolve(results);
+    }
+
+    console.log(`📧 Found ${uids.length} new email(s)`);
+
+    const fetch = imap.fetch(uids, { bodies: '', markSeen: false });
+    const mailPromises = [];
+
+    fetch.on('message', (msg) => {
+      let buffer = '';
+      const mailData = { uid: null };
+
+      msg.on('attributes', (attrs) => { mailData.uid = attrs.uid; });
+      msg.on('body', (stream) => {
+        stream.on('data', (chunk) => { buffer += chunk.toString('utf8'); });
+        stream.on('end', () => { mailData.raw = buffer; });
+      });
+      msg.once('end', () => {
+        mailPromises.push(processEmail(mailData, imap));
+      });
+    });
+
+    fetch.once('error', (err) => {
+      results.errors.push(`Fetch error: ${err.message}`);
+    });
+
+    fetch.once('end', async () => {
+      const processed = await Promise.allSettled(mailPromises);
+      processed.forEach(p => {
+        if (p.status === 'fulfilled' && p.value) {
+          results.synced++;
+          results.mails.push(p.value);
+        } else if (p.status === 'rejected') {
+          results.errors.push(p.reason?.message || 'Unknown error');
+        }
+      });
+      imap.end();
+      resolve(results);
+    });
   });
 }
 
