@@ -12,7 +12,16 @@ if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
 
-// ─── Regex: extrae email del remitente real en reenvíos ──────────────────────
+// ─── Filtro CRM: prefijos de asunto y etiqueta ───────────────────────────────
+const CRM_SUBJECT_PREFIXES = ['[crm]', 'crm:', 'crm -', '#crm', 'crm '];
+const CRM_LABEL = process.env.MAIL_CRM_LABEL || 'crm';
+
+function hasCrmSubject(subject) {
+  const s = (subject || '').toLowerCase().trim();
+  return CRM_SUBJECT_PREFIXES.some(p => s.startsWith(p));
+}
+
+// ─── Regex: extrae email del remitente real en reenvíos ───────────────────────
 // Maneja Outlook ES ("De:"), Gmail EN ("From:"), con o sin ángulos, al inicio de línea
 const FORWARD_FROM_RE = /(?:^|\r?\n)[ \t]*(?:De|From):[ \t]*(?:[^<\r\n]*?<[ \t]*)?([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})[ \t]*>?/im;
 
@@ -127,8 +136,44 @@ async function nextCode(model, prefix) {
 }
 
 /**
- * Conecta a Gmail vía IMAP, lee mails no leídos,
- * matchea remitente con clientes y crea cotizaciones.
+ * Abre una carpeta IMAP y devuelve los emails UNSEEN como array de {uid, raw, requiresPrefixCheck}.
+ * requiresPrefixCheck=false → vino del label CRM (no necesita verificar prefijo)
+ * requiresPrefixCheck=true  → vino de All Mail por subject (hay que verificar prefijo exacto)
+ */
+function fetchRawFromFolder(imap, folder, searchCriteria, requiresPrefixCheck) {
+  return new Promise((resolve) => {
+    imap.openBox(folder, false, (err) => {
+      if (err) {
+        console.warn(`⚠️  Carpeta "${folder}" no disponible: ${err.message}`);
+        return resolve([]);
+      }
+      imap.search(searchCriteria, (err, uids) => {
+        if (err || !uids?.length) return resolve([]);
+        console.log(`📬 ${uids.length} email(s) en "${folder}"`);
+        const mails = [];
+        const fetch = imap.fetch(uids, { bodies: '', markSeen: false });
+        fetch.on('message', (msg) => {
+          const chunks = [];
+          const mailData = { uid: null, requiresPrefixCheck };
+          msg.on('attributes', (attrs) => { mailData.uid = attrs.uid; });
+          msg.on('body', (stream) => {
+            stream.on('data', (c) => chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)));
+            stream.on('end', () => { mailData.raw = Buffer.concat(chunks); });
+          });
+          msg.once('end', () => mails.push(mailData));
+        });
+        fetch.once('end', () => resolve(mails));
+        fetch.once('error', () => resolve(mails));
+      });
+    });
+  });
+}
+
+/**
+ * Conecta a Gmail vía IMAP y lee mails CRM:
+ *  - Fuente 1: etiqueta "crm" (todos los UNSEEN)
+ *  - Fuente 2: All Mail con prefijo CRM en el asunto
+ * Los duplicados se manejan por messageId en processEmail.
  */
 async function syncMails() {
   if (!process.env.MAIL_USER || !process.env.MAIL_PASSWORD) {
@@ -148,26 +193,41 @@ async function syncMails() {
       tlsOptions: { rejectUnauthorized: false },
     });
 
-    imap.once('ready', () => {
-      // [Gmail]/All Mail incluye todos los mails independientemente del label/inbox
-      // Así capturamos emails filtrados directamente a un label sin pasar por Inbox
-      const GMAIL_ALL = process.env.MAIL_ALL_FOLDER || '[Gmail]/All Mail';
-      imap.openBox(GMAIL_ALL, false, (err) => {
-        if (err) {
-          // Fallback a INBOX si el folder no existe (cuentas no-Gmail)
-          console.warn(`⚠️  No se pudo abrir ${GMAIL_ALL}, usando INBOX: ${err.message}`);
-          imap.openBox('INBOX', false, (err2) => {
-            if (err2) {
-              results.errors.push(`Error opening INBOX: ${err2.message}`);
-              imap.end();
-              return resolve(results);
-            }
-            runSearch(imap, results, resolve);
-          });
-          return;
+    imap.once('ready', async () => {
+      try {
+        const GMAIL_ALL = process.env.MAIL_ALL_FOLDER || '[Gmail]/All Mail';
+
+        // Fuente 1: etiqueta CRM → no necesita verificar prefijo
+        const labelMails = await fetchRawFromFolder(imap, CRM_LABEL, ['UNSEEN'], false);
+
+        // Fuente 2: All Mail con "crm" en asunto (pre-filtro amplio, verificamos prefijo exacto en processEmail)
+        const subjectMails = await fetchRawFromFolder(imap, GMAIL_ALL, ['UNSEEN', ['SUBJECT', 'crm']], true);
+
+        // Si All Mail falla, intentar INBOX
+        const allMails = [...labelMails, ...subjectMails];
+
+        if (allMails.length === 0) {
+          console.log('📧 No hay emails CRM nuevos');
+          imap.end();
+          return resolve(results);
         }
-        runSearch(imap, results, resolve);
-      });
+
+        console.log(`📧 Total a procesar: ${allMails.length} (label: ${labelMails.length}, asunto: ${subjectMails.length})`);
+
+        const processed = await Promise.allSettled(allMails.map(m => processEmail(m, imap)));
+        processed.forEach(p => {
+          if (p.status === 'fulfilled' && p.value) {
+            results.synced++;
+            results.mails.push(p.value);
+          } else if (p.status === 'rejected') {
+            results.errors.push(p.reason?.message || 'Unknown error');
+          }
+        });
+      } catch (err) {
+        results.errors.push(`Sync error: ${err.message}`);
+      }
+      imap.end();
+      resolve(results);
     });
 
     imap.once('error', (err) => {
@@ -175,67 +235,9 @@ async function syncMails() {
       resolve(results);
     });
 
-    imap.once('end', () => {
-      console.log('📧 IMAP connection closed');
-    });
+    imap.once('end', () => console.log('📧 IMAP connection closed'));
 
     imap.connect();
-  });
-}
-
-function runSearch(imap, results, resolve) {
-  imap.search(['UNSEEN'], (err, uids) => {
-    if (err) {
-      results.errors.push(`Error searching: ${err.message}`);
-      imap.end();
-      return resolve(results);
-    }
-
-    if (!uids || uids.length === 0) {
-      console.log('📧 No new emails found');
-      imap.end();
-      return resolve(results);
-    }
-
-    console.log(`📧 Found ${uids.length} new email(s)`);
-
-    const fetch = imap.fetch(uids, { bodies: '', markSeen: false });
-    const mailPromises = [];
-
-    fetch.on('message', (msg) => {
-      // Acumular como Buffers para preservar encoding (base64, UTF-8, Latin-1, etc.)
-      const chunks = [];
-      const mailData = { uid: null };
-
-      msg.on('attributes', (attrs) => { mailData.uid = attrs.uid; });
-      msg.on('body', (stream) => {
-        stream.on('data', (chunk) => {
-          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-        });
-        stream.on('end', () => { mailData.raw = Buffer.concat(chunks); });
-      });
-      msg.once('end', () => {
-        mailPromises.push(processEmail(mailData, imap));
-      });
-    });
-
-    fetch.once('error', (err) => {
-      results.errors.push(`Fetch error: ${err.message}`);
-    });
-
-    fetch.once('end', async () => {
-      const processed = await Promise.allSettled(mailPromises);
-      processed.forEach(p => {
-        if (p.status === 'fulfilled' && p.value) {
-          results.synced++;
-          results.mails.push(p.value);
-        } else if (p.status === 'rejected') {
-          results.errors.push(p.reason?.message || 'Unknown error');
-        }
-      });
-      imap.end();
-      resolve(results);
-    });
   });
 }
 
@@ -245,6 +247,12 @@ async function processEmail(mailData, imap) {
 
     const directFrom  = parsed.from?.value?.[0]?.address || '';
     const subject     = parsed.subject || '(sin asunto)';
+
+    // ── Filtro CRM: si vino de All Mail por subject, verificar prefijo exacto ──
+    if (mailData.requiresPrefixCheck && !hasCrmSubject(subject)) {
+      console.log(`   ⏭️  Ignorado (no tiene prefijo CRM): "${subject}"`);
+      return null; // No marcar como leído
+    }
     const date        = parsed.date || new Date();
     const messageId   = parsed.messageId || `uid-${mailData.uid}`;
 
