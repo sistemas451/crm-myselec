@@ -331,9 +331,14 @@ async function processEmail(mailData, imap) {
     const extractedSender = embeddedFrom || forwardMatch?.[1]?.toLowerCase()?.trim() || '';
 
     let originalSender;
-    if (extractedSender) {
+    if (!isOwnForward) {
+      // Mail directo del cliente — el From: ya es el remitente real, sin parsear nada
+      originalSender = directFrom.toLowerCase();
+      console.log(`   📨 Mail directo de: ${originalSender}`);
+    } else if (extractedSender) {
+      // Reenvío de cuenta propia — remitente extraído del cuerpo
       originalSender = extractedSender;
-    } else if (isOwnForward && replyToAddr) {
+    } else if (replyToAddr) {
       originalSender = replyToAddr;
       console.log(`   📨 Remitente via Reply-To: ${replyToAddr}`);
     } else {
