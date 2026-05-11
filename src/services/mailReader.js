@@ -16,14 +16,25 @@ if (!fs.existsSync(UPLOADS_DIR)) {
 // Maneja Outlook ES ("De:"), Gmail EN ("From:"), con o sin ángulos, al inicio de línea
 const FORWARD_FROM_RE = /(?:^|\r?\n)[ \t]*(?:De|From):[ \t]*(?:[^<\r\n]*?<[ \t]*)?([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})[ \t]*>?/im;
 
-// Nuestras propias direcciones de reenvío — si directFrom es una de estas,
-// siempre buscamos el remitente real en el cuerpo del mensaje.
+// Nuestras propias direcciones de reenvío — si directFrom es una de estas
+// O viene del dominio @myselec.com.ar → ignorar como cliente externo.
 const OWN_ADDRESSES = new Set([
   'ventas@myselec.com.ar',
   'iamyselec@gmail.com',
   'info@myselec.com.ar',
   'compras@myselec.com.ar',
+  'logistica@myselec.com.ar',
+  'jorge@myselec.com.ar',
 ]);
+const OWN_DOMAINS = ['myselec.com.ar'];
+
+function isOwnAddress(email) {
+  if (!email) return false;
+  const e = email.toLowerCase().trim();
+  if (OWN_ADDRESSES.has(e)) return true;
+  const domain = e.split('@')[1] || '';
+  return OWN_DOMAINS.some(d => domain === d);
+}
 
 // ─── Strip HTML conservando texto legible ─────────────────────────────────────
 function stripHtml(html) {
@@ -324,7 +335,7 @@ async function processEmail(mailData, imap) {
 
     // ── Extraer remitente real (puede ser un reenvío) ─────────────────────
     // Prioridad: (1) embedded message From, (2) regex en cuerpo, (3) Reply-To, (4) directFrom
-    const isOwnForward = OWN_ADDRESSES.has(directFrom.toLowerCase());
+    const isOwnForward = isOwnAddress(directFrom);
     const replyToAddr  = parsed.replyTo?.value?.[0]?.address?.toLowerCase()?.trim() || '';
 
     const forwardMatch = bodyText.match(FORWARD_FROM_RE) || subject.match(FORWARD_FROM_RE);
@@ -774,7 +785,7 @@ async function resyncQuoteEmail(quoteId) {
               const replyToAddr = parsed.replyTo?.value?.[0]?.address?.toLowerCase()?.trim() || '';
               const forwardMatch = bodyText.match(FORWARD_FROM_RE);
               const extractedSender = embeddedFrom || forwardMatch?.[1]?.toLowerCase()?.trim() || '';
-              const isOwnForward = OWN_ADDRESSES.has(directFrom.toLowerCase());
+              const isOwnForward = isOwnAddress(directFrom);
 
               let newFrom;
               if (extractedSender) newFrom = extractedSender;
