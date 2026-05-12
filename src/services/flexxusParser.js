@@ -97,7 +97,7 @@ function parseArFloat(s) {
  */
 async function parseFlexxusPDF(buffer) {
   const result = {
-    npCode:     null,   // "NP-17680"
+    npCode:     null,   // "PR-17680" (PR = Presupuesto)
     npRaw:      null,   // "17680"
     cuit:       null,   // "30-68621830-5"
     clientName: null,
@@ -129,12 +129,12 @@ async function parseFlexxusPDF(buffer) {
       result.clientName = lines[cuitIdx + 2]; // skip "-"
     }
 
-    // ── NP ────────────────────────────────────────────────────────────────────
+    // ── Código de Presupuesto (PR-XXXXX) ─────────────────────────────────────
     for (const line of lines) {
       const m = line.match(NP_RE);
       if (m) {
         result.npRaw  = m[1];
-        result.npCode = `NP-${m[1]}`;
+        result.npCode = `PR-${m[1]}`;   // PR = Presupuesto
         break;
       }
     }
@@ -225,7 +225,7 @@ function parseNotaPedidoItems(lines) {
  */
 async function parseNotaPedidoPDF(buffer) {
   const result = {
-    npCode:        null,  // "NP-20728" — número de la Nota de Pedido
+    npCode:        null,  // "NP-20728" — número de la Nota de Pedido (NP = Nota de Pedido)
     npRaw:         null,  // "20728"
     cuit:          null,  // CUIT del cliente
     clientName:    null,  // Razón social del cliente
@@ -284,12 +284,13 @@ async function parseNotaPedidoPDF(buffer) {
         const l = lines[j];
         if (!l || SKIP_LABELS.has(l) || l.startsWith('U$S') || /^\d{4}$/.test(l)) continue;
         result.presupuestoRef = l; // texto raw
-        // Intentar extraer número de NP: "NP-17680", "NP 17680", "17680", etc.
-        const npMatch = l.match(/NP[-\s]?(\d+)/i)
+        // Intentar extraer referencia al presupuesto: "PR-17680", "NP-17680", número solo, etc.
+        const prMatch = l.match(/PR[-\s]?(\d+)/i)
+          || l.match(/NP[-\s]?(\d+)/i)
           || l.match(/presupuesto\s+(\d+)/i)
           || l.match(/\b(\d{4,6})\b/);
-        if (npMatch) {
-          result.presupuestoNP = `NP-${npMatch[1]}`;
+        if (prMatch) {
+          result.presupuestoNP = `PR-${prMatch[1]}`;  // siempre formateamos como PR-
         }
         break;
       }
