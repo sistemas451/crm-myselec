@@ -175,26 +175,24 @@ function fetchRawFromFolder(imap, folder, searchCriteria, requiresPrefixCheck, i
 }
 
 /**
- * Conecta a Gmail vía IMAP y lee mails CRM:
- *  - Fuente 1: etiqueta "crm" (todos los UNSEEN)
- *  - Fuente 2: All Mail con prefijo CRM en el asunto
- * Los duplicados se manejan por messageId en processEmail.
+ * Sincroniza una cuenta de mail individual vía IMAP.
+ * Lee tres fuentes:
+ *  1. Etiqueta "crm"   → SOLICITUDES / PRESUPUESTOS entrantes
+ *  2. All Mail "crm"   → ídem por prefijo de asunto
+ *  3. Enviados         → PRESUPUESTOS con PDF Flexxus enviados por el vendedor
  */
-async function syncMails() {
-  if (!process.env.MAIL_USER || !process.env.MAIL_PASSWORD) {
-    console.log('⚠️  Mail credentials not configured, skipping sync');
-    return { synced: 0, errors: [] };
-  }
+async function syncAccount(account) {
+  const tag = account.user; // para logs
 
   return new Promise((resolve) => {
     const results = { synced: 0, errors: [], mails: [] };
 
     const imap = new Imap({
-      user: process.env.MAIL_USER,
-      password: process.env.MAIL_PASSWORD,
-      host: process.env.MAIL_HOST || 'imap.gmail.com',
-      port: parseInt(process.env.MAIL_PORT || '993'),
-      tls: true,
+      user:       account.user,
+      password:   account.password,
+      host:       process.env.MAIL_HOST || 'imap.gmail.com',
+      port:       parseInt(process.env.MAIL_PORT || '993'),
+      tls:        true,
       tlsOptions: { rejectUnauthorized: false },
     });
 
@@ -205,11 +203,10 @@ async function syncMails() {
         // Fuente 1: etiqueta CRM → no necesita verificar prefijo
         const labelMails = await fetchRawFromFolder(imap, CRM_LABEL, ['UNSEEN'], false);
 
-        // Fuente 2: All Mail con "crm" en asunto (pre-filtro amplio, verificamos prefijo exacto en processEmail)
+        // Fuente 2: All Mail con "crm" en asunto (verificamos prefijo exacto en processEmail)
         const subjectMails = await fetchRawFromFolder(imap, GMAIL_ALL, ['UNSEEN', ['SUBJECT', 'crm']], true);
 
-        // Fuente 3: Enviados — últimos N días (mails ya vistos, usamos dedup por messageId)
-        // Solo nos interesan los que tengan PDF Flexxus → se filtra en processEmail
+        // Fuente 3: Enviados — últimos N días (dedup por messageId, filtramos Flexxus en processEmail)
         const sinceDate = new Date();
         sinceDate.setDate(sinceDate.getDate() - SENT_LOOKBACK_DAYS);
         const sentMails = await fetchRawFromFolder(imap, GMAIL_SENT, ['SINCE', sinceDate], false, true);
@@ -217,12 +214,12 @@ async function syncMails() {
         const allMails = [...labelMails, ...subjectMails, ...sentMails];
 
         if (allMails.length === 0) {
-          console.log('📧 No hay emails CRM nuevos');
+          console.log(`📧 [${tag}] Sin emails nuevos`);
           imap.end();
           return resolve(results);
         }
 
-        console.log(`📧 Total a procesar: ${allMails.length} (label: ${labelMails.length}, asunto: ${subjectMails.length}, enviados: ${sentMails.length})`);
+        console.log(`📧 [${tag}] Total: ${allMails.length} (label: ${labelMails.length}, asunto: ${subjectMails.length}, enviados: ${sentMails.length})`);
 
         const processed = await Promise.allSettled(allMails.map(m => processEmail(m, imap)));
         processed.forEach(p => {
@@ -234,21 +231,74 @@ async function syncMails() {
           }
         });
       } catch (err) {
-        results.errors.push(`Sync error: ${err.message}`);
+        results.errors.push(`[${tag}] Sync error: ${err.message}`);
       }
       imap.end();
       resolve(results);
     });
 
     imap.once('error', (err) => {
-      results.errors.push(`IMAP error: ${err.message}`);
+      results.errors.push(`[${tag}] IMAP error: ${err.message}`);
       resolve(results);
     });
 
-    imap.once('end', () => console.log('📧 IMAP connection closed'));
+    imap.once('end', () => console.log(`📧 [${tag}] Conexión IMAP cerrada`));
 
     imap.connect();
   });
+}
+
+/**
+ * Punto de entrada principal: sincroniza todas las cuentas configuradas.
+ *
+ * Configuración en variables de entorno (Railway):
+ *   MAIL_ACCOUNTS = JSON array con todas las cuentas:
+ *     [{"user":"v1@myselec.com.ar","password":"app-pass-1"},
+ *      {"user":"v2@myselec.com.ar","password":"app-pass-2"}, ...]
+ *
+ *   Si MAIL_ACCOUNTS no está definido, usa MAIL_USER + MAIL_PASSWORD como cuenta única.
+ */
+async function syncMails() {
+  // Construir lista de cuentas
+  let accounts = [];
+
+  if (process.env.MAIL_ACCOUNTS) {
+    try {
+      accounts = JSON.parse(process.env.MAIL_ACCOUNTS);
+      if (!Array.isArray(accounts)) throw new Error('No es un array');
+    } catch (e) {
+      console.error('❌ MAIL_ACCOUNTS tiene formato inválido (debe ser JSON array):', e.message);
+      accounts = [];
+    }
+  }
+
+  // Fallback: cuenta única legacy
+  if (accounts.length === 0 && process.env.MAIL_USER && process.env.MAIL_PASSWORD) {
+    accounts = [{ user: process.env.MAIL_USER, password: process.env.MAIL_PASSWORD }];
+  }
+
+  if (accounts.length === 0) {
+    console.log('⚠️  No hay cuentas de mail configuradas, skipping sync');
+    return { synced: 0, errors: [] };
+  }
+
+  console.log(`📬 Sincronizando ${accounts.length} cuenta(s) de mail...`);
+
+  const totals = { synced: 0, errors: [], mails: [] };
+
+  // Procesar cuentas de forma secuencial (evita solapamiento de conexiones IMAP)
+  for (const account of accounts) {
+    if (!account.user || !account.password) {
+      console.warn(`⚠️  Cuenta inválida (falta user o password), saltando`);
+      continue;
+    }
+    const r = await syncAccount(account);
+    totals.synced += r.synced;
+    totals.errors.push(...r.errors);
+    totals.mails.push(...r.mails);
+  }
+
+  return totals;
 }
 
 /**
