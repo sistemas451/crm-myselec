@@ -483,7 +483,7 @@ function NewOrderModal() {
           <input className="inp w-full" placeholder="Ej: OC-10043-2026" value={form.ocCliente} onChange={e=>set('ocCliente',e.target.value)}/>
         </FormGroup>
         <FormGroup label="Código NP Flexxus">
-          <input className="inp w-full mono" placeholder="Ej: NP-88150" value={form.flexxus} onChange={e=>set('flexxus',e.target.value)}/>
+          <input className="inp w-full mono" placeholder="Ej: NP-20728" value={form.flexxus} onChange={e=>set('flexxus',e.target.value)}/>
         </FormGroup>
         <FormGroup label="Tipo de entrega" cols={2}>
           <div className="flex gap-2">

@@ -231,7 +231,7 @@ async function parseNotaPedidoPDF(buffer) {
     clientName:    null,  // Razón social del cliente
     ocNumber:      null,  // Número de OC del cliente
     presupuestoRef: null, // Texto raw del COMENTARIO
-    presupuestoNP:  null, // NP del presupuesto extraído del COMENTARIO (ej: "NP-17680")
+    presupuestoNP:  null, // Código PR del presupuesto extraído del COMENTARIO (ej: "PR-17680")
     date:          null,
     seller:        null,
     total:         null,

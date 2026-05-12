@@ -139,29 +139,29 @@ const STAGES_F2 = [
 ];
 
 const QUOTES = [
-  { code:'COT-2026-041', client:'CLI-001', seller:'u-lp', stage:'enviado',   ingreso:'2026-04-20', dias:3, monto:45200, adj:3, notas:4, flexxus:'NP-88120' },
+  { code:'COT-2026-041', client:'CLI-001', seller:'u-lp', stage:'enviado',   ingreso:'2026-04-20', dias:3, monto:45200, adj:3, notas:4, flexxus:'PR-88120' },
   { code:'COT-2026-042', client:'CLI-002', seller:'u-sr', stage:'armado',    ingreso:'2026-04-23', dias:0, monto:null,  adj:1, notas:1, flexxus:'' },
   { code:'COT-2026-043', client:'CLI-003', seller:'u-fm', stage:'recibida',  ingreso:'2026-04-22', dias:1, monto:null,  adj:2, notas:0, flexxus:'' },
-  { code:'COT-2026-038', client:'CLI-004', seller:'u-lp', stage:'aceptada',  ingreso:'2026-04-18', dias:5, monto:12800, adj:5, notas:6, flexxus:'NP-88092' },
-  { code:'COT-2026-035', client:'CLI-006', seller:'u-sr', stage:'rechazada', ingreso:'2026-04-15', dias:8, monto:67500, adj:4, notas:3, flexxus:'NP-88044', rejectReason:'Precio' },
-  { code:'COT-2026-044', client:'CLI-005', seller:'u-vl', stage:'proveedor', ingreso:'2026-04-21', dias:2, monto:null,  adj:2, notas:2, flexxus:'NP-88144' },
-  { code:'COT-2026-039', client:'CLI-002', seller:'u-fm', stage:'oferta',    ingreso:'2026-04-22', dias:1, monto:23100, adj:3, notas:1, flexxus:'NP-88133' },
+  { code:'COT-2026-038', client:'CLI-004', seller:'u-lp', stage:'aceptada',  ingreso:'2026-04-18', dias:5, monto:12800, adj:5, notas:6, flexxus:'PR-88092' },
+  { code:'COT-2026-035', client:'CLI-006', seller:'u-sr', stage:'rechazada', ingreso:'2026-04-15', dias:8, monto:67500, adj:4, notas:3, flexxus:'PR-88044', rejectReason:'Precio' },
+  { code:'COT-2026-044', client:'CLI-005', seller:'u-vl', stage:'proveedor', ingreso:'2026-04-21', dias:2, monto:null,  adj:2, notas:2, flexxus:'PR-88144' },
+  { code:'COT-2026-039', client:'CLI-002', seller:'u-fm', stage:'oferta',    ingreso:'2026-04-22', dias:1, monto:23100, adj:3, notas:1, flexxus:'PR-88133' },
   { code:'COT-2026-040', client:'CLI-001', seller:'u-lp', stage:'asignada',  ingreso:'2026-04-23', dias:0, monto:null,  adj:1, notas:0, flexxus:'' },
-  { code:'COT-2026-037', client:'CLI-010', seller:'u-lp', stage:'enviado',   ingreso:'2026-04-17', dias:6, monto:18900, adj:2, notas:2, flexxus:'NP-88066' },
+  { code:'COT-2026-037', client:'CLI-010', seller:'u-lp', stage:'enviado',   ingreso:'2026-04-17', dias:6, monto:18900, adj:2, notas:2, flexxus:'PR-88066' },
   { code:'COT-2026-036', client:'CLI-012', seller:'u-fm', stage:'armado',    ingreso:'2026-04-19', dias:4, monto:null,  adj:1, notas:0, flexxus:'' },
-  { code:'COT-2026-034', client:'CLI-009', seller:'u-vl', stage:'aceptada',  ingreso:'2026-04-12', dias:11,monto:31400, adj:4, notas:5, flexxus:'NP-87998' },
-  { code:'COT-2026-033', client:'CLI-014', seller:'u-sr', stage:'proveedor', ingreso:'2026-04-14', dias:9, monto:null,  adj:2, notas:2, flexxus:'NP-87988' },
+  { code:'COT-2026-034', client:'CLI-009', seller:'u-vl', stage:'aceptada',  ingreso:'2026-04-12', dias:11,monto:31400, adj:4, notas:5, flexxus:'PR-87998' },
+  { code:'COT-2026-033', client:'CLI-014', seller:'u-sr', stage:'proveedor', ingreso:'2026-04-14', dias:9, monto:null,  adj:2, notas:2, flexxus:'PR-87988' },
 ];
 
 const ORDERS = [
-  { code:'OC-2026-018', client:'CLI-001', seller:'u-lp', stage:'armado',    fromQuote:'COT-2026-038', entrega:'AMBA',     transp:'—',                        flexxus:'NP-88092', fecha:'2026-04-19' },
-  { code:'OC-2026-016', client:'CLI-002', seller:'u-sr', stage:'transito',  fromQuote:'COT-2026-032', entrega:'Interior', transp:'Cruz del Sur',             flexxus:'NP-87890', fecha:'2026-04-12', guia:'CDS-884012' },
-  { code:'OC-2026-019', client:'CLI-006', seller:'u-sr', stage:'stock',     fromQuote:'COT-2026-035', entrega:'AMBA',     transp:'—',                        flexxus:'NP-88044', fecha:'2026-04-22' },
-  { code:'OC-2026-015', client:'CLI-004', seller:'u-lp', stage:'entregada', fromQuote:'COT-2026-029', entrega:'AMBA',     transp:'Propio',                   flexxus:'NP-87801', fecha:'2026-04-08' },
-  { code:'OC-2026-017', client:'CLI-009', seller:'u-vl', stage:'facturada', fromQuote:'COT-2026-031', entrega:'Interior', transp:'Andesmar Cargas',          flexxus:'NP-87855', fecha:'2026-04-16' },
-  { code:'OC-2026-020', client:'CLI-010', seller:'u-lp', stage:'oc',        fromQuote:'COT-2026-037', entrega:'AMBA',     transp:'—',                        flexxus:'NP-88066', fecha:'2026-04-23' },
+  { code:'OC-2026-018', client:'CLI-001', seller:'u-lp', stage:'armado',    fromQuote:'COT-2026-038', entrega:'AMBA',     transp:'—',                        flexxus:'PR-88092', fecha:'2026-04-19' },
+  { code:'OC-2026-016', client:'CLI-002', seller:'u-sr', stage:'transito',  fromQuote:'COT-2026-032', entrega:'Interior', transp:'Cruz del Sur',             flexxus:'PR-87890', fecha:'2026-04-12', guia:'CDS-884012' },
+  { code:'OC-2026-019', client:'CLI-006', seller:'u-sr', stage:'stock',     fromQuote:'COT-2026-035', entrega:'AMBA',     transp:'—',                        flexxus:'PR-88044', fecha:'2026-04-22' },
+  { code:'OC-2026-015', client:'CLI-004', seller:'u-lp', stage:'entregada', fromQuote:'COT-2026-029', entrega:'AMBA',     transp:'Propio',                   flexxus:'PR-87801', fecha:'2026-04-08' },
+  { code:'OC-2026-017', client:'CLI-009', seller:'u-vl', stage:'facturada', fromQuote:'COT-2026-031', entrega:'Interior', transp:'Andesmar Cargas',          flexxus:'PR-87855', fecha:'2026-04-16' },
+  { code:'OC-2026-020', client:'CLI-010', seller:'u-lp', stage:'oc',        fromQuote:'COT-2026-037', entrega:'AMBA',     transp:'—',                        flexxus:'PR-88066', fecha:'2026-04-23' },
   { code:'OC-2026-014', client:'CLI-012', seller:'u-fm', stage:'np',        fromQuote:'COT-2026-027', entrega:'Interior', transp:'—',                        flexxus:'—',        fecha:'2026-04-21' },
-  { code:'OC-2026-013', client:'CLI-015', seller:'u-lp', stage:'proveedor', fromQuote:'COT-2026-025', entrega:'Interior', transp:'—',                        flexxus:'NP-87700', fecha:'2026-04-14' },
+  { code:'OC-2026-013', client:'CLI-015', seller:'u-lp', stage:'proveedor', fromQuote:'COT-2026-025', entrega:'Interior', transp:'—',                        flexxus:'PR-87700', fecha:'2026-04-14' },
 ];
 
 // ---------- Timeline activity ----------
