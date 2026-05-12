@@ -184,8 +184,12 @@ router.patch('/:id/stage', authMiddleware, async (req, res) => {
       },
     });
 
-    // If accepted, auto-create an order
+    // If accepted, auto-create an order (solo si no existe ya una)
     if (stage === 'aceptada') {
+      const existingOrder = await prisma.order.findFirst({ where: { fromQuoteId: quote.id } });
+      if (existingOrder) {
+        console.log(`ℹ️  OC ya existe para ${quote.code}: ${existingOrder.code}`);
+      } else {
       const ocCode = await nextCode(prisma.order, 'OC-2026');
 
       await prisma.order.create({
@@ -207,6 +211,7 @@ router.patch('/:id/stage', authMiddleware, async (req, res) => {
           quoteId: quote.id,
         },
       });
+      } // end if !existingOrder
     }
 
     res.json(updated);

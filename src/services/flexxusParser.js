@@ -175,4 +175,152 @@ function isFlexxusPDF(att) {
   return name.endsWith('.pdf') && name.includes('presupuesto');
 }
 
-module.exports = { parseFlexxusPDF, isFlexxusPDF, parseArFloat };
+/**
+ * Detecta si un attachment es una Nota de Pedido Flexxus.
+ * Criterio: filename contiene "Nota de Pedido" y extensión .pdf
+ */
+function isNotaPedidoPDF(att) {
+  if (!att || !att.filename) return false;
+  const name = att.filename.toLowerCase();
+  return name.endsWith('.pdf') && name.includes('nota de pedido');
+}
+
+// NP Nota de Pedido: formato "0001-00020728" (4 dígitos, guión, 8+ dígitos)
+const NP_PEDIDO_RE = /^\d{4}-\d{7,}$/;
+
+/**
+ * Parsea líneas de ítems de una Nota de Pedido Flexxus.
+ * Formato por línea: {descripción+código+cantidades}U$S {total}U$S {unitario}
+ */
+function parseNotaPedidoItems(lines) {
+  const items = [];
+  for (const line of lines) {
+    const usdCount = (line.match(/U\$S/g) || []).length;
+    if (usdCount < 2) continue;
+    // Ignorar líneas que empiezan con U$S (son totales, no ítems)
+    if (line.startsWith('U$S')) continue;
+    const m = line.match(/^(.+?)U\$S\s*([\d,.]+)\s*U\$S\s*([\d,.]+)/);
+    if (!m) continue;
+    const descBlob  = m[1].trim();
+    const total     = parseArFloat(m[2]);
+    const unitPrice = parseArFloat(m[3]);
+    const qty       = (unitPrice > 0) ? Math.round(total / unitPrice) : 0;
+    items.push({
+      description: descBlob,
+      quantity:    qty,
+      unit:        null,
+      unitPrice:   unitPrice || null,
+      total:       total || null,
+      accepted:    true,
+      sortOrder:   items.length,
+    });
+  }
+  return items;
+}
+
+/**
+ * Parsea un buffer de PDF Nota de Pedido Flexxus.
+ * Retorna:
+ *   { npCode, npRaw, cuit, clientName, ocNumber, presupuestoRef, presupuestoNP, date, seller, total, items }
+ */
+async function parseNotaPedidoPDF(buffer) {
+  const result = {
+    npCode:        null,  // "NP-20728" — número de la Nota de Pedido
+    npRaw:         null,  // "20728"
+    cuit:          null,  // CUIT del cliente
+    clientName:    null,  // Razón social del cliente
+    ocNumber:      null,  // Número de OC del cliente
+    presupuestoRef: null, // Texto raw del COMENTARIO
+    presupuestoNP:  null, // NP del presupuesto extraído del COMENTARIO (ej: "NP-17680")
+    date:          null,
+    seller:        null,
+    total:         null,
+    items:         [],
+  };
+
+  try {
+    const data  = await pdfParse(buffer);
+    const lines = data.text.split('\n').map(l => l.trim()).filter(Boolean);
+
+    // ── Número de Nota de Pedido ("0001-00020728") ────────────────────────────
+    for (const line of lines) {
+      if (NP_PEDIDO_RE.test(line)) {
+        const parts = line.split('-');
+        result.npRaw  = String(parseInt(parts[1], 10)); // "20728"
+        result.npCode = `NP-${result.npRaw}`;
+        break;
+      }
+    }
+
+    // ── CUIT del cliente (primera aparición) ─────────────────────────────────
+    let cuitIdx = -1;
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(CUIT_RE);
+      if (m) { result.cuit = m[1]; cuitIdx = i; break; }
+    }
+
+    // ── Razón social (2 líneas después del CUIT: CUIT / dirección / nombre) ──
+    if (cuitIdx >= 0 && cuitIdx + 2 < lines.length) {
+      result.clientName = lines[cuitIdx + 2];
+    }
+
+    // ── Número de OC del cliente (línea después de "Nº OC:") ─────────────────
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i] === 'Nº OC:' && lines[i + 1]) {
+        result.ocNumber = lines[i + 1].trim();
+        break;
+      }
+    }
+
+    // ── Presupuesto de referencia (sección COMENTARIO) ────────────────────────
+    let comentIdx = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i] === 'COMENTARIO') { comentIdx = i; break; }
+    }
+    if (comentIdx >= 0) {
+      const SKIP_LABELS = new Set(['Forma de pago:', 'Anticipo:', 'Firma ClienteAclaración',
+        'TRABAJO REALIZADO', 'FLETE:RETIRAN', 'ORDEN DE COMPRA']);
+      for (let j = comentIdx + 1; j < Math.min(comentIdx + 6, lines.length); j++) {
+        const l = lines[j];
+        if (!l || SKIP_LABELS.has(l) || l.startsWith('U$S') || /^\d{4}$/.test(l)) continue;
+        result.presupuestoRef = l; // texto raw
+        // Intentar extraer número de NP: "NP-17680", "NP 17680", "17680", etc.
+        const npMatch = l.match(/NP[-\s]?(\d+)/i)
+          || l.match(/presupuesto\s+(\d+)/i)
+          || l.match(/\b(\d{4,6})\b/);
+        if (npMatch) {
+          result.presupuestoNP = `NP-${npMatch[1]}`;
+        }
+        break;
+      }
+    }
+
+    // ── Fecha ─────────────────────────────────────────────────────────────────
+    for (const line of lines) {
+      if (/^\d{2}\/\d{2}\/\d{4}$/.test(line)) { result.date = line; break; }
+    }
+
+    // ── Vendedor ──────────────────────────────────────────────────────────────
+    for (let i = 1; i < lines.length; i++) {
+      if (lines[i] === 'Vendedor:') { result.seller = lines[i - 1]; break; }
+    }
+
+    // ── Total ─────────────────────────────────────────────────────────────────
+    for (const line of lines) {
+      if (/^U\$S\s+[\d,.]+$/.test(line)) {
+        const m = line.match(/U\$S\s+([\d,.]+)/);
+        if (m) { result.total = parseArFloat(m[1]); break; }
+      }
+    }
+
+    // ── Ítems ─────────────────────────────────────────────────────────────────
+    result.items = parseNotaPedidoItems(lines);
+
+  } catch (err) {
+    console.error('parseNotaPedidoPDF error:', err.message);
+  }
+
+  return result;
+}
+
+module.exports = { parseFlexxusPDF, isFlexxusPDF, isNotaPedidoPDF, parseNotaPedidoPDF, parseArFloat };

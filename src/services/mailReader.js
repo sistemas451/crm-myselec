@@ -3,7 +3,7 @@ const { simpleParser } = require('mailparser');
 const { PrismaClient } = require('@prisma/client');
 const fs = require('fs');
 const path = require('path');
-const { parseFlexxusPDF, isFlexxusPDF } = require('./flexxusParser');
+const { parseFlexxusPDF, isFlexxusPDF, isNotaPedidoPDF, parseNotaPedidoPDF } = require('./flexxusParser');
 
 const prisma = new PrismaClient();
 
@@ -312,6 +312,173 @@ async function syncMails() {
 }
 
 /**
+ * Procesa un mail enviado que contiene una Nota de Pedido Flexxus.
+ * - Parsea el PDF para obtener NP, cliente, ítems y referencia al presupuesto
+ * - Busca la Order vinculada al presupuesto y la actualiza
+ * - Crea un Quote(mailType='NOTA_PEDIDO') con los ítems reales
+ */
+async function processNotaPedido(parsed, mailData, att, imap) {
+  const subject   = parsed.subject || '(sin asunto)';
+  const date      = parsed.date    || new Date();
+  const messageId = parsed.messageId || `uid-${mailData.uid}`;
+  const fromAddr  = parsed.from?.value?.[0]?.address?.toLowerCase()?.trim() || '';
+
+  console.log(`   📦 Nota de Pedido detectada: "${subject}"`);
+
+  // Chequeo de duplicado
+  const existing = await prisma.quote.findFirst({ where: { emailMessageId: messageId, mailType: 'NOTA_PEDIDO' } });
+  if (existing) {
+    console.log(`   ⏭️  Nota de Pedido ya existente: ${existing.code}`);
+    return null;
+  }
+
+  // Parsear PDF
+  let npData = null;
+  try {
+    npData = await parseNotaPedidoPDF(att.content);
+    console.log(`   📄 NP: ${npData.npCode} | Cliente: ${npData.clientName} | CUIT: ${npData.cuit} | Pres.Ref: ${npData.presupuestoNP || npData.presupuestoRef || '—'}`);
+  } catch (e) {
+    console.error('   ❌ Error parseando Nota de Pedido:', e.message);
+    return null;
+  }
+
+  // ── Buscar presupuesto de referencia ────────────────────────────────────
+  let presupuesto = null;
+
+  // 1. Por NP del presupuesto extraído del COMENTARIO
+  if (npData.presupuestoNP) {
+    presupuesto = await prisma.quote.findFirst({
+      where: { flexxusCode: npData.presupuestoNP, mailType: 'PRESUPUESTO' },
+    });
+    if (presupuesto) console.log(`   🔗 Presupuesto encontrado por NP: ${presupuesto.code}`);
+  }
+
+  // 2. Fallback: por CUIT del cliente + presupuesto abierto reciente
+  if (!presupuesto && npData.cuit) {
+    const client = await prisma.client.findFirst({ where: { cuit: { equals: npData.cuit, mode: 'insensitive' } } });
+    if (client) {
+      const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 180);
+      presupuesto = await prisma.quote.findFirst({
+        where: { clientId: client.id, mailType: 'PRESUPUESTO', createdAt: { gte: cutoff } },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (presupuesto) console.log(`   🔗 Presupuesto por CUIT cliente: ${presupuesto.code}`);
+    }
+  }
+
+  // ── Buscar Order vinculada al presupuesto ────────────────────────────────
+  let order = null;
+  if (presupuesto) {
+    order = await prisma.order.findFirst({ where: { fromQuoteId: presupuesto.id } });
+    if (order) {
+      // Actualizar Order con NP de la Nota de Pedido
+      await prisma.order.update({
+        where: { id: order.id },
+        data:  { flexxusCode: npData.npCode },
+      });
+      console.log(`   🔗 Order ${order.code} actualizada con NP: ${npData.npCode}`);
+    }
+  }
+
+  // ── Buscar cliente ───────────────────────────────────────────────────────
+  let client = null;
+  if (npData.cuit) {
+    client = await prisma.client.findFirst({
+      where: { cuit: { equals: npData.cuit, mode: 'insensitive' } },
+      include: { defaultSeller: true },
+    });
+  }
+  if (!client && presupuesto?.clientId) {
+    client = await prisma.client.findUnique({
+      where: { id: presupuesto.clientId },
+      include: { defaultSeller: true },
+    });
+  }
+
+  // ── Crear Quote NOTA_PEDIDO ──────────────────────────────────────────────
+  const code = await nextCode(prisma.quote, 'COT-2026');
+  const npTotal = npData.total || (npData.items.reduce((s, i) => s + (i.total || 0), 0) || null);
+
+  const quote = await prisma.quote.create({
+    data: {
+      code,
+      clientId:       client?.id || presupuesto?.clientId || null,
+      sellerId:       presupuesto?.sellerId || null,
+      stage:          'oc',
+      source:         'EMAIL',
+      mailType:       'NOTA_PEDIDO',
+      flexxusCode:    npData.npCode,
+      amount:         npTotal,
+      emailSubject:   subject.substring(0, 500),
+      emailMessageId: messageId,
+      emailFrom:      fromAddr,
+      emailBody:      (parsed.text || '').substring(0, 5000),
+      linkedQuoteId:  presupuesto?.id || null,
+      createdAt:      date,
+    },
+  });
+
+  // Vincular presupuesto → nota de pedido (bidireccional)
+  if (presupuesto && !presupuesto.linkedQuoteId) {
+    await prisma.quote.update({
+      where: { id: presupuesto.id },
+      data:  { linkedQuoteId: quote.id },
+    });
+  }
+
+  // ── Crear ítems ──────────────────────────────────────────────────────────
+  if (npData.items?.length) {
+    await prisma.quoteItem.createMany({
+      data: npData.items.map((item, i) => ({
+        quoteId:     quote.id,
+        sku:         null,
+        description: (item.description || '').substring(0, 500),
+        quantity:    item.quantity || 0,
+        unit:        null,
+        unitPrice:   item.unitPrice || null,
+        total:       item.total || null,
+        accepted:    true,
+        sortOrder:   i,
+      })),
+    });
+    console.log(`   📋 ${npData.items.length} ítems creados para ${code} (Nota de Pedido)`);
+  }
+
+  // ── Guardar PDF como adjunto ──────────────────────────────────────────────
+  try {
+    const safeName = `${quote.id}-${att.filename.replace(/[^a-zA-Z0-9._\-]/g, '_')}`;
+    const filePath = require('path').join(UPLOADS_DIR, safeName);
+    require('fs').writeFileSync(filePath, att.content);
+    await prisma.attachment.create({
+      data: { filename: safeName, path: filePath, size: att.content?.length || null, mimeType: att.contentType || null, quoteId: quote.id },
+    });
+  } catch (e) {
+    console.error('   ❌ Error guardando adjunto Nota de Pedido:', e.message);
+  }
+
+  // ── Actividad ────────────────────────────────────────────────────────────
+  await prisma.activity.create({
+    data: {
+      action:  'CREATED',
+      detail:  `Nota de Pedido ${npData.npCode} capturada desde Enviados${order ? ` → OC ${order.code}` : ''}${presupuesto ? ` | Pres. ${presupuesto.code}` : ''}`,
+      quoteId: quote.id,
+    },
+  });
+
+  console.log(`   ✅ ${code} (NOTA_PEDIDO) → ${client?.name || 'sin cliente'} | NP: ${npData.npCode}`);
+
+  return {
+    code,
+    mailType:    'NOTA_PEDIDO',
+    flexxusCode: npData.npCode,
+    clientName:  client?.name || null,
+    orderCode:   order?.code || null,
+    itemCount:   npData.items?.length || 0,
+    date:        date.toISOString(),
+  };
+}
+
+/**
  * Procesa un mail de la carpeta Enviados para detectar PRESUPUESTO con PDF Flexxus.
  * Diferencias clave vs. mail entrante:
  *  - From: = cuenta propia del vendedor → usar para sellerId
@@ -334,11 +501,18 @@ async function processSentMail(parsed, mailData, imap) {
     console.log(`   📋 Asunto con prefijo "Presupuesto" detectado: "${subject}"`);
   }
 
-  // Filtrar adjuntos y buscar Flexxus — si no hay, ignorar
+  // Filtrar adjuntos y buscar PDFs Flexxus — si no hay ninguno, ignorar
   const realAttachments = (parsed.attachments || []).filter(a => !isImageAttachment(a));
-  const flexxusAtt = realAttachments.find(a => isFlexxusPDF(a));
+  const notaPedidoAtt   = realAttachments.find(a => isNotaPedidoPDF(a));
+  const flexxusAtt      = realAttachments.find(a => isFlexxusPDF(a));
+
+  // ── Nota de Pedido → flujo separado ──────────────────────────────────────
+  if (notaPedidoAtt) {
+    return await processNotaPedido(parsed, mailData, notaPedidoAtt, imap);
+  }
+
   if (!flexxusAtt) {
-    // Mail enviado sin PDF Flexxus → no es un presupuesto para nosotros
+    // Mail enviado sin PDF Flexxus ni Nota de Pedido → ignorar
     return null;
   }
 
