@@ -200,11 +200,21 @@ async function syncAccount(account) {
       try {
         const GMAIL_ALL = process.env.MAIL_ALL_FOLDER || '[Gmail]/All Mail';
 
-        // Fuente 1: etiqueta CRM → no necesita verificar prefijo
-        const labelMails = await fetchRawFromFolder(imap, CRM_LABEL, ['UNSEEN'], false);
+        // Leer lookback desde DB (fallback a variable de entorno o 2 días)
+        let lookbackDays = SENT_LOOKBACK_DAYS;
+        try {
+          const setting = await prisma.appSetting.findUnique({ where: { key: 'mail_lookback_days' } });
+          if (setting?.value) lookbackDays = parseFloat(setting.value);
+        } catch (_) {}
 
-        // Fuente 2: All Mail con "crm" en asunto (verificamos prefijo exacto en processEmail)
-        const subjectMails = await fetchRawFromFolder(imap, GMAIL_ALL, ['UNSEEN', ['SUBJECT', 'crm']], true);
+        const inboxSince = new Date();
+        inboxSince.setDate(inboxSince.getDate() - lookbackDays);
+
+        // Fuente 1: etiqueta CRM — últimos N días (dedup por messageId)
+        const labelMails = await fetchRawFromFolder(imap, CRM_LABEL, [['SINCE', inboxSince]], false);
+
+        // Fuente 2: All Mail con "crm" en asunto — últimos N días
+        const subjectMails = await fetchRawFromFolder(imap, GMAIL_ALL, [['SINCE', inboxSince], ['SUBJECT', 'crm']], true);
 
         // Fuente 3: Enviados — últimos N días (dedup por messageId, filtramos Flexxus en processEmail)
         const sinceDate = new Date();
@@ -1185,4 +1195,4 @@ async function resyncQuoteEmail(quoteId) {
   });
 }
 
-module.exports = { syncMails, listRecentMails, resyncQuoteEmail };
+module.exports = { syncMails, syncAccount, listRecentMails, resyncQuoteEmail };

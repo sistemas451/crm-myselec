@@ -887,6 +887,13 @@ function Config() {
   const [notifLoading, setNotifLoading] = useState(false);
   const [notifModal, setNotifModal] = useState(null); // null | 'new' | rule-object
 
+  // Mail state
+  const [mailAccounts,  setMailAccounts]  = useState([]);
+  const [mailSettings,  setMailSettings]  = useState({ mail_sync_interval_hours: '2', mail_lookback_days: '2' });
+  const [mailLoading,   setMailLoading]   = useState(false);
+  const [mailSyncing,   setMailSyncing]   = useState({}); // { [email]: true/false }
+  const [mailSyncingAll, setMailSyncingAll] = useState(false);
+
   useEffect(() => {
     CrmApi.getStagesFull()
       .then(data => { setStagesData(data); setStagesLoading(false); })
@@ -900,6 +907,61 @@ function Config() {
       .then(r => { setNotifRules(r); setNotifLoading(false); })
       .catch(() => setNotifLoading(false));
   }, [tab]);
+
+  useEffect(() => {
+    if (tab !== 'mails') return;
+    setMailLoading(true);
+    Promise.all([
+      fetch('/api/mail/accounts', { headers: { Authorization: `Bearer ${localStorage.getItem('crm_token')}` } }).then(r => r.json()),
+      fetch('/api/settings',      { headers: { Authorization: `Bearer ${localStorage.getItem('crm_token')}` } }).then(r => r.json()),
+    ]).then(([accounts, settings]) => {
+      setMailAccounts(Array.isArray(accounts) ? accounts : []);
+      setMailSettings(s => ({ ...s, ...settings }));
+      setMailLoading(false);
+    }).catch(() => setMailLoading(false));
+  }, [tab]);
+
+  const handleMailSettingSave = async () => {
+    try {
+      await fetch('/api/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('crm_token')}` },
+        body: JSON.stringify(mailSettings),
+      });
+      pushToast('Configuración guardada');
+    } catch { pushToast('Error al guardar', 'bad'); }
+  };
+
+  const handleSyncAll = async () => {
+    setMailSyncingAll(true);
+    try {
+      const res = await fetch('/api/mail/sync', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${localStorage.getItem('crm_token')}` },
+      });
+      const data = await res.json();
+      pushToast(`Sync completo · ${data.synced} nuevo(s)`);
+      // Refrescar estados
+      const accounts = await fetch('/api/mail/accounts', { headers: { Authorization: `Bearer ${localStorage.getItem('crm_token')}` } }).then(r => r.json());
+      setMailAccounts(Array.isArray(accounts) ? accounts : []);
+    } catch { pushToast('Error al sincronizar', 'bad'); }
+    setMailSyncingAll(false);
+  };
+
+  const handleSyncOne = async (email) => {
+    setMailSyncing(s => ({ ...s, [email]: true }));
+    try {
+      const res = await fetch(`/api/mail/sync/${encodeURIComponent(email)}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${localStorage.getItem('crm_token')}` },
+      });
+      const data = await res.json();
+      pushToast(`${email} · ${data.synced} nuevo(s)`);
+      const accounts = await fetch('/api/mail/accounts', { headers: { Authorization: `Bearer ${localStorage.getItem('crm_token')}` } }).then(r => r.json());
+      setMailAccounts(Array.isArray(accounts) ? accounts : []);
+    } catch { pushToast('Error al sincronizar', 'bad'); }
+    setMailSyncing(s => ({ ...s, [email]: false }));
+  };
 
   const handleToggleMandatory = async (stage) => {
     const newVal = !stage.mandatory;
@@ -1106,6 +1168,7 @@ function Config() {
       <TabBar active={tab} onChange={setTab} tabs={[
         { id:'stages',    label:'Etapas' },
         { id:'flexxus',   label:'Integración Flexxus' },
+        { id:'mails',     label:'Cuentas de mail' },
         { id:'notifs',    label:'Notificaciones' },
         { id:'roles',     label:'Roles y permisos' },
       ]}/>
@@ -1157,6 +1220,99 @@ function Config() {
                 </li>
               ))}
             </ul>
+          </div>
+        </div>
+      )}
+
+      {tab==='mails' && (
+        <div className="p-6 space-y-5">
+
+          {/* ── Configuración de sync ─────────────────────────── */}
+          <div className="bg-white border border-line rounded-xl p-5">
+            <div className="text-sm font-semibold mb-4">Configuración de sincronización</div>
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="block text-[12px] text-ink-500 mb-1">Frecuencia automática</label>
+                <select className="inp text-[13px]" value={mailSettings.mail_sync_interval_hours}
+                  onChange={e => setMailSettings(s => ({ ...s, mail_sync_interval_hours: e.target.value }))}>
+                  <option value="1">Cada 1 hora</option>
+                  <option value="2">Cada 2 horas</option>
+                  <option value="4">Cada 4 horas</option>
+                  <option value="8">Cada 8 horas</option>
+                  <option value="24">Una vez al día</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-[12px] text-ink-500 mb-1">Buscar mails de los últimos</label>
+                <select className="inp text-[13px]" value={mailSettings.mail_lookback_days}
+                  onChange={e => setMailSettings(s => ({ ...s, mail_lookback_days: e.target.value }))}>
+                  <option value="1">1 día</option>
+                  <option value="2">2 días</option>
+                  <option value="7">7 días</option>
+                  <option value="30">30 días</option>
+                </select>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <button onClick={handleMailSettingSave} className="btn-primary text-[12px]">
+                Guardar configuración
+              </button>
+            </div>
+          </div>
+
+          {/* ── Cuentas de mail ───────────────────────────────── */}
+          <div className="bg-white border border-line rounded-xl overflow-hidden">
+            <div className="px-5 py-3.5 border-b border-line flex items-center justify-between">
+              <div className="font-semibold text-[13px]">Cuentas configuradas</div>
+              <button onClick={handleSyncAll} disabled={mailSyncingAll}
+                className="btn-primary text-[12px] flex items-center gap-1.5 disabled:opacity-60">
+                <Icon name="refresh-cw" size={13} className={mailSyncingAll ? 'animate-spin' : ''}/>
+                {mailSyncingAll ? 'Sincronizando…' : 'Sincronizar todas'}
+              </button>
+            </div>
+
+            {mailLoading ? (
+              <div className="py-10 text-center text-ink-400 text-[13px]">Cargando cuentas…</div>
+            ) : mailAccounts.length === 0 ? (
+              <div className="py-10 text-center text-ink-400 text-[13px]">
+                No hay cuentas configuradas.<br/>
+                <span className="text-[12px]">Agrega <code className="mono bg-surface px-1 rounded">MAIL_ACCOUNTS</code> en Railway.</span>
+              </div>
+            ) : (
+              <table className="tbl w-full">
+                <thead><tr>
+                  <th>Cuenta</th>
+                  <th>Último sync</th>
+                  <th>Estado</th>
+                  <th></th>
+                </tr></thead>
+                <tbody>
+                  {mailAccounts.map(acc => (
+                    <tr key={acc.user}>
+                      <td className="mono text-[12px]">{acc.user}</td>
+                      <td className="text-[12px] text-ink-500">
+                        {acc.lastSyncAt
+                          ? new Date(acc.lastSyncAt).toLocaleString('es-AR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })
+                          : <span className="text-ink-400">Nunca</span>}
+                      </td>
+                      <td>
+                        <Badge tone={acc.isActive ? 'green' : 'gray'} dot>
+                          {acc.isActive ? 'Activa' : 'Inactiva'}
+                        </Badge>
+                      </td>
+                      <td className="text-right">
+                        <button onClick={() => handleSyncOne(acc.user)}
+                          disabled={mailSyncing[acc.user]}
+                          className="btn-ghost text-[12px] flex items-center gap-1.5 ml-auto disabled:opacity-60">
+                          <Icon name="refresh-cw" size={12} className={mailSyncing[acc.user] ? 'animate-spin' : ''}/>
+                          {mailSyncing[acc.user] ? 'Sync…' : 'Sincronizar'}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         </div>
       )}

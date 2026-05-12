@@ -244,11 +244,18 @@ model Activity {
 // ─── Integración de email ───
 model EmailIntegration {
   id           String    @id @default(uuid())
-  accountEmail String
+  accountEmail String    @unique
   lastSyncAt   DateTime?
   lastUid      Int?                         // Último UID procesado
   isActive     Boolean   @default(true)
   createdAt    DateTime  @default(now())
+}
+
+// ─── Configuraciones globales del sistema ───
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
 }
 
 // ─── Motivos de rechazo (configurables) ───
