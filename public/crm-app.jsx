@@ -108,8 +108,38 @@ function App() {
 }
 
 // ---------- Login ----------
+function PasswordInput({ value, onChange, placeholder, autoComplete, className }) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="relative">
+      <input
+        type={show ? 'text' : 'password'}
+        className={cx('inp w-full pr-10', className)}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        autoComplete={autoComplete}
+      />
+      <button
+        type="button"
+        onClick={() => setShow(s => !s)}
+        className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-400 hover:text-ink-700"
+        tabIndex={-1}
+      >
+        <Icon name={show ? 'eye-off' : 'eye'} size={15}/>
+      </button>
+    </div>
+  );
+}
+
+function validatePassword(pass) {
+  if (pass.length < 8) return 'La contraseña debe tener al menos 8 caracteres';
+  if (!/[A-Z]/.test(pass)) return 'Debe incluir al menos una mayúscula';
+  if (!/[0-9]/.test(pass)) return 'Debe incluir al menos un número';
+  return null;
+}
+
 function Login({ onLogin }) {
-  // Detectar token de reset en URL
   const urlParams  = new URLSearchParams(window.location.search);
   const resetToken = urlParams.get('reset');
 
@@ -121,11 +151,17 @@ function Login({ onLogin }) {
   const [info,    setInfo]    = useState('');
   const [loading, setLoading] = useState(false);
 
+  // Registro
+  const [reg, setReg] = useState({ name:'', lastName:'', email:'', phone:'', dni:'', cuit:'', pass:'', pass2:'' });
+  const setRegF = (k, v) => setReg(r => ({ ...r, [k]: v }));
+
   const bgStyle = {
     background: '#0F1B2D',
     backgroundImage: 'radial-gradient(circle at 20% 30%, #3B82F620 0, transparent 40%), radial-gradient(circle at 80% 70%, #3B82F610 0, transparent 35%), linear-gradient(#ffffff09 1px, transparent 1px), linear-gradient(90deg, #ffffff09 1px, transparent 1px)',
     backgroundSize: 'auto, auto, 40px 40px, 40px 40px',
   };
+
+  const goTo = (s) => { setScreen(s); setError(''); setInfo(''); };
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -158,17 +194,37 @@ function Login({ onLogin }) {
   const handleReset = async (e) => {
     e.preventDefault();
     setError('');
+    const pwErr = validatePassword(pass);
+    if (pwErr) { setError(pwErr); return; }
     if (pass !== pass2) { setError('Las contraseñas no coinciden'); return; }
-    if (pass.length < 6) { setError('Mínimo 6 caracteres'); return; }
     setLoading(true);
     try {
       await CrmApi.resetPassword(resetToken, pass);
-      // Limpiar token de URL
       window.history.replaceState({}, '', '/');
       setInfo('Contraseña restablecida. Podés iniciar sesión.');
-      setScreen('login');
+      goTo('login');
     } catch (err) {
       setError(err.message || 'Token inválido o expirado');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRegister = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (!reg.name.trim() || !reg.lastName.trim() || !reg.email.trim() || !reg.phone.trim() || !reg.dni.trim()) {
+      setError('Completá todos los campos obligatorios'); return;
+    }
+    const pwErr = validatePassword(reg.pass);
+    if (pwErr) { setError(pwErr); return; }
+    if (reg.pass !== reg.pass2) { setError('Las contraseñas no coinciden'); return; }
+    setLoading(true);
+    try {
+      await CrmApi.register(reg);
+      goTo('registered');
+    } catch (err) {
+      setError(err.message || 'Error al registrarse');
     } finally {
       setLoading(false);
     }
@@ -193,19 +249,25 @@ function Login({ onLogin }) {
               <input className="inp w-full mb-4" value={email} onChange={e=>setEmail(e.target.value)} placeholder="tu@myselec.com.ar" autoComplete="email"/>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="block text-xs font-medium text-ink-700">Contraseña</label>
-                <button type="button" onClick={()=>{setScreen('forgot');setError('');setInfo('');}}
+                <button type="button" onClick={()=>goTo('forgot')}
                   className="text-[11px] text-brand hover:underline">¿Olvidaste tu contraseña?</button>
               </div>
-              <input type="password" className="inp w-full mb-6" value={pass} onChange={e=>setPass(e.target.value)} placeholder="••••••••" autoComplete="current-password"/>
+              <PasswordInput value={pass} onChange={e=>setPass(e.target.value)} placeholder="••••••••" autoComplete="current-password" className="mb-6"/>
               <button className="btn-primary w-full justify-center" disabled={loading}>
                 {loading ? 'Ingresando...' : 'Iniciar sesión'}
               </button>
+              <div className="mt-4 text-center text-xs text-ink-500">
+                ¿No tenés cuenta?{' '}
+                <button type="button" onClick={()=>goTo('register')} className="text-brand hover:underline font-medium">
+                  Registrate
+                </button>
+              </div>
             </form>
           )}
 
           {screen === 'forgot' && (
             <form onSubmit={handleForgot}>
-              <button type="button" onClick={()=>{setScreen('login');setError('');setInfo('');}}
+              <button type="button" onClick={()=>goTo('login')}
                 className="flex items-center gap-1 text-ink-400 hover:text-ink-700 text-xs mb-4">
                 <Icon name="arrow-left" size={13}/> Volver
               </button>
@@ -224,16 +286,75 @@ function Login({ onLogin }) {
           {screen === 'reset' && (
             <form onSubmit={handleReset}>
               <h2 className="text-xl font-bold text-ink-900">Nueva contraseña</h2>
-              <p className="text-sm text-ink-500 mb-6">Elegí una contraseña segura de al menos 6 caracteres.</p>
+              <p className="text-sm text-ink-500 mb-6">Mínimo 8 caracteres, una mayúscula y un número.</p>
               {error && <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">{error}</div>}
               <label className="block text-xs font-medium text-ink-700 mb-1.5">Nueva contraseña</label>
-              <input type="password" className="inp w-full mb-4" value={pass} onChange={e=>setPass(e.target.value)} placeholder="••••••••" autoComplete="new-password"/>
+              <PasswordInput value={pass} onChange={e=>setPass(e.target.value)} placeholder="••••••••" autoComplete="new-password" className="mb-4"/>
               <label className="block text-xs font-medium text-ink-700 mb-1.5">Confirmar contraseña</label>
-              <input type="password" className="inp w-full mb-6" value={pass2} onChange={e=>setPass2(e.target.value)} placeholder="••••••••" autoComplete="new-password"/>
+              <PasswordInput value={pass2} onChange={e=>setPass2(e.target.value)} placeholder="••••••••" autoComplete="new-password" className="mb-6"/>
               <button className="btn-primary w-full justify-center" disabled={loading}>
                 {loading ? 'Guardando...' : 'Establecer nueva contraseña'}
               </button>
             </form>
+          )}
+
+          {screen === 'register' && (
+            <form onSubmit={handleRegister}>
+              <button type="button" onClick={()=>goTo('login')}
+                className="flex items-center gap-1 text-ink-400 hover:text-ink-700 text-xs mb-4">
+                <Icon name="arrow-left" size={13}/> Volver
+              </button>
+              <h2 className="text-xl font-bold text-ink-900">Crear cuenta</h2>
+              <p className="text-sm text-ink-500 mb-5">Un administrador revisará tu solicitud y te avisará por mail.</p>
+              {error && <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">{error}</div>}
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                <div>
+                  <label className="block text-xs font-medium text-ink-700 mb-1">Nombre *</label>
+                  <input className="inp w-full" value={reg.name} onChange={e=>setRegF('name',e.target.value)} placeholder="Juan"/>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-ink-700 mb-1">Apellido *</label>
+                  <input className="inp w-full" value={reg.lastName} onChange={e=>setRegF('lastName',e.target.value)} placeholder="García"/>
+                </div>
+              </div>
+              <label className="block text-xs font-medium text-ink-700 mb-1">Email *</label>
+              <input className="inp w-full mb-3" value={reg.email} onChange={e=>setRegF('email',e.target.value)} placeholder="tu@email.com" autoComplete="email"/>
+              <label className="block text-xs font-medium text-ink-700 mb-1">Teléfono *</label>
+              <input className="inp w-full mb-3" value={reg.phone} onChange={e=>setRegF('phone',e.target.value)} placeholder="11 1234-5678"/>
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                <div>
+                  <label className="block text-xs font-medium text-ink-700 mb-1">DNI *</label>
+                  <input className="inp w-full" value={reg.dni} onChange={e=>setRegF('dni',e.target.value)} placeholder="12345678"/>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-ink-700 mb-1">CUIT <span className="text-ink-400 font-normal">(opcional)</span></label>
+                  <input className="inp w-full" value={reg.cuit} onChange={e=>setRegF('cuit',e.target.value)} placeholder="20-12345678-9"/>
+                </div>
+              </div>
+              <label className="block text-xs font-medium text-ink-700 mb-1">Contraseña *</label>
+              <PasswordInput value={reg.pass} onChange={e=>setRegF('pass',e.target.value)} placeholder="••••••••" autoComplete="new-password" className="mb-1"/>
+              <p className="text-[11px] text-ink-400 mb-3">Mínimo 8 caracteres, una mayúscula y un número.</p>
+              <label className="block text-xs font-medium text-ink-700 mb-1">Confirmar contraseña *</label>
+              <PasswordInput value={reg.pass2} onChange={e=>setRegF('pass2',e.target.value)} placeholder="••••••••" autoComplete="new-password" className="mb-5"/>
+              <button className="btn-primary w-full justify-center" disabled={loading}>
+                {loading ? 'Enviando solicitud...' : 'Solicitar acceso'}
+              </button>
+            </form>
+          )}
+
+          {screen === 'registered' && (
+            <div className="text-center py-4">
+              <div className="w-14 h-14 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-4">
+                <Icon name="check" size={28} className="text-emerald-600"/>
+              </div>
+              <h2 className="text-xl font-bold text-ink-900 mb-2">¡Solicitud enviada!</h2>
+              <p className="text-sm text-ink-500 mb-6">
+                Tu cuenta está siendo revisada por un administrador. Te enviaremos un mail cuando esté lista para usar.
+              </p>
+              <button className="btn-secondary w-full justify-center" onClick={()=>goTo('login')}>
+                Volver al inicio de sesión
+              </button>
+            </div>
           )}
 
           <div className="mt-6 pt-5 border-t border-line text-center">

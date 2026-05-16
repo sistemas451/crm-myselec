@@ -3,7 +3,7 @@ const bcrypt   = require('bcryptjs');
 const jwt      = require('jsonwebtoken');
 const crypto   = require('crypto');
 const { PrismaClient } = require('@prisma/client');
-const { sendPasswordReset } = require('../services/mailer');
+const { sendPasswordReset, sendMail } = require('../services/mailer');
 
 const router = express.Router();
 const prisma  = new PrismaClient();
@@ -17,7 +17,11 @@ router.post('/login', async (req, res) => {
     }
 
     const user = await prisma.user.findUnique({ where: { email } });
-    if (!user || !user.active) {
+    if (!user) return res.status(401).json({ error: 'Credenciales inválidas' });
+    if (user.pendingApproval) {
+      return res.status(403).json({ error: 'Tu cuenta está pendiente de aprobación. Te avisaremos por mail cuando esté lista.' });
+    }
+    if (!user.active) {
       return res.status(401).json({ error: 'Credenciales inválidas' });
     }
 
@@ -50,6 +54,70 @@ router.get('/me', authMiddleware, async (req, res) => {
     select: { id: true, name: true, email: true, role: true, zone: true }
   });
   res.json(user);
+});
+
+// POST /api/auth/register — auto-registro público
+router.post('/register', async (req, res) => {
+  try {
+    const { name, lastName, email, password, phone, dni, cuit } = req.body;
+
+    if (!name || !lastName || !email || !password || !phone || !dni) {
+      return res.status(400).json({ error: 'Nombre, apellido, email, contraseña, teléfono y DNI son requeridos' });
+    }
+
+    // Validación de contraseña
+    if (password.length < 8) {
+      return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres' });
+    }
+    if (!/[A-Z]/.test(password)) {
+      return res.status(400).json({ error: 'La contraseña debe incluir al menos una mayúscula' });
+    }
+    if (!/[0-9]/.test(password)) {
+      return res.status(400).json({ error: 'La contraseña debe incluir al menos un número' });
+    }
+
+    const exists = await prisma.user.findUnique({ where: { email } });
+    if (exists) return res.status(400).json({ error: 'Ya existe una cuenta con ese email' });
+
+    const hashed = await bcrypt.hash(password, 10);
+    await prisma.user.create({
+      data: {
+        name: `${name.trim()} ${lastName.trim()}`,
+        email: email.toLowerCase().trim(),
+        password: hashed,
+        phone: phone.trim(),
+        dni: dni.trim(),
+        cuit: cuit ? cuit.trim() : null,
+        active: false,
+        pendingApproval: true,
+      },
+    });
+
+    // Notificar a todos los admins activos
+    const admins = await prisma.user.findMany({
+      where: { role: 'ADMIN', active: true },
+      select: { email: true },
+    });
+    if (admins.length > 0) {
+      await sendMail({
+        to: admins.map(a => a.email).join(', '),
+        subject: 'Nuevo registro pendiente · MySelec CRM',
+        html: `
+          <div style="font-family:sans-serif;max-width:500px;margin:0 auto">
+            <h2 style="color:#1B2A4A">Nuevo usuario pendiente de aprobación</h2>
+            <p><strong>${name.trim()} ${lastName.trim()}</strong> (${email}) se registró y está esperando aprobación.</p>
+            <p>DNI: ${dni} ${cuit ? `· CUIT: ${cuit}` : ''}<br/>Teléfono: ${phone}</p>
+            <p>Ingresá al CRM → sección <strong>Equipo</strong> para revisar y aprobar.</p>
+          </div>
+        `,
+      });
+    }
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('register error:', err);
+    res.status(500).json({ error: 'Error al registrar usuario' });
+  }
 });
 
 // POST /api/auth/forgot-password — genera token y envía mail

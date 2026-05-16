@@ -9,14 +9,18 @@ datasource db {
 
 // ─── Usuarios del sistema ───
 model User {
-  id           String   @id @default(uuid())
-  name         String
-  email        String   @unique
-  password     String
-  role         Role     @default(VENDEDOR)
-  zone         String?
-  active       Boolean  @default(true)
-  createdAt    DateTime @default(now())
+  id              String   @id @default(uuid())
+  name            String
+  email           String   @unique
+  password        String
+  role            Role     @default(VENDEDOR)
+  zone            String?
+  phone           String?
+  dni             String?
+  cuit            String?
+  active          Boolean  @default(true)
+  pendingApproval Boolean  @default(false)
+  createdAt       DateTime @default(now())
 
   quotesAssigned    Quote[]              @relation("QuoteSeller")
   ordersAssigned    Order[]              @relation("OrderSeller")

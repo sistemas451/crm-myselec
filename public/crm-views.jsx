@@ -594,15 +594,68 @@ function UserModal({ user, onClose, onSave }) {
   );
 }
 
+function ApproveUserModal({ user, onClose, onApprove }) {
+  const [role, setRole] = React.useState('VENDEDOR');
+  const [loading, setLoading] = React.useState(false);
+
+  const handleApprove = async () => {
+    setLoading(true);
+    await onApprove(user.id, role);
+    setLoading(false);
+  };
+
+  const roleLabel = { ADMIN:'Administrador', VENDEDOR:'Vendedor', LOGISTICA:'Logística' };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-line">
+          <div className="font-semibold">Aprobar usuario</div>
+          <button onClick={onClose} className="btn-ghost p-1"><Icon name="x" size={16}/></button>
+        </div>
+        <div className="p-6 space-y-4">
+          <div className="flex items-center gap-3 p-3 rounded-lg bg-surface">
+            <Avatar name={user.name} size={36}/>
+            <div>
+              <div className="font-semibold text-[13px]">{user.name}</div>
+              <div className="text-[12px] text-ink-500">{user.email}</div>
+            </div>
+          </div>
+          <div>
+            <label className="text-[12px] font-medium text-ink-600 mb-1.5 block">Asignar rol</label>
+            <div className="flex flex-col gap-2">
+              {['VENDEDOR','LOGISTICA','ADMIN'].map(r => (
+                <label key={r} className={cx('flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors',
+                  role === r ? 'border-brand bg-blue-50' : 'border-line hover:bg-surface')}>
+                  <input type="radio" name="role" value={r} checked={role === r} onChange={() => setRole(r)} className="accent-brand"/>
+                  <span className="text-[13px] font-medium">{roleLabel[r]}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 px-6 py-4 border-t border-line">
+          <button onClick={onClose} className="btn-secondary">Cancelar</button>
+          <button onClick={handleApprove} disabled={loading} className="btn-primary">
+            <Icon name="user-check" size={14}/>
+            {loading ? 'Aprobando...' : 'Aprobar acceso'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Team() {
   const { quotes, orders, clients, pushToast } = useApp();
   const [users,    setUsers]    = useState(null);
+  const [pending,  setPending]  = useState([]);
   const [loading,  setLoading]  = useState(true);
-  const [modal,    setModal]    = useState(null); // null | { mode:'create' } | { mode:'edit', user }
+  const [modal,    setModal]    = useState(null); // null | { mode:'create' } | { mode:'edit', user } | { mode:'approve', user }
 
   useEffect(() => {
-    CrmApi.getUsersFull()
-      .then(data => { setUsers(data); setLoading(false); })
+    Promise.all([CrmApi.getUsersFull(), CrmApi.getPendingUsers()])
+      .then(([data, pend]) => { setUsers(data); setPending(pend); setLoading(false); })
       .catch(() => setLoading(false));
   }, []);
 
@@ -621,6 +674,29 @@ function Team() {
       pushToast(`${u.name} ${updated.active ? 'activado' : 'desactivado'}`);
     } catch (err) {
       pushToast(err.message || 'Error', 'bad');
+    }
+  };
+
+  const handleApprove = async (userId, role) => {
+    try {
+      const approved = await CrmApi.approveUser(userId, role);
+      setPending(prev => prev.filter(u => u.id !== userId));
+      setUsers(prev => prev ? [...prev, { ...approved, cotiz:0, ganadas:0, ocs:0, clientes:0 }] : [approved]);
+      setModal(null);
+      pushToast(`Usuario aprobado como ${role}`);
+    } catch (err) {
+      pushToast(err.message || 'Error al aprobar', 'bad');
+    }
+  };
+
+  const handleReject = async (userId, name) => {
+    if (!confirm(`¿Rechazar la solicitud de ${name}? Se eliminará su registro.`)) return;
+    try {
+      await CrmApi.rejectUser(userId);
+      setPending(prev => prev.filter(u => u.id !== userId));
+      pushToast('Solicitud rechazada');
+    } catch (err) {
+      pushToast(err.message || 'Error al rechazar', 'bad');
     }
   };
 
@@ -686,17 +762,33 @@ function Team() {
         title="Usuarios del sistema"
         description="Gestioná roles, zonas asignadas y accesos."
         actions={
-          <button className="btn-primary" onClick={() => setModal({ mode:'create' })}>
-            <Icon name="user-plus" size={14}/>Nuevo usuario
-          </button>
+          <div className="flex items-center gap-2">
+            {pending.length > 0 && (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-xs font-medium">
+                <Icon name="clock" size={13}/>
+                {pending.length} pendiente{pending.length > 1 ? 's' : ''} de aprobación
+              </div>
+            )}
+            <button className="btn-primary" onClick={() => setModal({ mode:'create' })}>
+              <Icon name="user-plus" size={14}/>Nuevo usuario
+            </button>
+          </div>
         }
       />
 
-      {modal && (
+      {modal && modal.mode !== 'approve' && (
         <UserModal
           user={modal.mode === 'edit' ? modal.user : null}
           onClose={() => setModal(null)}
           onSave={handleSave}
+        />
+      )}
+
+      {modal && modal.mode === 'approve' && (
+        <ApproveUserModal
+          user={modal.user}
+          onClose={() => setModal(null)}
+          onApprove={handleApprove}
         />
       )}
 
@@ -705,6 +797,52 @@ function Team() {
           <div className="text-center text-ink-400 py-10">Cargando usuarios…</div>
         ) : (
           <>
+            {pending.length > 0 && (
+              <div className="bg-white rounded-xl border border-amber-200 shadow-card overflow-hidden">
+                <div className="px-5 py-3 border-b border-amber-200 bg-amber-50 flex items-center gap-2">
+                  <Icon name="clock" size={15} className="text-amber-600"/>
+                  <div className="text-sm font-semibold text-amber-800">Solicitudes pendientes de aprobación</div>
+                  <div className="ml-auto text-xs text-amber-600">{pending.length} solicitud{pending.length > 1 ? 'es' : ''}</div>
+                </div>
+                <table className="tbl w-full">
+                  <thead><tr>
+                    <th>Usuario</th><th>Teléfono</th><th>DNI</th><th>CUIT</th><th>Fecha solicitud</th><th></th>
+                  </tr></thead>
+                  <tbody>
+                    {pending.map(u => (
+                      <tr key={u.id}>
+                        <td>
+                          <div className="flex items-center gap-2.5">
+                            <Avatar name={u.name} size={32}/>
+                            <div>
+                              <div className="font-semibold text-[13px]">{u.name}</div>
+                              <div className="text-[11px] text-ink-500">{u.email}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="text-[13px]">{u.phone || '—'}</td>
+                        <td className="text-[13px] mono">{u.dni || '—'}</td>
+                        <td className="text-[13px] mono">{u.cuit || '—'}</td>
+                        <td className="text-[12px] text-ink-500">{new Date(u.createdAt).toLocaleDateString('es-AR')}</td>
+                        <td className="text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <button onClick={() => setModal({ mode:'approve', user: u })}
+                              className="btn-ghost p-1.5 text-ok" title="Aprobar">
+                              <Icon name="user-check" size={14} className="text-ok"/>
+                            </button>
+                            <button onClick={() => handleReject(u.id, u.name)}
+                              className="btn-ghost p-1.5" title="Rechazar">
+                              <Icon name="user-x" size={14} className="text-red-400"/>
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
             <div className="bg-white rounded-xl border border-line shadow-card overflow-hidden">
               <div className="px-5 py-3 border-b border-line flex items-center justify-between">
                 <div className="text-sm font-semibold">Vendedores</div>

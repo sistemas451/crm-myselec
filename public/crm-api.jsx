@@ -56,12 +56,21 @@ const CrmApi = {
   resetPassword: (token, password) => apiFetch('/auth/reset-password', {
     method: 'POST', body: JSON.stringify({ token, password })
   }),
+  register: (data) => apiFetch('/auth/register', {
+    method: 'POST', body: JSON.stringify({
+      name: data.name, lastName: data.lastName, email: data.email,
+      password: data.pass, phone: data.phone, dni: data.dni, cuit: data.cuit || undefined,
+    })
+  }),
 
   // Users (admin)
   getUsersFull: () => apiFetch('/users'),
+  getPendingUsers: () => apiFetch('/users/pending'),
   createUser: (data) => apiFetch('/users', { method: 'POST', body: JSON.stringify(data) }),
   updateUser: (id, data) => apiFetch(`/users/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   toggleUser: (id) => apiFetch(`/users/${id}/toggle`, { method: 'PATCH' }),
+  approveUser: (id, role) => apiFetch(`/users/${id}/approve`, { method: 'POST', body: JSON.stringify({ role }) }),
+  rejectUser: (id) => apiFetch(`/users/${id}/reject`, { method: 'POST' }),
   changeUserPassword: (id, password) => apiFetch(`/users/${id}/password`, {
     method: 'PATCH', body: JSON.stringify({ password })
   }),

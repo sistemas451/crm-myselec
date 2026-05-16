@@ -2,6 +2,7 @@ const express = require('express');
 const bcrypt  = require('bcryptjs');
 const { PrismaClient } = require('@prisma/client');
 const { authMiddleware } = require('../middleware/auth');
+const { sendMail } = require('../services/mailer');
 
 const router = express.Router();
 const prisma  = new PrismaClient();
@@ -11,10 +12,92 @@ const adminOnly = (req, res, next) => {
   next();
 };
 
+// GET /api/users/pending — usuarios pendientes de aprobación (admin only)
+router.get('/pending', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const users = await prisma.user.findMany({
+      where: { pendingApproval: true },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true, name: true, email: true, phone: true, dni: true, cuit: true, createdAt: true },
+    });
+    res.json(users);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/users/:id/approve — aprobar usuario pendiente (admin only)
+router.post('/:id/approve', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { role } = req.body;
+    if (!['ADMIN', 'VENDEDOR', 'LOGISTICA'].includes(role)) {
+      return res.status(400).json({ error: 'Rol inválido' });
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: req.params.id } });
+    if (!user || !user.pendingApproval) return res.status(404).json({ error: 'Usuario no encontrado o no está pendiente' });
+
+    const updated = await prisma.user.update({
+      where: { id: req.params.id },
+      data: { role, active: true, pendingApproval: false },
+      select: { id: true, name: true, email: true, role: true, zone: true, active: true, createdAt: true },
+    });
+
+    const baseUrl = process.env.APP_URL || `http://localhost:${process.env.PORT || 3000}`;
+    await sendMail({
+      to: user.email,
+      subject: 'Tu cuenta fue aprobada · MySelec CRM',
+      html: `
+        <div style="font-family:sans-serif;max-width:500px;margin:0 auto">
+          <h2 style="color:#1B2A4A">¡Bienvenido/a a MySelec CRM!</h2>
+          <p>Hola ${user.name}, tu cuenta fue aprobada. Ya podés ingresar al sistema.</p>
+          <p>
+            <a href="${baseUrl}"
+               style="display:inline-block;padding:12px 24px;background:#3B82F6;color:white;text-decoration:none;border-radius:8px;font-weight:600">
+              Ingresar al CRM
+            </a>
+          </p>
+        </div>
+      `,
+    });
+
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/users/:id/reject — rechazar usuario pendiente (admin only)
+router.post('/:id/reject', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.params.id } });
+    if (!user || !user.pendingApproval) return res.status(404).json({ error: 'Usuario no encontrado o no está pendiente' });
+
+    await prisma.user.delete({ where: { id: req.params.id } });
+
+    await sendMail({
+      to: user.email,
+      subject: 'Tu solicitud de acceso · MySelec CRM',
+      html: `
+        <div style="font-family:sans-serif;max-width:500px;margin:0 auto">
+          <h2 style="color:#1B2A4A">Solicitud de acceso</h2>
+          <p>Hola ${user.name}, lamentablemente tu solicitud de acceso a MySelec CRM no fue aprobada.</p>
+          <p>Si creés que es un error, contactá al administrador del sistema.</p>
+        </div>
+      `,
+    });
+
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/users — lista usuarios (admin: todos, vendedor: solo activos básico)
 router.get('/', authMiddleware, async (req, res) => {
   try {
     const users = await prisma.user.findMany({
+      where: { pendingApproval: false },
       orderBy: [{ role: 'asc' }, { name: 'asc' }],
       select: { id: true, name: true, email: true, role: true, zone: true, active: true, createdAt: true },
     });
@@ -65,6 +148,18 @@ router.post('/', authMiddleware, adminOnly, async (req, res) => {
 router.put('/:id', authMiddleware, adminOnly, async (req, res) => {
   try {
     const { name, email, role, zone, password } = req.body;
+
+    // Protección: no degradar al último admin activo
+    if (role && role !== 'ADMIN') {
+      const target = await prisma.user.findUnique({ where: { id: req.params.id } });
+      if (target && target.role === 'ADMIN' && target.active) {
+        const activeAdmins = await prisma.user.count({ where: { role: 'ADMIN', active: true } });
+        if (activeAdmins <= 1) {
+          return res.status(400).json({ error: 'Debe haber al menos un administrador activo' });
+        }
+      }
+    }
+
     const data = {};
     if (name)  data.name  = name;
     if (email) data.email = email;
@@ -90,6 +185,14 @@ router.patch('/:id/toggle', authMiddleware, adminOnly, async (req, res) => {
     const user = await prisma.user.findUnique({ where: { id: req.params.id } });
     if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
     if (user.id === req.user.id) return res.status(400).json({ error: 'No podés desactivarte a vos mismo' });
+
+    // Protección: no dejar sin admins activos
+    if (user.role === 'ADMIN' && user.active) {
+      const activeAdmins = await prisma.user.count({ where: { role: 'ADMIN', active: true } });
+      if (activeAdmins <= 1) {
+        return res.status(400).json({ error: 'Debe haber al menos un administrador activo' });
+      }
+    }
 
     const updated = await prisma.user.update({
       where: { id: req.params.id },
