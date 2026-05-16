@@ -33,7 +33,7 @@ function AppRoot() {
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-navy-950">
       <div className="text-center">
-        <Logo size={48} />
+        <Logo size={72} />
         <div className="text-white/60 mt-4 text-sm">Cargando sistema...</div>
       </div>
     </div>
@@ -234,9 +234,8 @@ function Login({ onLogin }) {
     <div className="min-h-screen flex items-center justify-center relative overflow-hidden" style={bgStyle}>
       <div className="relative flex items-center justify-center p-8 w-full">
         <div className="w-full max-w-sm bg-white rounded-2xl shadow-[0_25px_60px_rgba(0,0,0,0.4)] p-8 border border-line">
-          <div className="flex items-center gap-2 mb-6">
-            <Logo size={28} tone="dark"/>
-            <div className="font-bold tracking-wider text-navy-900">MYSELEC</div>
+          <div className="flex items-center mb-6">
+            <Logo size={52} tone="dark"/>
           </div>
 
           {screen === 'login' && (
@@ -393,12 +392,8 @@ function Sidebar({ role, screen, setScreen }) {
 
   return (
     <aside className="w-[244px] shrink-0 bg-navy-900 text-white flex flex-col min-h-screen">
-      <div className="px-5 pt-5 pb-4 flex items-center gap-2.5 border-b border-white/5">
-        <Logo size={32}/>
-        <div>
-          <div className="font-bold tracking-wider text-[15px]">MYSELEC</div>
-          <div className="text-[10px] uppercase tracking-[.18em] text-white/45">CRM Comercial</div>
-        </div>
+      <div className="px-5 pt-5 pb-4 flex items-center justify-center border-b border-white/5">
+        <Logo size={56}/>
       </div>
 
       <nav className="flex-1 py-4 px-3 space-y-0.5">
