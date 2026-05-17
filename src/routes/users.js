@@ -1,8 +1,30 @@
 const express = require('express');
 const bcrypt  = require('bcryptjs');
+const path    = require('path');
+const fs      = require('fs');
+const multer  = require('multer');
 const { PrismaClient } = require('@prisma/client');
 const { authMiddleware } = require('../middleware/auth');
 const { sendMail } = require('../services/mailer');
+
+// Multer para avatares
+const AVATARS_DIR = path.join(__dirname, '..', '..', 'uploads', 'avatars');
+if (!fs.existsSync(AVATARS_DIR)) fs.mkdirSync(AVATARS_DIR, { recursive: true });
+const avatarStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, AVATARS_DIR),
+  filename:    (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
+    cb(null, `avatar-${req.params.id}-${Date.now()}${ext}`);
+  },
+});
+const uploadAvatar = multer({
+  storage: avatarStorage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) cb(null, true);
+    else cb(new Error('Solo se permiten imágenes'));
+  },
+});
 
 const router = express.Router();
 const prisma  = new PrismaClient();
@@ -216,6 +238,53 @@ router.patch('/:id/password', authMiddleware, async (req, res) => {
     const hashed = await bcrypt.hash(password, 10);
     await prisma.user.update({ where: { id: req.params.id }, data: { password: hashed } });
     res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /api/users/:id/profile — actualizar nombre (propio usuario o admin)
+router.patch('/:id/profile', authMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'ADMIN' && req.user.id !== req.params.id) {
+      return res.status(403).json({ error: 'Sin permiso' });
+    }
+    const { name } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ error: 'Nombre requerido' });
+
+    const user = await prisma.user.update({
+      where: { id: req.params.id },
+      data: { name: name.trim() },
+      select: { id: true, name: true, email: true, role: true, zone: true, avatar: true },
+    });
+    res.json(user);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/users/:id/avatar — subir foto de perfil (propio usuario o admin)
+router.post('/:id/avatar', authMiddleware, uploadAvatar.single('avatar'), async (req, res) => {
+  try {
+    if (req.user.role !== 'ADMIN' && req.user.id !== req.params.id) {
+      return res.status(403).json({ error: 'Sin permiso' });
+    }
+    if (!req.file) return res.status(400).json({ error: 'No se recibió imagen' });
+
+    // Borrar avatar anterior si existe
+    const existing = await prisma.user.findUnique({ where: { id: req.params.id }, select: { avatar: true } });
+    if (existing?.avatar) {
+      const oldPath = path.join(__dirname, '..', '..', existing.avatar.replace(/^\//, ''));
+      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+    }
+
+    const avatarUrl = `/uploads/avatars/${req.file.filename}`;
+    const user = await prisma.user.update({
+      where: { id: req.params.id },
+      data: { avatar: avatarUrl },
+      select: { id: true, name: true, email: true, role: true, zone: true, avatar: true },
+    });
+    res.json(user);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

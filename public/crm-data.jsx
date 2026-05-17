@@ -56,10 +56,18 @@ function Logo({ size=28, tone='light' }) {
 }
 
 // ---------- Avatar ----------
-function Avatar({ name, size=24, tone }) {
+function Avatar({ name, size=24, tone, src }) {
   const palette = ['#1B2A4A','#2D4A6F','#3B82F6','#0EA5E9','#8B5CF6','#10B981','#F59E0B'];
   const idx = (name || '?').split('').reduce((a,c)=>a+c.charCodeAt(0),0) % palette.length;
   const bg = tone || palette[idx];
+  if (src) {
+    return (
+      <img src={src} alt={name} title={name}
+        className="rounded-full object-cover shrink-0"
+        style={{ width:size, height:size }}
+      />
+    );
+  }
   return (
     <span
       className="inline-flex items-center justify-center rounded-full text-white font-semibold leading-none shrink-0"

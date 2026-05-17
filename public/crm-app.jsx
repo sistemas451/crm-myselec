@@ -49,6 +49,8 @@ function AppRoot() {
 function App() {
   const { roleKey, setRoleKey, currentUserId, setCurrentUserId, users, openModal, closeAllModals } = useApp();
   const [screen, setScreen] = useState('dashboard');
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [profileUser, setProfileUser] = useState(null);
   const loggedUser = CrmAuth.getUser();
 
   // Initialize role and user ID from token on mount
@@ -75,21 +77,36 @@ function App() {
         e.preventDefault();
         openModal('search');
       }
-      if (e.key === 'Escape') closeAllModals();
+      if (e.key === 'Escape') { closeAllModals(); setProfileOpen(false); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [openModal, closeAllModals]);
 
   const user = users.find(u => u.id === currentUserId) || users[0];
+  // Merge avatar desde profileUser si fue actualizado en esta sesión
+  const displayUser = profileUser ? { ...user, ...profileUser } : user;
 
   const openDetail = (code, kind='quote') => openModal(kind==='quote'?'quoteDetail':'orderDetail', { code });
 
   return (
     <div className="min-h-screen flex bg-surface" data-screen-label={`${roleKey} · ${screen}`}>
-      <Sidebar role={roleKey} screen={screen} setScreen={setScreen}/>
+      <Sidebar role={roleKey} screen={screen} setScreen={setScreen}
+        user={displayUser} onProfileOpen={() => setProfileOpen(true)}/>
+      {profileOpen && (
+        <ProfileModal
+          user={displayUser}
+          onClose={() => setProfileOpen(false)}
+          onUpdated={(updated) => {
+            setProfileUser(updated);
+            // Actualizar también el localStorage del CrmAuth
+            const stored = CrmAuth.getUser();
+            if (stored) CrmAuth.setUser({ ...stored, ...updated });
+          }}
+        />
+      )}
       <div className="flex-1 min-w-0 flex flex-col">
-        <Topbar user={user} roleKey={roleKey} setRoleKey={setRoleKey}/>
+        <Topbar user={displayUser} roleKey={roleKey} setRoleKey={setRoleKey}/>
         <main className="flex-1 min-w-0 overflow-x-hidden">
           {screen === 'dashboard'  && <Dashboard/>}
           {screen === 'quotes'     && <KanbanQuotes onOpen={(c)=>openDetail(c,'quote')}/>}
@@ -102,6 +119,140 @@ function App() {
           {screen === 'team'       && <Team/>}
           {screen === 'config'     && <Config/>}
         </main>
+      </div>
+    </div>
+  );
+}
+
+// ---------- ProfileModal ----------
+function ProfileModal({ user, onClose, onUpdated }) {
+  const [name,      setName]      = useState(user?.name || '');
+  const [pass,      setPass]      = useState('');
+  const [pass2,     setPass2]     = useState('');
+  const [preview,   setPreview]   = useState(user?.avatar || null);
+  const [avatarFile,setAvatarFile]= useState(null);
+  const [loading,   setLoading]   = useState(false);
+  const [error,     setError]     = useState('');
+  const [info,      setInfo]      = useState('');
+  const fileRef = React.useRef();
+
+  const handleAvatarChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setAvatarFile(file);
+    setPreview(URL.createObjectURL(file));
+  };
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    setError(''); setInfo(''); setLoading(true);
+    try {
+      let updated = { ...user };
+
+      // Actualizar nombre si cambió
+      if (name.trim() && name.trim() !== user?.name) {
+        const res = await CrmApi.updateProfile(user.id, { name: name.trim() });
+        updated = { ...updated, ...res };
+      }
+
+      // Subir avatar si eligió uno
+      if (avatarFile) {
+        const res = await CrmApi.uploadAvatar(user.id, avatarFile);
+        updated = { ...updated, ...res };
+      }
+
+      // Cambiar contraseña si completó los campos
+      if (pass) {
+        const pwErr = validatePassword(pass);
+        if (pwErr) { setError(pwErr); setLoading(false); return; }
+        if (pass !== pass2) { setError('Las contraseñas no coinciden'); setLoading(false); return; }
+        await CrmApi.changeUserPassword(user.id, pass);
+      }
+
+      onUpdated(updated);
+      setInfo('Perfil actualizado correctamente');
+      setPass(''); setPass2(''); setAvatarFile(null);
+    } catch (err) {
+      setError(err.message || 'Error al guardar');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleLogout = () => {
+    CrmAuth.clearToken();
+    localStorage.removeItem('crm_user');
+    window.location.reload();
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 z-50 flex items-end sm:items-center justify-start p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm ml-2"
+           onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-line">
+          <div className="font-semibold text-ink-900">Mi perfil</div>
+          <button onClick={onClose} className="btn-ghost p-1"><Icon name="x" size={16}/></button>
+        </div>
+
+        <form onSubmit={handleSave}>
+          <div className="p-6 space-y-5">
+            {error && <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">{error}</div>}
+            {info  && <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm">{info}</div>}
+
+            {/* Foto de perfil */}
+            <div className="flex flex-col items-center gap-3">
+              <div className="relative cursor-pointer group" onClick={() => fileRef.current?.click()}>
+                {preview
+                  ? <img src={preview} alt="avatar" className="w-20 h-20 rounded-full object-cover border-2 border-line"/>
+                  : <Avatar name={user?.name} size={80}/>
+                }
+                <div className="absolute inset-0 rounded-full bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                  <Icon name="camera" size={20} className="text-white"/>
+                </div>
+              </div>
+              <button type="button" onClick={() => fileRef.current?.click()}
+                className="text-xs text-brand hover:underline">
+                {preview ? 'Cambiar foto' : 'Subir foto'}
+              </button>
+              <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarChange}/>
+            </div>
+
+            {/* Nombre */}
+            <div>
+              <label className="text-xs font-medium text-ink-700 mb-1 block">Nombre completo</label>
+              <input className="inp w-full" value={name} onChange={e=>setName(e.target.value)} placeholder="Tu nombre"/>
+            </div>
+
+            {/* Email (solo lectura) */}
+            <div>
+              <label className="text-xs font-medium text-ink-700 mb-1 block">Email</label>
+              <input className="inp w-full bg-surface text-ink-500 cursor-not-allowed" value={user?.email || ''} readOnly/>
+            </div>
+
+            {/* Cambiar contraseña */}
+            <div className="border-t border-line pt-4">
+              <div className="text-xs font-semibold text-ink-700 mb-3">Cambiar contraseña <span className="text-ink-400 font-normal">(opcional)</span></div>
+              <div className="space-y-3">
+                <PasswordInput value={pass} onChange={e=>setPass(e.target.value)} placeholder="Nueva contraseña" autoComplete="new-password"/>
+                <PasswordInput value={pass2} onChange={e=>setPass2(e.target.value)} placeholder="Confirmar contraseña" autoComplete="new-password"/>
+                {pass && <p className="text-[11px] text-ink-400">Mínimo 8 caracteres, una mayúscula y un número.</p>}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between px-6 py-4 border-t border-line">
+            <button type="button" onClick={handleLogout}
+              className="flex items-center gap-1.5 text-xs text-bad hover:text-red-700 font-medium">
+              <Icon name="log-out" size={14}/>Cerrar sesión
+            </button>
+            <div className="flex gap-2">
+              <button type="button" onClick={onClose} className="btn-secondary">Cancelar</button>
+              <button type="submit" disabled={loading} className="btn-primary">
+                {loading ? 'Guardando...' : 'Guardar cambios'}
+              </button>
+            </div>
+          </div>
+        </form>
       </div>
     </div>
   );
@@ -367,7 +518,7 @@ function Login({ onLogin }) {
 }
 
 // ---------- Sidebar ----------
-function Sidebar({ role, screen, setScreen }) {
+function Sidebar({ role, screen, setScreen, user, onProfileOpen }) {
   const navAdmin = [
     { id:'dashboard', label:'Dashboard',             icon:'layout-dashboard' },
     { id:'quotes',    label:'Cotizaciones',          icon:'clipboard-list', sub:'Fase 1' },
@@ -386,9 +537,10 @@ function Sidebar({ role, screen, setScreen }) {
     { id:'articles',  label:'Artículos',             icon:'box',        sub:'Catálogo' },
   ];
   const navLog = [
-    { id:'ops',       label:'Operaciones',           icon:'truck', sub:'Fase 2' },
+    { id:'ops', label:'Operaciones', icon:'truck', sub:'Fase 2' },
   ];
   const nav = role === 'admin' ? navAdmin : role === 'seller' ? navSeller : navLog;
+  const roleLabel = { ADMIN:'Administrador', VENDEDOR:'Vendedor', LOGISTICA:'Logística' };
 
   return (
     <aside className="w-[244px] shrink-0 bg-navy-900 text-white flex flex-col min-h-screen">
@@ -418,8 +570,17 @@ function Sidebar({ role, screen, setScreen }) {
         ))}
       </nav>
 
-<div className="px-4 py-3 border-t border-white/5 text-[11px] text-white/40 font-mono">
-        v2026.04 · conectado
+      {/* Perfil al pie del sidebar */}
+      <div className="px-3 pb-3 border-t border-white/5 pt-3">
+        <button onClick={onProfileOpen}
+          className="w-full flex items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-white/8 transition-colors text-left group">
+          <Avatar name={user?.name} size={34} src={user?.avatar}/>
+          <div className="flex-1 min-w-0">
+            <div className="text-[13px] font-semibold text-white truncate">{user?.name || '—'}</div>
+            <div className="text-[11px] text-white/45">{roleLabel[user?.role] || '—'}</div>
+          </div>
+          <Icon name="settings" size={14} className="text-white/30 group-hover:text-white/60 shrink-0"/>
+        </button>
       </div>
     </aside>
   );
@@ -513,16 +674,10 @@ function Topbar({ user, roleKey, setRoleKey }) {
         {notifOpen && <NotificationsPopover onClose={()=>setNotifOpen(false)}/>}
       </div>
 
-      <div className="flex items-center gap-2.5 pl-3 border-l border-line">
-        <Avatar name={user.name} size={32}/>
-        <div className="leading-tight">
-          <div className="text-sm font-semibold text-ink-900">{user.name}</div>
-          <div className="text-[11px] text-ink-500">{user.role} · {user.zone || '—'}</div>
-        </div>
-        <button onClick={handleLogout} title="Cerrar sesión" className="w-8 h-8 rounded-lg hover:bg-surface flex items-center justify-center text-ink-400 hover:text-bad">
-          <Icon name="log-out" size={15}/>
-        </button>
-      </div>
+      <button onClick={handleLogout} title="Cerrar sesión"
+        className="w-9 h-9 rounded-lg hover:bg-surface flex items-center justify-center text-ink-400 hover:text-bad border border-transparent hover:border-line transition-colors">
+        <Icon name="log-out" size={15}/>
+      </button>
     </header>
   );
 }

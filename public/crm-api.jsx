@@ -74,6 +74,21 @@ const CrmApi = {
   changeUserPassword: (id, password) => apiFetch(`/users/${id}/password`, {
     method: 'PATCH', body: JSON.stringify({ password })
   }),
+  updateProfile: (id, data) => apiFetch(`/users/${id}/profile`, {
+    method: 'PATCH', body: JSON.stringify(data)
+  }),
+  uploadAvatar: async (id, file) => {
+    const form = new FormData();
+    form.append('avatar', file);
+    const token = localStorage.getItem('crm_token');
+    const res = await fetch(`/api/users/${id}/avatar`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: form,
+    });
+    if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Error al subir foto'); }
+    return res.json();
+  },
 
   // Quotes
   getQuotes: () => apiFetch('/quotes'),
