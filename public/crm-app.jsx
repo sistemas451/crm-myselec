@@ -124,60 +124,167 @@ function App() {
   );
 }
 
-// ---------- ProfileModal ----------
-function ProfileModal({ user, onClose, onUpdated }) {
-  const [name,      setName]      = useState(user?.name || '');
-  const [currentPass, setCurrentPass] = useState('');
-  const [pass,      setPass]      = useState('');
-  const [pass2,     setPass2]     = useState('');
-  const [preview,   setPreview]   = useState(user?.avatar || null);
-  const [avatarFile,setAvatarFile]= useState(null);
-  const [loading,   setLoading]   = useState(false);
-  const [error,     setError]     = useState('');
-  const [info,      setInfo]      = useState('');
-  const fileRef = React.useRef();
+// ---------- ImageCropper ----------
+function ImageCropper({ src, onConfirm, onCancel }) {
+  const [zoom,   setZoom]   = useState(1);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [drag,   setDrag]   = useState(null);
+  const imgRef   = React.useRef();
+  const SIZE     = 200;
 
-  const handleAvatarChange = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    setAvatarFile(file);
-    setPreview(URL.createObjectURL(file));
+  const onMouseDown = (e) => {
+    e.preventDefault();
+    setDrag({ sx: e.clientX - offset.x, sy: e.clientY - offset.y });
+  };
+  const onMouseMove = (e) => {
+    if (!drag) return;
+    setOffset({ x: e.clientX - drag.sx, y: e.clientY - drag.sy });
+  };
+  const onMouseUp = () => setDrag(null);
+
+  const onTouchStart = (e) => {
+    const t = e.touches[0];
+    setDrag({ sx: t.clientX - offset.x, sy: t.clientY - offset.y });
+  };
+  const onTouchMove = (e) => {
+    if (!drag) return;
+    const t = e.touches[0];
+    setOffset({ x: t.clientX - drag.sx, y: t.clientY - drag.sy });
   };
 
-  const handleSave = async (e) => {
+  const handleConfirm = () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = SIZE; canvas.height = SIZE;
+    const ctx = canvas.getContext('2d');
+    ctx.beginPath();
+    ctx.arc(SIZE/2, SIZE/2, SIZE/2, 0, Math.PI*2);
+    ctx.clip();
+    const img = imgRef.current;
+    const naturalW = img.naturalWidth;
+    const naturalH = img.naturalHeight;
+    const base = Math.min(naturalW, naturalH);
+    const scaledW = (naturalW / base) * SIZE * zoom;
+    const scaledH = (naturalH / base) * SIZE * zoom;
+    const dx = (SIZE - scaledW) / 2 + offset.x;
+    const dy = (SIZE - scaledH) / 2 + offset.y;
+    ctx.drawImage(img, dx, dy, scaledW, scaledH);
+    canvas.toBlob(blob => onConfirm(blob), 'image/jpeg', 0.92);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/70 z-[60] flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xs p-6">
+        <div className="font-semibold text-ink-900 mb-4 text-center">Ajustar foto</div>
+
+        {/* Área de crop */}
+        <div className="flex justify-center mb-4">
+          <div style={{ width: SIZE, height: SIZE, borderRadius: '50%', overflow: 'hidden', cursor: drag ? 'grabbing' : 'grab', border: '3px solid #3B82F6', background: '#f1f5f9' }}
+            onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={onMouseUp} onMouseLeave={onMouseUp}
+            onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onMouseUp}>
+            <img ref={imgRef} src={src} alt="crop" draggable={false}
+              style={{
+                width: '100%', height: '100%', objectFit: 'contain',
+                transform: `scale(${zoom}) translate(${offset.x / zoom}px, ${offset.y / zoom}px)`,
+                transformOrigin: 'center', userSelect: 'none', pointerEvents: 'none',
+              }}
+            />
+          </div>
+        </div>
+
+        {/* Zoom */}
+        <div className="flex items-center gap-3 mb-5">
+          <Icon name="image" size={13} className="text-ink-400"/>
+          <input type="range" min="0.5" max="3" step="0.05" value={zoom}
+            onChange={e => setZoom(parseFloat(e.target.value))}
+            className="flex-1 accent-brand"/>
+          <Icon name="zoom-in" size={15} className="text-ink-400"/>
+        </div>
+        <p className="text-[11px] text-ink-400 text-center mb-4">Arrastrá para mover · Deslizá para hacer zoom</p>
+
+        <div className="flex gap-2">
+          <button type="button" onClick={onCancel} className="btn-secondary flex-1">Cancelar</button>
+          <button type="button" onClick={handleConfirm} className="btn-primary flex-1">Confirmar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------- ProfileModal ----------
+function ProfileModal({ user, onClose, onUpdated }) {
+  const [tab,         setTab]         = useState('datos');
+  const [name,        setName]        = useState(user?.name || '');
+  const [phone,       setPhone]       = useState(user?.phone || '');
+  const [currentPass, setCurrentPass] = useState('');
+  const [pass,        setPass]        = useState('');
+  const [pass2,       setPass2]       = useState('');
+  const [logoutAll,   setLogoutAll]   = useState(false);
+  const [preview,     setPreview]     = useState(user?.avatar || null);
+  const [avatarFile,  setAvatarFile]  = useState(null);
+  const [cropSrc,     setCropSrc]     = useState(null);
+  const [loading,     setLoading]     = useState(false);
+  const [error,       setError]       = useState('');
+  const [info,        setInfo]        = useState('');
+  const [pwChangedAt, setPwChangedAt] = useState(user?.passwordChangedAt || null);
+  const fileRef = React.useRef();
+
+  const clearMessages = () => { setError(''); setInfo(''); };
+
+  const handleFileSelect = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setCropSrc(URL.createObjectURL(file));
+    e.target.value = '';
+  };
+
+  const handleCropConfirm = (blob) => {
+    const file = new File([blob], 'avatar.jpg', { type: 'image/jpeg' });
+    setAvatarFile(file);
+    setPreview(URL.createObjectURL(blob));
+    setCropSrc(null);
+  };
+
+  const handleSaveDatos = async (e) => {
     e.preventDefault();
-    setError(''); setInfo(''); setLoading(true);
+    clearMessages(); setLoading(true);
     try {
       let updated = { ...user };
-
-      // Actualizar nombre si cambió
-      if (name.trim() && name.trim() !== user?.name) {
-        const res = await CrmApi.updateProfile(user.id, { name: name.trim() });
+      if (name.trim() !== (user?.name || '') || phone.trim() !== (user?.phone || '')) {
+        const res = await CrmApi.updateProfile(user.id, { name: name.trim(), phone: phone.trim() });
         updated = { ...updated, ...res };
       }
-
-      // Subir avatar si eligió uno
       if (avatarFile) {
         const res = await CrmApi.uploadAvatar(user.id, avatarFile);
         updated = { ...updated, ...res };
       }
-
-      // Cambiar contraseña si completó los campos
-      if (pass) {
-        const pwErr = validatePassword(pass);
-        if (pwErr) { setError(pwErr); setLoading(false); return; }
-        if (pass !== pass2) { setError('Las contraseñas no coinciden'); setLoading(false); return; }
-        await CrmApi.changeUserPassword(user.id, pass, currentPass);
-      }
-
       onUpdated(updated);
-      setInfo('Perfil actualizado correctamente');
-      setPass(''); setPass2(''); setCurrentPass(''); setAvatarFile(null);
+      setAvatarFile(null);
+      setInfo('Datos actualizados');
     } catch (err) {
       setError(err.message || 'Error al guardar');
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
+  };
+
+  const handleSaveSeguridad = async (e) => {
+    e.preventDefault();
+    clearMessages();
+    if (!pass) { setError('Ingresá la nueva contraseña'); return; }
+    const pwErr = validatePassword(pass);
+    if (pwErr) { setError(pwErr); return; }
+    if (pass !== pass2) { setError('Las contraseñas no coinciden'); return; }
+    setLoading(true);
+    try {
+      const res = await CrmApi.changeUserPassword(user.id, pass, currentPass);
+      setPwChangedAt(res.passwordChangedAt);
+      onUpdated({ ...user, passwordChangedAt: res.passwordChangedAt });
+      setPass(''); setPass2(''); setCurrentPass('');
+      setInfo('Contraseña actualizada. Te enviamos un mail de confirmación.');
+      if (logoutAll) {
+        setTimeout(() => { CrmAuth.clearToken(); localStorage.removeItem('crm_user'); window.location.reload(); }, 1800);
+      }
+    } catch (err) {
+      setError(err.message || 'Error al cambiar contraseña');
+    } finally { setLoading(false); }
   };
 
   const handleLogout = () => {
@@ -186,77 +293,140 @@ function ProfileModal({ user, onClose, onUpdated }) {
     window.location.reload();
   };
 
+  const fmtDate = (d) => d ? new Date(d).toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }) : 'Nunca';
+
   return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-end sm:items-center justify-start p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm ml-2"
-           onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-6 py-4 border-b border-line">
-          <div className="font-semibold text-ink-900">Mi perfil</div>
-          <button onClick={onClose} className="btn-ghost p-1"><Icon name="x" size={16}/></button>
-        </div>
+    <>
+      {cropSrc && <ImageCropper src={cropSrc} onConfirm={handleCropConfirm} onCancel={() => setCropSrc(null)}/>}
 
-        <form onSubmit={handleSave}>
-          <div className="p-6 space-y-5">
-            {error && <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">{error}</div>}
-            {info  && <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm">{info}</div>}
+      <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-start p-4" onClick={onClose}>
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm ml-2 flex flex-col max-h-[90vh]"
+             onClick={e => e.stopPropagation()}>
 
-            {/* Foto de perfil */}
-            <div className="flex flex-col items-center gap-3">
-              <div className="relative cursor-pointer group" onClick={() => fileRef.current?.click()}>
-                {preview
-                  ? <img src={preview} alt="avatar" className="w-20 h-20 rounded-full object-cover border-2 border-line"/>
-                  : <Avatar name={user?.name} size={80}/>
-                }
-                <div className="absolute inset-0 rounded-full bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                  <Icon name="camera" size={20} className="text-white"/>
+          {/* Header */}
+          <div className="flex items-center justify-between px-6 py-4 border-b border-line shrink-0">
+            <div className="font-semibold text-ink-900">Mi perfil</div>
+            <button onClick={onClose} className="btn-ghost p-1"><Icon name="x" size={16}/></button>
+          </div>
+
+          {/* Tabs */}
+          <div className="flex border-b border-line shrink-0">
+            {[{k:'datos',label:'Datos',icon:'user'},{k:'seguridad',label:'Seguridad',icon:'shield'}].map(t => (
+              <button key={t.k} onClick={() => { setTab(t.k); clearMessages(); }}
+                className={cx('flex-1 flex items-center justify-center gap-2 py-3 text-[13px] font-medium transition-colors border-b-2',
+                  tab === t.k ? 'border-brand text-brand' : 'border-transparent text-ink-500 hover:text-ink-800')}>
+                <Icon name={t.icon} size={14}/>{t.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Contenido scrollable */}
+          <div className="overflow-y-auto flex-1">
+
+            {/* ── TAB DATOS ── */}
+            {tab === 'datos' && (
+              <form onSubmit={handleSaveDatos}>
+                <div className="p-6 space-y-4">
+                  {error && <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">{error}</div>}
+                  {info  && <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm">{info}</div>}
+
+                  {/* Foto */}
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="relative cursor-pointer group" onClick={() => fileRef.current?.click()}>
+                      {preview
+                        ? <img src={preview} alt="avatar" className="w-20 h-20 rounded-full object-cover border-2 border-line"/>
+                        : <Avatar name={user?.name} size={80}/>
+                      }
+                      <div className="absolute inset-0 rounded-full bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                        <Icon name="camera" size={20} className="text-white"/>
+                      </div>
+                    </div>
+                    <button type="button" onClick={() => fileRef.current?.click()}
+                      className="text-xs text-brand hover:underline">{preview ? 'Cambiar foto' : 'Subir foto'}</button>
+                    <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFileSelect}/>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-medium text-ink-700 mb-1 block">Nombre completo</label>
+                    <input className="inp w-full" value={name} onChange={e=>setName(e.target.value)} placeholder="Tu nombre"/>
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-ink-700 mb-1 block">Teléfono</label>
+                    <input className="inp w-full" value={phone} onChange={e=>setPhone(e.target.value)} placeholder="11 1234-5678"/>
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-ink-700 mb-1 block">Email</label>
+                    <input className="inp w-full bg-surface text-ink-500 cursor-not-allowed" value={user?.email || ''} readOnly/>
+                  </div>
                 </div>
-              </div>
-              <button type="button" onClick={() => fileRef.current?.click()}
-                className="text-xs text-brand hover:underline">
-                {preview ? 'Cambiar foto' : 'Subir foto'}
-              </button>
-              <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarChange}/>
-            </div>
+                <div className="flex items-center justify-between px-6 py-4 border-t border-line">
+                  <button type="button" onClick={handleLogout}
+                    className="flex items-center gap-1.5 text-xs text-bad hover:text-red-700 font-medium">
+                    <Icon name="log-out" size={14}/>Cerrar sesión
+                  </button>
+                  <button type="submit" disabled={loading} className="btn-primary">
+                    {loading ? 'Guardando...' : 'Guardar'}
+                  </button>
+                </div>
+              </form>
+            )}
 
-            {/* Nombre */}
-            <div>
-              <label className="text-xs font-medium text-ink-700 mb-1 block">Nombre completo</label>
-              <input className="inp w-full" value={name} onChange={e=>setName(e.target.value)} placeholder="Tu nombre"/>
-            </div>
+            {/* ── TAB SEGURIDAD ── */}
+            {tab === 'seguridad' && (
+              <form onSubmit={handleSaveSeguridad}>
+                <div className="p-6 space-y-4">
+                  {error && <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">{error}</div>}
+                  {info  && <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm">{info}</div>}
 
-            {/* Email (solo lectura) */}
-            <div>
-              <label className="text-xs font-medium text-ink-700 mb-1 block">Email</label>
-              <input className="inp w-full bg-surface text-ink-500 cursor-not-allowed" value={user?.email || ''} readOnly/>
-            </div>
+                  {/* Último cambio */}
+                  <div className="flex items-center gap-3 p-3 rounded-lg bg-surface border border-line">
+                    <Icon name="clock" size={15} className="text-ink-400 shrink-0"/>
+                    <div>
+                      <div className="text-[11px] text-ink-500 uppercase tracking-wider font-medium">Último cambio de contraseña</div>
+                      <div className="text-[13px] font-semibold text-ink-800">{fmtDate(pwChangedAt)}</div>
+                    </div>
+                  </div>
 
-            {/* Cambiar contraseña */}
-            <div className="border-t border-line pt-4">
-              <div className="text-xs font-semibold text-ink-700 mb-3">Cambiar contraseña <span className="text-ink-400 font-normal">(opcional)</span></div>
-              <div className="space-y-3">
-                <PasswordInput value={currentPass} onChange={e=>setCurrentPass(e.target.value)} placeholder="Contraseña actual" autoComplete="current-password"/>
-                <PasswordInput value={pass} onChange={e=>setPass(e.target.value)} placeholder="Nueva contraseña" autoComplete="new-password"/>
-                {pass && <PasswordStrength password={pass}/>}
-                <PasswordInput value={pass2} onChange={e=>setPass2(e.target.value)} placeholder="Confirmar nueva contraseña" autoComplete="new-password"/>
-              </div>
-            </div>
+                  <div className="space-y-3">
+                    <div>
+                      <label className="text-xs font-medium text-ink-700 mb-1 block">Contraseña actual</label>
+                      <PasswordInput value={currentPass} onChange={e=>setCurrentPass(e.target.value)} placeholder="Tu contraseña actual" autoComplete="current-password"/>
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-ink-700 mb-1 block">Nueva contraseña</label>
+                      <PasswordInput value={pass} onChange={e=>setPass(e.target.value)} placeholder="Nueva contraseña" autoComplete="new-password"/>
+                      <PasswordStrength password={pass}/>
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-ink-700 mb-1 block">Confirmar nueva contraseña</label>
+                      <PasswordInput value={pass2} onChange={e=>setPass2(e.target.value)} placeholder="Repetí la nueva contraseña" autoComplete="new-password"/>
+                    </div>
+                  </div>
+
+                  {/* Cerrar todas las sesiones */}
+                  <label className="flex items-start gap-3 p-3 rounded-lg border border-line hover:bg-surface cursor-pointer">
+                    <input type="checkbox" checked={logoutAll} onChange={e=>setLogoutAll(e.target.checked)}
+                      className="mt-0.5 accent-brand w-4 h-4 shrink-0"/>
+                    <div>
+                      <div className="text-[13px] font-medium text-ink-800">Cerrar sesión en todos los dispositivos</div>
+                      <div className="text-[11px] text-ink-400 mt-0.5">Invalidará todos los tokens activos, incluido este.</div>
+                    </div>
+                  </label>
+                </div>
+
+                <div className="flex justify-end gap-2 px-6 py-4 border-t border-line">
+                  <button type="button" onClick={onClose} className="btn-secondary">Cancelar</button>
+                  <button type="submit" disabled={loading} className="btn-primary">
+                    <Icon name="shield-check" size={14}/>
+                    {loading ? 'Guardando...' : 'Cambiar contraseña'}
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
-
-          <div className="flex items-center justify-between px-6 py-4 border-t border-line">
-            <button type="button" onClick={handleLogout}
-              className="flex items-center gap-1.5 text-xs text-bad hover:text-red-700 font-medium">
-              <Icon name="log-out" size={14}/>Cerrar sesión
-            </button>
-            <div className="flex gap-2">
-              <button type="button" onClick={onClose} className="btn-secondary">Cancelar</button>
-              <button type="submit" disabled={loading} className="btn-primary">
-                {loading ? 'Guardando...' : 'Guardar cambios'}
-              </button>
-            </div>
-          </div>
-        </form>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 

@@ -18,8 +18,9 @@ model User {
   phone           String?
   dni             String?
   cuit            String?
-  avatar          String?
-  active          Boolean  @default(true)
+  avatar             String?
+  passwordChangedAt  DateTime?
+  active             Boolean  @default(true)
   pendingApproval Boolean  @default(false)
   createdAt       DateTime @default(now())
 
