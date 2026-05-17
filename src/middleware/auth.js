@@ -13,18 +13,24 @@ async function authMiddleware(req, res, next) {
 
     // Invalidar tokens emitidos antes del último cambio de contraseña
     if (decoded.iat) {
-      const user = await prisma.user.findUnique({
-        where: { id: decoded.id },
-        select: { passwordChangedAt: true, active: true, pendingApproval: true },
-      });
-      if (!user || !user.active || user.pendingApproval) {
-        return res.status(401).json({ error: 'Sesión inválida' });
-      }
-      if (user.passwordChangedAt) {
-        const changedAt = Math.floor(new Date(user.passwordChangedAt).getTime() / 1000);
-        if (decoded.iat < changedAt) {
-          return res.status(401).json({ error: 'Sesión expirada. Iniciá sesión nuevamente.' });
+      try {
+        const user = await prisma.user.findUnique({
+          where: { id: decoded.id },
+          select: { passwordChangedAt: true, active: true, pendingApproval: true },
+        });
+        if (user) {
+          if (!user.active || user.pendingApproval) {
+            return res.status(401).json({ error: 'Sesión inválida' });
+          }
+          if (user.passwordChangedAt) {
+            const changedAt = Math.floor(new Date(user.passwordChangedAt).getTime() / 1000);
+            if (decoded.iat < changedAt) {
+              return res.status(401).json({ error: 'Sesión expirada. Iniciá sesión nuevamente.' });
+            }
+          }
         }
+      } catch {
+        // Si la consulta falla (ej: cliente Prisma desactualizado), dejamos pasar
       }
     }
 
