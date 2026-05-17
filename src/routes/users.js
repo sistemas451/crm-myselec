@@ -121,7 +121,7 @@ router.get('/', authMiddleware, async (req, res) => {
     const users = await prisma.user.findMany({
       where: { pendingApproval: false },
       orderBy: [{ role: 'asc' }, { name: 'asc' }],
-      select: { id: true, name: true, email: true, role: true, zone: true, active: true, createdAt: true },
+      select: { id: true, name: true, email: true, role: true, zone: true, active: true, avatar: true, phone: true, passwordChangedAt: true, createdAt: true },
     });
 
     // Enriquecer con stats solo para admin
@@ -249,8 +249,15 @@ router.patch('/:id/password', authMiddleware, async (req, res) => {
       if (!valid) return res.status(400).json({ error: 'La contraseña actual es incorrecta' });
     }
 
+    // Bloquear si la nueva contraseña es igual a la actual
+    const isSame = await bcrypt.compare(password, user.password);
+    if (isSame) return res.status(400).json({ error: 'La nueva contraseña debe ser diferente a la actual' });
+
     const hashed = await bcrypt.hash(password, 10);
-    await prisma.user.update({ where: { id: req.params.id }, data: { password: hashed } });
+    await prisma.user.update({
+      where: { id: req.params.id },
+      data: { password: hashed, passwordChangedAt: new Date() },
+    });
 
     // Notificar al usuario por mail
     await sendMail({
@@ -265,7 +272,7 @@ router.patch('/:id/password', authMiddleware, async (req, res) => {
       `,
     });
 
-    res.json({ ok: true });
+    res.json({ ok: true, passwordChangedAt: new Date() });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -277,13 +284,16 @@ router.patch('/:id/profile', authMiddleware, async (req, res) => {
     if (req.user.role !== 'ADMIN' && req.user.id !== req.params.id) {
       return res.status(403).json({ error: 'Sin permiso' });
     }
-    const { name } = req.body;
+    const { name, phone } = req.body;
     if (!name || !name.trim()) return res.status(400).json({ error: 'Nombre requerido' });
+
+    const data = { name: name.trim() };
+    if (phone !== undefined) data.phone = phone.trim() || null;
 
     const user = await prisma.user.update({
       where: { id: req.params.id },
-      data: { name: name.trim() },
-      select: { id: true, name: true, email: true, role: true, zone: true, avatar: true },
+      data,
+      select: { id: true, name: true, email: true, role: true, zone: true, avatar: true, phone: true, passwordChangedAt: true },
     });
     res.json(user);
   } catch (err) {
