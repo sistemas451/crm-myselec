@@ -47,8 +47,8 @@ const toQS = (params = {}) => {
 
 const CrmApi = {
   // Auth
-  login: (email, password) => apiFetch('/auth/login', {
-    method: 'POST', body: JSON.stringify({ email, password })
+  login: (email, password, rememberMe = false) => apiFetch('/auth/login', {
+    method: 'POST', body: JSON.stringify({ email, password, rememberMe })
   }),
   forgotPassword: (email) => apiFetch('/auth/forgot-password', {
     method: 'POST', body: JSON.stringify({ email })
@@ -71,8 +71,8 @@ const CrmApi = {
   toggleUser: (id) => apiFetch(`/users/${id}/toggle`, { method: 'PATCH' }),
   approveUser: (id, role) => apiFetch(`/users/${id}/approve`, { method: 'POST', body: JSON.stringify({ role }) }),
   rejectUser: (id) => apiFetch(`/users/${id}/reject`, { method: 'POST' }),
-  changeUserPassword: (id, password) => apiFetch(`/users/${id}/password`, {
-    method: 'PATCH', body: JSON.stringify({ password })
+  changeUserPassword: (id, password, currentPassword) => apiFetch(`/users/${id}/password`, {
+    method: 'PATCH', body: JSON.stringify({ password, currentPassword })
   }),
   updateProfile: (id, data) => apiFetch(`/users/${id}/profile`, {
     method: 'PATCH', body: JSON.stringify(data)

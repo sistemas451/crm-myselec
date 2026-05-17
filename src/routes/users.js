@@ -230,13 +230,41 @@ router.patch('/:id/toggle', authMiddleware, adminOnly, async (req, res) => {
 // PATCH /api/users/:id/password — cambiar contraseña (admin o el propio usuario)
 router.patch('/:id/password', authMiddleware, async (req, res) => {
   try {
-    if (req.user.role !== 'ADMIN' && req.user.id !== req.params.id) {
-      return res.status(403).json({ error: 'Sin permiso' });
+    const isSelf  = req.user.id === req.params.id;
+    const isAdmin = req.user.role === 'ADMIN';
+    if (!isAdmin && !isSelf) return res.status(403).json({ error: 'Sin permiso' });
+
+    const { password, currentPassword } = req.body;
+    if (!password || password.length < 8) return res.status(400).json({ error: 'Contraseña mínimo 8 caracteres' });
+    if (!/[A-Z]/.test(password)) return res.status(400).json({ error: 'Debe incluir al menos una mayúscula' });
+    if (!/[0-9]/.test(password)) return res.status(400).json({ error: 'Debe incluir al menos un número' });
+
+    const user = await prisma.user.findUnique({ where: { id: req.params.id } });
+    if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+    // Si es el propio usuario (no admin cambiando la de otro), verificar contraseña actual
+    if (isSelf) {
+      if (!currentPassword) return res.status(400).json({ error: 'Ingresá tu contraseña actual' });
+      const valid = await bcrypt.compare(currentPassword, user.password);
+      if (!valid) return res.status(400).json({ error: 'La contraseña actual es incorrecta' });
     }
-    const { password } = req.body;
-    if (!password || password.length < 6) return res.status(400).json({ error: 'Contraseña mínimo 6 caracteres' });
+
     const hashed = await bcrypt.hash(password, 10);
     await prisma.user.update({ where: { id: req.params.id }, data: { password: hashed } });
+
+    // Notificar al usuario por mail
+    await sendMail({
+      to: user.email,
+      subject: 'Tu contraseña fue cambiada · MySelec CRM',
+      html: `
+        <div style="font-family:sans-serif;max-width:500px;margin:0 auto">
+          <h2 style="color:#1B2A4A">Contraseña actualizada</h2>
+          <p>Hola ${user.name}, tu contraseña de MySelec CRM fue cambiada exitosamente.</p>
+          <p style="color:#64748B;font-size:13px">Si no fuiste vos, contactá al administrador del sistema de inmediato.</p>
+        </div>
+      `,
+    });
+
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

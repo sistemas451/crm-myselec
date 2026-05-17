@@ -127,6 +127,7 @@ function App() {
 // ---------- ProfileModal ----------
 function ProfileModal({ user, onClose, onUpdated }) {
   const [name,      setName]      = useState(user?.name || '');
+  const [currentPass, setCurrentPass] = useState('');
   const [pass,      setPass]      = useState('');
   const [pass2,     setPass2]     = useState('');
   const [preview,   setPreview]   = useState(user?.avatar || null);
@@ -166,12 +167,12 @@ function ProfileModal({ user, onClose, onUpdated }) {
         const pwErr = validatePassword(pass);
         if (pwErr) { setError(pwErr); setLoading(false); return; }
         if (pass !== pass2) { setError('Las contraseñas no coinciden'); setLoading(false); return; }
-        await CrmApi.changeUserPassword(user.id, pass);
+        await CrmApi.changeUserPassword(user.id, pass, currentPass);
       }
 
       onUpdated(updated);
       setInfo('Perfil actualizado correctamente');
-      setPass(''); setPass2(''); setAvatarFile(null);
+      setPass(''); setPass2(''); setCurrentPass(''); setAvatarFile(null);
     } catch (err) {
       setError(err.message || 'Error al guardar');
     } finally {
@@ -233,9 +234,10 @@ function ProfileModal({ user, onClose, onUpdated }) {
             <div className="border-t border-line pt-4">
               <div className="text-xs font-semibold text-ink-700 mb-3">Cambiar contraseña <span className="text-ink-400 font-normal">(opcional)</span></div>
               <div className="space-y-3">
+                <PasswordInput value={currentPass} onChange={e=>setCurrentPass(e.target.value)} placeholder="Contraseña actual" autoComplete="current-password"/>
                 <PasswordInput value={pass} onChange={e=>setPass(e.target.value)} placeholder="Nueva contraseña" autoComplete="new-password"/>
-                <PasswordInput value={pass2} onChange={e=>setPass2(e.target.value)} placeholder="Confirmar contraseña" autoComplete="new-password"/>
-                {pass && <p className="text-[11px] text-ink-400">Mínimo 8 caracteres, una mayúscula y un número.</p>}
+                {pass && <PasswordStrength password={pass}/>}
+                <PasswordInput value={pass2} onChange={e=>setPass2(e.target.value)} placeholder="Confirmar nueva contraseña" autoComplete="new-password"/>
               </div>
             </div>
           </div>
@@ -259,6 +261,26 @@ function ProfileModal({ user, onClose, onUpdated }) {
 }
 
 // ---------- Login ----------
+// ---------- PasswordStrength ----------
+function PasswordStrength({ password }) {
+  if (!password) return null;
+  const rules = [
+    { label: 'Mínimo 8 caracteres',     ok: password.length >= 8 },
+    { label: 'Al menos una mayúscula',  ok: /[A-Z]/.test(password) },
+    { label: 'Al menos un número',      ok: /[0-9]/.test(password) },
+  ];
+  return (
+    <div className="space-y-1 mt-2">
+      {rules.map(r => (
+        <div key={r.label} className={cx('flex items-center gap-2 text-[12px] transition-colors', r.ok ? 'text-ok' : 'text-ink-400')}>
+          <Icon name={r.ok ? 'check-circle' : 'circle'} size={13} className={r.ok ? 'text-ok' : 'text-ink-300'}/>
+          {r.label}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function PasswordInput({ value, onChange, placeholder, autoComplete, className }) {
   const [show, setShow] = useState(false);
   return (
@@ -298,9 +320,10 @@ function Login({ onLogin }) {
   const [email,   setEmail]   = useState('');
   const [pass,    setPass]    = useState('');
   const [pass2,   setPass2]   = useState('');
-  const [error,   setError]   = useState('');
-  const [info,    setInfo]    = useState('');
-  const [loading, setLoading] = useState(false);
+  const [error,      setError]      = useState('');
+  const [info,       setInfo]       = useState('');
+  const [loading,    setLoading]    = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
 
   // Registro
   const [reg, setReg] = useState({ name:'', lastName:'', email:'', phone:'', dni:'', cuit:'', pass:'', pass2:'' });
@@ -318,7 +341,7 @@ function Login({ onLogin }) {
     e.preventDefault();
     setError(''); setLoading(true);
     try {
-      const result = await CrmApi.login(email, pass);
+      const result = await CrmApi.login(email, pass, rememberMe);
       CrmAuth.setToken(result.token);
       CrmAuth.setUser(result.user);
       onLogin();
@@ -402,7 +425,12 @@ function Login({ onLogin }) {
                 <button type="button" onClick={()=>goTo('forgot')}
                   className="text-[11px] text-brand hover:underline">¿Olvidaste tu contraseña?</button>
               </div>
-              <PasswordInput value={pass} onChange={e=>setPass(e.target.value)} placeholder="••••••••" autoComplete="current-password" className="mb-6"/>
+              <PasswordInput value={pass} onChange={e=>setPass(e.target.value)} placeholder="••••••••" autoComplete="current-password" className="mb-4"/>
+              <label className="flex items-center gap-2 mb-5 cursor-pointer select-none">
+                <input type="checkbox" checked={rememberMe} onChange={e=>setRememberMe(e.target.checked)}
+                  className="w-4 h-4 rounded accent-brand cursor-pointer"/>
+                <span className="text-xs text-ink-600">Recordarme por 7 días</span>
+              </label>
               <button className="btn-primary w-full justify-center" disabled={loading}>
                 {loading ? 'Ingresando...' : 'Iniciar sesión'}
               </button>
@@ -436,10 +464,12 @@ function Login({ onLogin }) {
           {screen === 'reset' && (
             <form onSubmit={handleReset}>
               <h2 className="text-xl font-bold text-ink-900">Nueva contraseña</h2>
-              <p className="text-sm text-ink-500 mb-6">Mínimo 8 caracteres, una mayúscula y un número.</p>
+              <p className="text-sm text-ink-500 mb-4">Elegí una contraseña segura.</p>
               {error && <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">{error}</div>}
               <label className="block text-xs font-medium text-ink-700 mb-1.5">Nueva contraseña</label>
-              <PasswordInput value={pass} onChange={e=>setPass(e.target.value)} placeholder="••••••••" autoComplete="new-password" className="mb-4"/>
+              <PasswordInput value={pass} onChange={e=>setPass(e.target.value)} placeholder="••••••••" autoComplete="new-password"/>
+              <PasswordStrength password={pass}/>
+              <div className="mb-4"/>
               <label className="block text-xs font-medium text-ink-700 mb-1.5">Confirmar contraseña</label>
               <PasswordInput value={pass2} onChange={e=>setPass2(e.target.value)} placeholder="••••••••" autoComplete="new-password" className="mb-6"/>
               <button className="btn-primary w-full justify-center" disabled={loading}>
@@ -482,9 +512,9 @@ function Login({ onLogin }) {
                 </div>
               </div>
               <label className="block text-xs font-medium text-ink-700 mb-1">Contraseña *</label>
-              <PasswordInput value={reg.pass} onChange={e=>setRegF('pass',e.target.value)} placeholder="••••••••" autoComplete="new-password" className="mb-1"/>
-              <p className="text-[11px] text-ink-400 mb-3">Mínimo 8 caracteres, una mayúscula y un número.</p>
-              <label className="block text-xs font-medium text-ink-700 mb-1">Confirmar contraseña *</label>
+              <PasswordInput value={reg.pass} onChange={e=>setRegF('pass',e.target.value)} placeholder="••••••••" autoComplete="new-password"/>
+              <PasswordStrength password={reg.pass}/>
+              <label className="block text-xs font-medium text-ink-700 mb-1 mt-3">Confirmar contraseña *</label>
               <PasswordInput value={reg.pass2} onChange={e=>setRegF('pass2',e.target.value)} placeholder="••••••••" autoComplete="new-password" className="mb-5"/>
               <button className="btn-primary w-full justify-center" disabled={loading}>
                 {loading ? 'Enviando solicitud...' : 'Solicitar acceso'}
