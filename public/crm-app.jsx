@@ -99,7 +99,7 @@ function App() {
   const openDetail = (code, kind='quote') => openModal(kind==='quote'?'quoteDetail':'orderDetail', { code });
 
   return (
-    <div className="min-h-screen flex bg-surface" data-screen-label={`${roleKey} · ${screen}`}>
+    <div className="h-screen flex overflow-hidden bg-surface" data-screen-label={`${roleKey} · ${screen}`}>
       <Sidebar role={roleKey} screen={screen} setScreen={setScreen}
         user={displayUser} onProfileOpen={() => setProfileOpen(true)}
         collapsed={sidebarCollapsed} onToggle={toggleSidebar}/>
@@ -115,9 +115,9 @@ function App() {
           }}
         />
       )}
-      <div className="flex-1 min-w-0 flex flex-col">
+      <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
         <Topbar user={displayUser} roleKey={roleKey} setRoleKey={setRoleKey}/>
-        <main className="flex-1 min-w-0 overflow-x-hidden">
+        <main className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden">
           {screen === 'dashboard'  && <Dashboard/>}
           {screen === 'quotes'     && <KanbanQuotes onOpen={(c)=>openDetail(c,'quote')}/>}
           {screen === 'orders'     && <KanbanOrders onOpen={(c)=>openDetail(c,'order')}/>}
@@ -754,7 +754,7 @@ function Sidebar({ role, screen, setScreen, user, onProfileOpen, collapsed, onTo
 
   return (
     <aside
-      className="shrink-0 bg-navy-900 text-white flex flex-col min-h-screen overflow-hidden"
+      className="shrink-0 bg-navy-900 text-white flex flex-col h-screen overflow-hidden"
       style={{ width: collapsed ? 60 : 244, transition: 'width 0.2s ease' }}
     >
       {/* Logo */}
