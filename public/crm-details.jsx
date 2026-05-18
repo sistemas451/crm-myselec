@@ -431,6 +431,7 @@ function QuoteDetail({ code, onClose, canReassign }) {
   const noteInputRef = React.useRef(null);
   const fileInputRef = React.useRef(null);
   const [uploading, setUploading] = useState(false);
+  const [pdfPreview, setPdfPreview] = useState(null); // { url, filename }
 
   const handleUploadFiles = async (files) => {
     if (!files || files.length === 0) return;
@@ -1058,6 +1059,8 @@ function QuoteDetail({ code, onClose, canReassign }) {
             );
             return visibleAdj.map(a => {
               const ext = extOf(a.filename, a.mimeType);
+              const isPdf = ext === 'pdf';
+              const fileUrl = `/uploads/attachments/${a.filename}`;
               return (
                 <div key={a.id} className="bg-white border border-line rounded-xl p-3 flex items-center gap-3">
                   <div className={cx('w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold text-[11px] shrink-0', extBg(ext))}>
@@ -1069,10 +1072,21 @@ function QuoteDetail({ code, onClose, canReassign }) {
                       {fmtBytes(a.size)}{a.size ? ' · ' : ''}{fmtDate(a.createdAt)}
                     </div>
                   </div>
-                  <a href={`/uploads/attachments/${a.filename}`} target="_blank" rel="noopener noreferrer"
-                    className="w-8 h-8 rounded-lg hover:bg-surface text-ink-500 flex items-center justify-center">
-                    <Icon name="download" size={14}/>
-                  </a>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {isPdf && (
+                      <button
+                        onClick={() => setPdfPreview({ url: fileUrl, filename: a.filename })}
+                        className="h-8 px-2.5 rounded-lg hover:bg-brandSoft text-brand text-[12px] font-medium flex items-center gap-1"
+                        title="Ver PDF">
+                        <Icon name="eye" size={13}/>Ver
+                      </button>
+                    )}
+                    <a href={fileUrl} download={a.filename}
+                      className="w-8 h-8 rounded-lg hover:bg-surface text-ink-500 flex items-center justify-center"
+                      title="Descargar">
+                      <Icon name="download" size={14}/>
+                    </a>
+                  </div>
                 </div>
               );
             });
@@ -1085,6 +1099,35 @@ function QuoteDetail({ code, onClose, canReassign }) {
               ? <><Icon name="loader" size={14} className="inline mr-1 animate-spin"/> Subiendo…</>
               : <><Icon name="plus" size={14} className="inline mr-1"/> Subir adjunto</>}
           </button>
+        </div>
+      )}
+
+      {/* Modal preview PDF */}
+      {pdfPreview && (
+        <div className="fixed inset-0 z-[200] flex flex-col bg-black/80" onClick={() => setPdfPreview(null)}>
+          <div className="flex items-center justify-between px-5 py-3 bg-navy-950 shrink-0" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center gap-3">
+              <div className="w-7 h-7 rounded bg-red-500 flex items-center justify-center text-white text-[10px] font-bold">PDF</div>
+              <span className="text-white text-sm font-medium truncate max-w-[500px]">{pdfPreview.filename}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <a href={pdfPreview.url} download={pdfPreview.filename}
+                className="btn-ghost text-xs text-white border-white/20 hover:bg-white/10">
+                <Icon name="download" size={13}/>Descargar
+              </a>
+              <button onClick={() => setPdfPreview(null)}
+                className="w-8 h-8 rounded-lg hover:bg-white/10 flex items-center justify-center text-white/60 hover:text-white">
+                <Icon name="x" size={16}/>
+              </button>
+            </div>
+          </div>
+          <div className="flex-1 p-4 overflow-hidden" onClick={e => e.stopPropagation()}>
+            <iframe
+              src={pdfPreview.url}
+              className="w-full h-full rounded-lg bg-white"
+              title={pdfPreview.filename}
+            />
+          </div>
         </div>
       )}
 

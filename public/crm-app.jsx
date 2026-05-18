@@ -7,11 +7,14 @@ function AppRoot() {
   const [logged, setLogged] = useState(CrmAuth.isLoggedIn());
   const [apiData, setApiData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [retry, setRetry] = useState(0);
 
   // On login or if already has token, load API data
   useEffect(() => {
     if (!logged) { setLoading(false); return; }
     setLoading(true);
+    setLoadError(false);
     loadAllData().then(data => {
       if (data) {
         // Replace window globals with API data
@@ -23,18 +26,49 @@ function AppRoot() {
         window.STAGES_F2 = data.stagesF2;
         window.ACTIVITY = data.activity;
         setApiData(data);
+        setLoading(false);
+      } else {
+        setLoadError(true);
+        setLoading(false);
       }
-      setLoading(false);
-    }).catch(() => setLoading(false));
-  }, [logged]);
+    }).catch(() => { setLoadError(true); setLoading(false); });
+  }, [logged, retry]);
 
   if (!logged) return <Login onLogin={() => setLogged(true)} />;
-  
+
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-navy-950">
       <div className="text-center">
         <Logo size={72} />
-        <div className="text-white/60 mt-4 text-sm">Cargando sistema...</div>
+        <div className="text-white/60 mt-4 text-sm">Cargando sistema…</div>
+        <div className="text-white/30 mt-1 text-xs">Conectando con la base de datos</div>
+      </div>
+    </div>
+  );
+
+  if (loadError) return (
+    <div className="min-h-screen flex items-center justify-center bg-navy-950">
+      <div className="text-center max-w-sm px-6">
+        <Logo size={72} />
+        <div className="w-12 h-12 rounded-full bg-red-500/15 flex items-center justify-center mx-auto mt-6">
+          <Icon name="wifi-off" size={22} className="text-red-400"/>
+        </div>
+        <div className="text-white font-semibold mt-4">No se pudo conectar</div>
+        <div className="text-white/50 text-sm mt-2 leading-relaxed">
+          El servidor tardó demasiado en responder. Puede ser que la base de datos esté iniciando — suele tardar unos segundos.
+        </div>
+        <button
+          onClick={() => setRetry(r => r + 1)}
+          className="mt-6 btn-accent w-full justify-center"
+        >
+          <Icon name="refresh-cw" size={14}/>Reintentar
+        </button>
+        <button
+          onClick={() => { CrmAuth.clearToken(); localStorage.removeItem('crm_user'); window.location.reload(); }}
+          className="mt-2 w-full text-white/30 hover:text-white/60 text-sm py-2 transition-colors"
+        >
+          Cerrar sesión
+        </button>
       </div>
     </div>
   );

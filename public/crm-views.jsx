@@ -1388,7 +1388,6 @@ function Config() {
         { id:'stages',    label:'Etapas' },
         { id:'mails',     label:'Cuentas de mail' },
         { id:'notifs',    label:'Notificaciones' },
-        { id:'roles',     label:'Roles y permisos' },
       ]}/>
 
       {tab==='stages' && (
@@ -1600,44 +1599,6 @@ function Config() {
         </div>
       )}
 
-      {tab==='roles' && (
-        <div className="p-6">
-          <div className="bg-white border border-line rounded-xl overflow-hidden">
-            <table className="tbl w-full">
-              <thead><tr>
-                <th>Acción</th>
-                <th className="text-center">Admin</th>
-                <th className="text-center">Vendedor</th>
-                <th className="text-center">Logística</th>
-              </tr></thead>
-              <tbody>
-                {[
-                  ['Ver todas las cotizaciones',            true,  false, false],
-                  ['Ver sólo las propias',                  false, true,  false],
-                  ['Crear / editar cotización',             true,  true,  false],
-                  ['Asignar cotización a vendedor',         true,  false, false],
-                  ['Avanzar etapa Fase 1',                  true,  true,  false],
-                  ['Avanzar etapa Fase 2 (logística)',      true,  false, true],
-                  ['Cargar NP Flexxus',                     true,  true,  true],
-                  ['Gestionar clientes',                    true,  false, false],
-                  ['Ver clientes (solo lectura)',           true,  true,  false],
-                  ['Configurar etapas e integraciones',     true,  false, false],
-                ].map((row,i)=>(
-                  <tr key={i}>
-                    <td className="font-medium">{row[0]}</td>
-                    {row.slice(1).map((v,j)=>(
-                      <td key={j} className="text-center">
-                        {v ? <Icon name="check" size={14} className="text-ok"/>
-                           : <Icon name="minus" size={14} className="text-ink-300"/>}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
