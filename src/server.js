@@ -1,19 +1,32 @@
 require('dotenv').config();
+
+// ── Validación de variables de entorno críticas ───────────────────────────────
+const REQUIRED_ENV = ['JWT_SECRET', 'DATABASE_URL'];
+for (const key of REQUIRED_ENV) {
+  if (!process.env[key]) {
+    console.error(`❌ Variable de entorno requerida no definida: ${key}`);
+    console.error('   El servidor no puede arrancar de forma segura sin esta variable.');
+    process.exit(1);
+  }
+}
+
 const express = require('express');
 const cors    = require('cors');
 const path    = require('path');
 const multer  = require('multer');
-const { PrismaClient } = require('@prisma/client');
+const prisma  = require('./db');
 const { authMiddleware } = require('./middleware/auth');
 const { runIdleCheck } = require('./services/notifier');
 const { syncMails }    = require('./services/mailReader');
 
-const app    = express();
-const prisma = new PrismaClient();
-const PORT   = process.env.PORT || 3000;
+const app  = express();
+const PORT = process.env.PORT || 3000;
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: process.env.APP_URL || true,   // true = refleja el origin (equivalente a * pero funciona con credentials)
+  credentials: true,
+}));
 app.use(express.json({ limit: '10mb' }));
 
 // Serve frontend static files
@@ -98,14 +111,31 @@ app.delete('/api/attachments/:id', authMiddleware, async (req, res) => {
   }
 });
 
-// Health check
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+// Health check — verifica también la conexión a la DB
+app.get('/api/health', async (req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({ status: 'ok', db: 'ok', timestamp: new Date().toISOString() });
+  } catch (e) {
+    res.status(503).json({ status: 'error', db: 'unreachable', timestamp: new Date().toISOString() });
+  }
 });
 
 // SPA fallback
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
+});
+
+// ── Graceful shutdown — cierra conexiones de DB correctamente ────────────────
+process.on('SIGTERM', async () => {
+  console.log('🛑 SIGTERM recibido — cerrando servidor...');
+  await prisma.$disconnect();
+  process.exit(0);
+});
+process.on('SIGINT', async () => {
+  console.log('🛑 SIGINT recibido — cerrando servidor...');
+  await prisma.$disconnect();
+  process.exit(0);
 });
 
 // Start server

@@ -1,10 +1,9 @@
 const express = require('express');
-const { PrismaClient } = require('@prisma/client');
 const { authMiddleware, requireRole } = require('../middleware/auth');
 const { syncMails, syncAccount, listRecentMails } = require('../services/mailReader');
+const prisma = require('../db');
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

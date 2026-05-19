@@ -1,7 +1,5 @@
-const { PrismaClient } = require('@prisma/client');
 const { sendNotification } = require('./mailer');
-
-const prisma = new PrismaClient();
+const prisma = require('../db');
 
 // Construye el contexto para templates a partir de una quote enriquecida
 function buildCtx(quote, client, seller) {

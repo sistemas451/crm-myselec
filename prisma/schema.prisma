@@ -159,6 +159,13 @@ model Quote {
   activities     Activity[] @relation("QuoteActivities")
   orders         Order[]   @relation("OrderFromQuote")
   items          QuoteItem[]
+
+  @@index([sellerId])
+  @@index([clientId])
+  @@index([stage])
+  @@index([createdAt])
+  @@index([mailType])
+  @@index([emailMessageId])
 }
 
 // ─── Ítems / productos del presupuesto Flexxus ───
@@ -178,6 +185,7 @@ model QuoteItem {
   createdAt   DateTime @default(now())
 
   @@index([quoteId])
+  @@index([accepted])
 }
 
 // ─── Órdenes de Compra (Fase 2) ───
@@ -207,6 +215,11 @@ model Order {
   notes           Note[]    @relation("OrderNotes")
   attachments     Attachment[] @relation("OrderAttachments")
   activities      Activity[] @relation("OrderActivities")
+
+  @@index([sellerId])
+  @@index([clientId])
+  @@index([stage])
+  @@index([createdAt])
 }
 
 // ─── Notas / Comentarios ───
@@ -248,6 +261,10 @@ model Activity {
   orderId   String?
   order     Order?   @relation("OrderActivities", fields: [orderId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
+
+  @@index([quoteId])
+  @@index([orderId])
+  @@index([createdAt])
 }
 
 // ─── Integración de email ───

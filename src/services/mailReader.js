@@ -1,11 +1,10 @@
 const Imap = require('imap');
 const { simpleParser } = require('mailparser');
-const { PrismaClient } = require('@prisma/client');
 const fs = require('fs');
 const path = require('path');
 const { parseFlexxusPDF, isFlexxusPDF, isNotaPedidoPDF, parseNotaPedidoPDF } = require('./flexxusParser');
 
-const prisma = new PrismaClient();
+const prisma = require('../db');
 
 const UPLOADS_DIR = path.join(__dirname, '..', '..', 'uploads', 'attachments');
 if (!fs.existsSync(UPLOADS_DIR)) {
@@ -100,12 +99,6 @@ function isImageAttachment(att) {
   return true;
 }
 
-function isOCAttachment(att) {
-  if (!att?.filename) return false;
-  const ext = path.extname(att.filename).toLowerCase();
-  return OC_EXTENSIONS.includes(ext);
-}
-
 // Copia los ítems aceptados de un PRESUPUESTO a una OC (si la OC no tiene ítems aún)
 async function copyPresupuestoItemsToOC(presupuestoId, ocId) {
   const existing = await prisma.quoteItem.count({ where: { quoteId: ocId } });
@@ -191,12 +184,14 @@ async function syncAccount(account) {
     const results = { synced: 0, errors: [], mails: [] };
 
     const imap = new Imap({
-      user:       account.user,
-      password:   account.password,
-      host:       process.env.MAIL_HOST || 'imap.gmail.com',
-      port:       parseInt(process.env.MAIL_PORT || '993'),
-      tls:        true,
-      tlsOptions: { rejectUnauthorized: false },
+      user:        account.user,
+      password:    account.password,
+      host:        process.env.MAIL_HOST || 'imap.gmail.com',
+      port:        parseInt(process.env.MAIL_PORT || '993'),
+      tls:         true,
+      tlsOptions:  { rejectUnauthorized: false },
+      authTimeout: 15000,   // 15s para autenticar
+      connTimeout: 30000,   // 30s para conectar
     });
 
     imap.once('ready', async () => {
@@ -346,7 +341,16 @@ async function applyGmailLabel(imap, mails, label) {
  *
  *   Si MAIL_ACCOUNTS no está definido, usa MAIL_USER + MAIL_PASSWORD como cuenta única.
  */
+
+// Lock para evitar syncs simultáneos (ej: dos admins hacen click al mismo tiempo)
+let syncInProgress = false;
+
 async function syncMails() {
+  if (syncInProgress) {
+    console.log('⚠️  Sync ya en progreso — ignorando llamada concurrente');
+    return { synced: 0, errors: ['Sync ya en progreso. Esperá que termine el anterior.'], mails: [] };
+  }
+  syncInProgress = true;
   // Construir lista de cuentas
   let accounts = [];
 
@@ -374,16 +378,20 @@ async function syncMails() {
 
   const totals = { synced: 0, errors: [], mails: [] };
 
-  // Procesar cuentas de forma secuencial (evita solapamiento de conexiones IMAP)
-  for (const account of accounts) {
-    if (!account.user || !account.password) {
-      console.warn(`⚠️  Cuenta inválida (falta user o password), saltando`);
-      continue;
+  try {
+    // Procesar cuentas de forma secuencial (evita solapamiento de conexiones IMAP)
+    for (const account of accounts) {
+      if (!account.user || !account.password) {
+        console.warn(`⚠️  Cuenta inválida (falta user o password), saltando`);
+        continue;
+      }
+      const r = await syncAccount(account);
+      totals.synced += r.synced;
+      totals.errors.push(...r.errors);
+      totals.mails.push(...r.mails);
     }
-    const r = await syncAccount(account);
-    totals.synced += r.synced;
-    totals.errors.push(...r.errors);
-    totals.mails.push(...r.mails);
+  } finally {
+    syncInProgress = false;
   }
 
   return totals;
@@ -460,6 +468,21 @@ async function processNotaPedido(parsed, mailData, att, imap) {
     }
   }
 
+  // ── Buscar cliente PRIMERO (necesario antes de crear la Order) ──────────
+  let client = null;
+  if (npData.cuit) {
+    client = await prisma.client.findFirst({
+      where: { cuit: { equals: npData.cuit, mode: 'insensitive' } },
+      include: { defaultSeller: true },
+    });
+  }
+  if (!client && presupuesto?.clientId) {
+    client = await prisma.client.findUnique({
+      where: { id: presupuesto.clientId },
+      include: { defaultSeller: true },
+    });
+  }
+
   // ── Buscar o crear Order vinculada al presupuesto ────────────────────────
   let order = null;
   if (presupuesto) {
@@ -485,13 +508,7 @@ async function processNotaPedido(parsed, mailData, att, imap) {
       console.log(`   🔗 Order ${order.code} → NP Enviada | NP: ${npData.npCode}${npData.ocNumber ? ` | OC: ${npData.ocNumber}` : ''}`);
     } else {
       // No existe Order → crearla automáticamente desde el presupuesto
-      const ocCode = await (async () => {
-        const all  = await prisma.order.findMany({ select: { code: true } });
-        const nums = all.map(r => parseInt(r.code.split('-')[2]) || 0).filter(n => !isNaN(n));
-        const max  = nums.length > 0 ? Math.max(...nums) : 0;
-        const yr   = new Date().getFullYear();
-        return `OC-${yr}-${String(max + 1).padStart(3, '0')}`;
-      })();
+      const ocCode = await nextCode(prisma.order, `OC-${new Date().getFullYear()}`);
 
       const clientId = presupuesto.clientId || client?.id || null;
       if (clientId) {
@@ -518,21 +535,6 @@ async function processNotaPedido(parsed, mailData, att, imap) {
         console.log(`   ⚠️  Sin clientId — no se pudo crear Order automáticamente`);
       }
     }
-  }
-
-  // ── Buscar cliente ───────────────────────────────────────────────────────
-  let client = null;
-  if (npData.cuit) {
-    client = await prisma.client.findFirst({
-      where: { cuit: { equals: npData.cuit, mode: 'insensitive' } },
-      include: { defaultSeller: true },
-    });
-  }
-  if (!client && presupuesto?.clientId) {
-    client = await prisma.client.findUnique({
-      where: { id: presupuesto.clientId },
-      include: { defaultSeller: true },
-    });
   }
 
   // ── Crear Quote NOTA_PEDIDO ──────────────────────────────────────────────
@@ -1396,12 +1398,14 @@ async function listRecentMails(limit = 20) {
     const mails = [];
 
     const imap = new Imap({
-      user: process.env.MAIL_USER,
-      password: process.env.MAIL_PASSWORD,
-      host: process.env.MAIL_HOST || 'imap.gmail.com',
-      port: parseInt(process.env.MAIL_PORT || '993'),
-      tls: true,
-      tlsOptions: { rejectUnauthorized: false },
+      user:        process.env.MAIL_USER,
+      password:    process.env.MAIL_PASSWORD,
+      host:        process.env.MAIL_HOST || 'imap.gmail.com',
+      port:        parseInt(process.env.MAIL_PORT || '993'),
+      tls:         true,
+      tlsOptions:  { rejectUnauthorized: false },
+      authTimeout: 15000,
+      connTimeout: 30000,
     });
 
     imap.once('ready', () => {
@@ -1463,12 +1467,14 @@ async function resyncQuoteEmail(quoteId) {
 
   return new Promise((resolve) => {
     const imap = new Imap({
-      user: process.env.MAIL_USER,
-      password: process.env.MAIL_PASSWORD,
-      host: process.env.MAIL_HOST || 'imap.gmail.com',
-      port: parseInt(process.env.MAIL_PORT || '993'),
-      tls: true,
-      tlsOptions: { rejectUnauthorized: false },
+      user:        process.env.MAIL_USER,
+      password:    process.env.MAIL_PASSWORD,
+      host:        process.env.MAIL_HOST || 'imap.gmail.com',
+      port:        parseInt(process.env.MAIL_PORT || '993'),
+      tls:         true,
+      tlsOptions:  { rejectUnauthorized: false },
+      authTimeout: 15000,
+      connTimeout: 30000,
     });
 
     imap.once('ready', () => {

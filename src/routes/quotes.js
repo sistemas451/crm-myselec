@@ -1,13 +1,12 @@
 const express = require('express');
 const fs = require('fs');
-const { PrismaClient } = require('@prisma/client');
 const { authMiddleware } = require('../middleware/auth');
 const { onStageChange } = require('../services/notifier');
 const { resyncQuoteEmail } = require('../services/mailReader');
 const { parseFlexxusPDF } = require('../services/flexxusParser');
+const prisma = require('../db');
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 async function nextCode(model, prefix) {
   // findFirst + desc es O(log n) en lugar de cargar toda la tabla.
@@ -47,6 +46,7 @@ router.get('/', authMiddleware, async (req, res) => {
         _count: { select: { notes: true, attachments: true } },
       },
       orderBy: { createdAt: 'desc' },
+      take: 1000,  // límite de seguridad — la paginación real puede venir después
     });
 
     // Format for frontend compatibility
@@ -133,12 +133,23 @@ router.post('/', authMiddleware, async (req, res) => {
 router.patch('/:id/stage', authMiddleware, async (req, res) => {
   try {
     const { stage, rejectReason, rejectNotes } = req.body;
+    if (!stage) return res.status(400).json({ error: 'stage es requerido' });
+
+    // Validar motivo de rechazo obligatorio
+    if (stage === 'rechazada' && !rejectReason) {
+      return res.status(400).json({ error: 'Se requiere un motivo de rechazo al rechazar una cotización' });
+    }
 
     const quote = await prisma.quote.findUnique({
       where: { id: req.params.id },
       include: { client: true },
     });
     if (!quote) return res.status(404).json({ error: 'Cotización no encontrada' });
+
+    // VENDEDOR solo puede modificar sus propias cotizaciones
+    if (req.user.role === 'VENDEDOR' && quote.sellerId !== req.user.id) {
+      return res.status(403).json({ error: 'Sin permiso sobre esta cotización' });
+    }
 
     const oldStage = quote.stage;
 
@@ -230,8 +241,11 @@ router.patch('/:id/stage', authMiddleware, async (req, res) => {
   }
 });
 
-// PATCH /api/quotes/:id/assign - Reassign seller
+// PATCH /api/quotes/:id/assign - Reassign seller (solo admin o logística)
 router.patch('/:id/assign', authMiddleware, async (req, res) => {
+  if (req.user.role === 'VENDEDOR') {
+    return res.status(403).json({ error: 'Solo administradores pueden reasignar cotizaciones' });
+  }
   try {
     const { sellerId } = req.body;
     const quote = await prisma.quote.update({
@@ -364,9 +378,11 @@ router.post('/:id/resync-email', authMiddleware, async (req, res) => {
 // POST /api/quotes/:id/notes - Add a note
 router.post('/:id/notes', authMiddleware, async (req, res) => {
   try {
+    const text = (req.body.text || '').trim();
+    if (!text) return res.status(400).json({ error: 'El texto de la nota no puede estar vacío' });
     const note = await prisma.note.create({
       data: {
-        text: req.body.text,
+        text,
         userId: req.user.id,
         quoteId: req.params.id,
       },

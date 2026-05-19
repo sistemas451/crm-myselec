@@ -2,11 +2,10 @@ const express  = require('express');
 const bcrypt   = require('bcryptjs');
 const jwt      = require('jsonwebtoken');
 const crypto   = require('crypto');
-const { PrismaClient } = require('@prisma/client');
 const { sendPasswordReset, sendMail } = require('../services/mailer');
+const prisma = require('../db');
 
 const router = express.Router();
-const prisma  = new PrismaClient();
 
 // POST /api/auth/login
 router.post('/login', async (req, res) => {
@@ -50,11 +49,17 @@ router.post('/login', async (req, res) => {
 // GET /api/auth/me
 const { authMiddleware } = require('../middleware/auth');
 router.get('/me', authMiddleware, async (req, res) => {
-  const user = await prisma.user.findUnique({
-    where: { id: req.user.id },
-    select: { id: true, name: true, email: true, role: true, zone: true }
-  });
-  res.json(user);
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: { id: true, name: true, email: true, role: true, zone: true }
+    });
+    if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
+    res.json(user);
+  } catch (err) {
+    console.error('GET /me error:', err);
+    res.status(500).json({ error: 'Error interno' });
+  }
 });
 
 // POST /api/auth/register — auto-registro público
@@ -156,7 +161,10 @@ router.post('/reset-password', async (req, res) => {
   try {
     const { token, password } = req.body;
     if (!token || !password) return res.status(400).json({ error: 'token y password requeridos' });
-    if (password.length < 6) return res.status(400).json({ error: 'Mínimo 6 caracteres' });
+    // Misma política que registro: mínimo 8 chars, 1 mayúscula, 1 número
+    if (password.length < 8)         return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres' });
+    if (!/[A-Z]/.test(password))     return res.status(400).json({ error: 'La contraseña debe incluir al menos una mayúscula' });
+    if (!/[0-9]/.test(password))     return res.status(400).json({ error: 'La contraseña debe incluir al menos un número' });
 
     const resetToken = await prisma.passwordResetToken.findUnique({
       where: { token },
@@ -172,7 +180,8 @@ router.post('/reset-password', async (req, res) => {
 
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('reset-password error:', err);
+    res.status(500).json({ error: 'Error al restablecer la contraseña' });
   }
 });
 

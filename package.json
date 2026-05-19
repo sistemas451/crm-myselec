@@ -9,7 +9,9 @@
     "db:push": "npx prisma db push",
     "db:generate": "npx prisma generate",
     "setup": "npm run db:push && npm run db:generate && npm run seed",
-    "start": "node src/server.js"
+    "build": "npx prisma generate",
+    "start": "node src/server.js",
+    "postinstall": "npx prisma generate"
   },
   "dependencies": {
     "@prisma/client": "^6.6.0",

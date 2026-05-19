@@ -1,6 +1,5 @@
 const jwt = require('jsonwebtoken');
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const prisma = require('../db');
 
 async function authMiddleware(req, res, next) {
   const header = req.headers.authorization;
@@ -29,8 +28,11 @@ async function authMiddleware(req, res, next) {
             }
           }
         }
-      } catch {
-        // Si la consulta falla (ej: cliente Prisma desactualizado), dejamos pasar
+      } catch (dbErr) {
+        // Si la DB no responde, rechazar con 503 en lugar de dejar pasar silenciosamente.
+        // Esto evita que usuarios desactivados sean autenticados durante ventanas de latencia.
+        console.error('Auth middleware DB error:', dbErr.message);
+        return res.status(503).json({ error: 'Servicio temporalmente no disponible. Reintentá en unos segundos.' });
       }
     }
 

@@ -2,11 +2,10 @@ const express = require('express');
 const multer  = require('multer');
 const XLSX    = require('xlsx');
 const crypto  = require('crypto');
-const { PrismaClient } = require('@prisma/client');
 const { authMiddleware } = require('../middleware/auth');
+const prisma = require('../db');
 
 const router  = express.Router();
-const prisma  = new PrismaClient();
 const upload  = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
 // Cache en memoria para preview pendiente (token → parsed rows)

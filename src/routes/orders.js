@@ -1,9 +1,8 @@
 const express = require('express');
-const { PrismaClient } = require('@prisma/client');
 const { authMiddleware } = require('../middleware/auth');
+const prisma = require('../db');
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 async function nextCode(model, prefix) {
   const last = await model.findFirst({
@@ -32,6 +31,7 @@ router.get('/', authMiddleware, async (req, res) => {
         _count: { select: { notes: true, attachments: true } },
       },
       orderBy: { createdAt: 'desc' },
+      take: 1000,
     });
 
     // OCs ingresadas por email (modelo Quote con mailType='OC')
@@ -187,9 +187,11 @@ router.get('/:id/detail', authMiddleware, async (req, res) => {
 // POST /api/orders/:id/notes — add a note to an order
 router.post('/:id/notes', authMiddleware, async (req, res) => {
   try {
+    const text = (req.body.text || '').trim();
+    if (!text) return res.status(400).json({ error: 'El texto de la nota no puede estar vacío' });
     const note = await prisma.note.create({
       data: {
-        text: req.body.text,
+        text,
         userId: req.user.id,
         orderId: req.params.id,
       },
@@ -217,6 +219,13 @@ router.post('/:id/notes', authMiddleware, async (req, res) => {
 // PATCH /api/orders/:id — update order fields (carrier, tracking, etc.)
 router.patch('/:id', authMiddleware, async (req, res) => {
   try {
+    // VENDEDOR solo puede modificar sus propias OCs
+    if (req.user.role === 'VENDEDOR') {
+      const order = await prisma.order.findUnique({ where: { id: req.params.id }, select: { sellerId: true } });
+      if (order && order.sellerId !== req.user.id) {
+        return res.status(403).json({ error: 'Sin permiso sobre esta orden' });
+      }
+    }
     const { carrier, trackingNumber, flexxusCode, clientOCCode, estimatedDate, invoiceIssued, waybillReceived } = req.body;
     const data = {};
     if (carrier          !== undefined) data.carrier          = carrier || null;
@@ -238,6 +247,7 @@ router.patch('/:id', authMiddleware, async (req, res) => {
 router.patch('/:id/stage', authMiddleware, async (req, res) => {
   try {
     const { stage } = req.body;
+    if (!stage) return res.status(400).json({ error: 'stage es requerido' });
 
     // Verificar si es un Quote-OC de email
     const emailOC = await prisma.quote.findFirst({
@@ -253,6 +263,11 @@ router.patch('/:id/stage', authMiddleware, async (req, res) => {
 
     const order = await prisma.order.findUnique({ where: { id: req.params.id } });
     if (!order) return res.status(404).json({ error: 'OC no encontrada' });
+
+    // VENDEDOR solo puede mover sus propias OCs
+    if (req.user.role === 'VENDEDOR' && order.sellerId !== req.user.id) {
+      return res.status(403).json({ error: 'Sin permiso sobre esta orden' });
+    }
 
     const oldStage = order.stage;
     const updated = await prisma.order.update({

@@ -1,9 +1,8 @@
 const express = require('express');
-const { PrismaClient } = require('@prisma/client');
 const { authMiddleware } = require('../middleware/auth');
+const prisma = require('../db');
 
 const router = express.Router();
-const prisma  = new PrismaClient();
 
 const adminOnly = (req, res, next) => {
   if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Solo administradores' });

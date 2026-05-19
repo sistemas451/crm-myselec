@@ -1,18 +1,22 @@
 const express = require('express');
-const { PrismaClient } = require('@prisma/client');
 const { authMiddleware } = require('../middleware/auth');
+const prisma = require('../db');
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 // GET /api/data/users
 router.get('/users', authMiddleware, async (req, res) => {
-  const users = await prisma.user.findMany({
-    where: { active: true },
-    select: { id: true, name: true, email: true, role: true, zone: true },
-    orderBy: { name: 'asc' },
-  });
-  res.json(users);
+  try {
+    const users = await prisma.user.findMany({
+      where: { active: true },
+      select: { id: true, name: true, email: true, role: true, zone: true },
+      orderBy: { name: 'asc' },
+    });
+    res.json(users);
+  } catch (err) {
+    console.error('GET /data/users error:', err);
+    res.status(500).json({ error: 'Error al obtener usuarios' });
+  }
 });
 
 // GET /api/data/stages
@@ -28,7 +32,7 @@ router.get('/stages', authMiddleware, async (req, res) => {
 
 // GET /api/data/activity
 router.get('/activity', authMiddleware, async (req, res) => {
-  const limit = parseInt(req.query.limit) || 30;
+  const limit = Math.min(parseInt(req.query.limit) || 50, 200); // máximo 200 actividades
   const activities = await prisma.activity.findMany({
     take: limit,
     orderBy: { createdAt: 'desc' },

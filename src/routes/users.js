@@ -3,9 +3,9 @@ const bcrypt  = require('bcryptjs');
 const path    = require('path');
 const fs      = require('fs');
 const multer  = require('multer');
-const { PrismaClient } = require('@prisma/client');
 const { authMiddleware } = require('../middleware/auth');
 const { sendMail } = require('../services/mailer');
+const prisma = require('../db');
 
 // Multer para avatares
 const AVATARS_DIR = path.join(__dirname, '..', '..', 'uploads', 'avatars');
@@ -27,7 +27,6 @@ const uploadAvatar = multer({
 });
 
 const router = express.Router();
-const prisma  = new PrismaClient();
 
 const adminOnly = (req, res, next) => {
   if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Solo administradores' });
