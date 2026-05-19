@@ -477,6 +477,7 @@ function QuoteDetail({ code, onClose, canReassign }) {
   const [detailItems, setDetailItems] = useState([]);
   const [detailAttachments, setDetailAttachments] = useState([]);
   const [detailEmailBody, setDetailEmailBody] = useState('');
+  const [priceBreakdown, setPriceBreakdown] = useState(null); // { subtotalNeto, ivaAmount, totalPercepciones, total }
   const [emailBodyOpen, setEmailBodyOpen] = useState(false);
   const [linkedQuotes, setLinkedQuotes] = useState({ linkedQuote: null, linkedBy: [] });
   const [linkSearch, setLinkSearch] = useState('');
@@ -556,6 +557,17 @@ function QuoteDetail({ code, onClose, canReassign }) {
         setDetailAttachments(detail.attachments || []);
         setDetailEmailBody(detail.emailBody || '');
         setLinkedQuotes({ linkedQuote: detail.linkedQuote || null, linkedBy: detail.linkedBy || [] });
+        // Breakdown de precios (solo presupuestos Flexxus con datos parseados)
+        if (detail.subtotalNeto != null || detail.ivaAmount != null) {
+          setPriceBreakdown({
+            subtotalNeto:      detail.subtotalNeto,
+            ivaAmount:         detail.ivaAmount,
+            totalPercepciones: detail.totalPercepciones,
+            total:             detail.amount,  // amount = grand total (con IVA)
+          });
+        } else {
+          setPriceBreakdown(null);
+        }
         setNotesLoading(false);
       })
       .catch(() => setNotesLoading(false));
@@ -887,7 +899,7 @@ function QuoteDetail({ code, onClose, canReassign }) {
           <Field label="Ingreso">
             <span className="mono">{fmtDate(q.ingreso)} <span className="text-ink-500">· hace {q.dias}d</span></span>
           </Field>
-          <Field label="Monto cotizado" mono value={q.monto != null ? fmtMoney(q.monto) : '—'}/>
+          <Field label="Total con IVA" mono value={q.monto != null ? fmtMoney(q.monto) : '—'}/>
           <Field label="Cod. Flexxus NP" mono value={q.flexxus || '—'}/>
           <Field label="Zona de entrega" value={cli?.zone || '—'}/>
           <Field label="Contacto"><div className="text-[12.5px]">{cli?.email || '—'}</div></Field>
@@ -1046,14 +1058,40 @@ function QuoteDetail({ code, onClose, canReassign }) {
                       </tr>
                     ))}
                   </tbody>
-                  {q.monto != null && (
-                    <tfoot>
+                  <tfoot>
+                    {priceBreakdown?.subtotalNeto != null && (
+                      <tr className="border-t border-line">
+                        <td colSpan="4" className="text-right py-1.5 text-[11px] text-ink-400">Subtotal neto</td>
+                        <td className="text-right py-1.5 mono text-[12px] text-ink-500">
+                          {priceBreakdown.subtotalNeto.toLocaleString('es-AR',{minimumFractionDigits:2})}
+                        </td>
+                      </tr>
+                    )}
+                    {priceBreakdown?.ivaAmount != null && priceBreakdown.ivaAmount > 0 && (
+                      <tr>
+                        <td colSpan="4" className="text-right py-1.5 text-[11px] text-ink-400">IVA 21%</td>
+                        <td className="text-right py-1.5 mono text-[12px] text-ink-500">
+                          {priceBreakdown.ivaAmount.toLocaleString('es-AR',{minimumFractionDigits:2})}
+                        </td>
+                      </tr>
+                    )}
+                    {priceBreakdown?.totalPercepciones != null && priceBreakdown.totalPercepciones > 0 && (
+                      <tr>
+                        <td colSpan="4" className="text-right py-1.5 text-[11px] text-ink-400">Percepciones</td>
+                        <td className="text-right py-1.5 mono text-[12px] text-ink-500">
+                          {priceBreakdown.totalPercepciones.toLocaleString('es-AR',{minimumFractionDigits:2})}
+                        </td>
+                      </tr>
+                    )}
+                    {(q.monto != null || priceBreakdown?.total != null) && (
                       <tr className="border-t-2 border-ink-900">
                         <td colSpan="4" className="text-right pt-3 font-bold">TOTAL</td>
-                        <td className="text-right pt-3 mono font-bold text-base">{q.monto.toLocaleString('es-AR')}</td>
+                        <td className="text-right pt-3 mono font-bold text-base">
+                          {(priceBreakdown?.total ?? q.monto).toLocaleString('es-AR',{minimumFractionDigits:2})}
+                        </td>
                       </tr>
-                    </tfoot>
-                  )}
+                    )}
+                  </tfoot>
                 </table>
                 {detailItems.filter(i => !i.accepted).length > 0 && (
                   <div className="mt-4 pt-4 border-t border-line">
@@ -1075,7 +1113,21 @@ function QuoteDetail({ code, onClose, canReassign }) {
                   <ul className="text-[12.5px] space-y-1.5">
                     <li className="flex justify-between"><span className="text-ink-500">Cliente</span><span className="font-medium">{cli?.name || '—'}</span></li>
                     {q.flexxus && <li className="flex justify-between"><span className="text-ink-500">NP Flexxus</span><span className="mono">{q.flexxus}</span></li>}
-                    {q.monto != null && <li className="flex justify-between"><span className="text-ink-500">Total</span><span className="mono font-semibold">{fmtMoney(q.monto)}</span></li>}
+                    {priceBreakdown?.subtotalNeto != null && (
+                      <li className="flex justify-between"><span className="text-ink-500">Subtotal neto</span><span className="mono">U$S {priceBreakdown.subtotalNeto.toLocaleString('es-AR',{minimumFractionDigits:2})}</span></li>
+                    )}
+                    {priceBreakdown?.ivaAmount != null && priceBreakdown.ivaAmount > 0 && (
+                      <li className="flex justify-between"><span className="text-ink-500">IVA 21%</span><span className="mono">U$S {priceBreakdown.ivaAmount.toLocaleString('es-AR',{minimumFractionDigits:2})}</span></li>
+                    )}
+                    {priceBreakdown?.totalPercepciones != null && priceBreakdown.totalPercepciones > 0 && (
+                      <li className="flex justify-between"><span className="text-ink-500">Percepciones</span><span className="mono">U$S {priceBreakdown.totalPercepciones.toLocaleString('es-AR',{minimumFractionDigits:2})}</span></li>
+                    )}
+                    {(q.monto != null || priceBreakdown?.total != null) && (
+                      <li className="flex justify-between border-t border-line pt-1.5 mt-0.5">
+                        <span className="font-semibold text-ink-800">Total</span>
+                        <span className="mono font-semibold">{fmtMoney(priceBreakdown?.total ?? q.monto)}</span>
+                      </li>
+                    )}
                     <li className="flex justify-between"><span className="text-ink-500">Ítems</span><span>{detailItems.filter(i=>i.accepted).length} cotizados{detailItems.filter(i=>!i.accepted).length > 0 ? `, ${detailItems.filter(i=>!i.accepted).length} NC` : ''}</span></li>
                   </ul>
                 </div>

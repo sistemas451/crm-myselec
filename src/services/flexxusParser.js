@@ -97,13 +97,19 @@ function parseArFloat(s) {
  */
 async function parseFlexxusPDF(buffer) {
   const result = {
-    npCode:     null,   // "PR-17680" (PR = Presupuesto)
-    npRaw:      null,   // "17680"
-    cuit:       null,   // "30-68621830-5"
-    clientName: null,
-    date:       null,
-    seller:     null,
-    items:      [],
+    npCode:           null,   // "PR-17680" (PR = Presupuesto)
+    npRaw:            null,   // "17680"
+    cuit:             null,   // "30-68621830-5"
+    clientName:       null,
+    date:             null,
+    seller:           null,
+    subtotalNeto:     null,   // U$S 4.896,00
+    discountPct:      null,   // 0
+    discountAmt:      null,   // U$S 0,00
+    ivaAmount:        null,   // U$S 1.028,16
+    totalPercepciones:null,   // U$S 146,88
+    total:            null,   // U$S 6.071,04 — grand total con IVA y percepciones
+    items:            [],
   };
 
   try {
@@ -157,6 +163,45 @@ async function parseFlexxusPDF(buffer) {
 
     // ── Ítems ─────────────────────────────────────────────────────────────────
     result.items = parseItems(lines);
+
+    // ── Breakdown de precios ──────────────────────────────────────────────────
+    // El PDF puede concatenar label+valor en la misma línea o separarlos.
+    // Manejamos ambos casos con marcador de contexto (totalMarker).
+    let totalMarker = false;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      let m;
+      // "Subtotal. Neto: U$S 4896,00"
+      if (!result.subtotalNeto && (m = line.match(/Subtotal[.\s]+Neto\s*:?\s*U\$S\s*([\d,.]+)/i)))
+        result.subtotalNeto = parseArFloat(m[1]);
+      // "Desc. 0,00 % : U$S 0,00"
+      if (!result.discountAmt && (m = line.match(/Desc\.\s*([\d,.]+)\s*%\s*:?\s*U\$S\s*([\d,.]+)/i))) {
+        result.discountPct = parseArFloat(m[1]);
+        result.discountAmt = parseArFloat(m[2]);
+      }
+      // "Total Perc.: U$S 146,88"
+      if (!result.totalPercepciones && (m = line.match(/Total\s+Perc\.?\s*:?\s*U\$S\s*([\d,.]+)/i)))
+        result.totalPercepciones = parseArFloat(m[1]);
+      // Grand total — "Total: U$S 6071,04" en la misma línea (mixed case)
+      if (!result.total && (m = line.match(/^Total\s*:\s*U\$S\s*([\d,.]+)$/)))
+        result.total = parseArFloat(m[1]);
+      // Grand total — "Total:" en una línea, "U$S 6071,04" en la siguiente
+      if (!result.total && /^Total\s*:?\s*$/.test(line)) {
+        totalMarker = true;
+      } else if (totalMarker) {
+        if (!result.total && (m = line.match(/^U\$S\s+([\d,.]+)$/)))
+          result.total = parseArFloat(m[1]);
+        totalMarker = false;
+      }
+    }
+    // Calcular IVA si no fue parseado directamente:
+    // Total = (SubtotalNeto - Descuento) + IVA + Percepciones
+    // → IVA  = Total - SubtotalNeto + Descuento - Percepciones
+    if (result.total != null && result.subtotalNeto != null && result.ivaAmount === null) {
+      const disc = result.discountAmt || 0;
+      const perc = result.totalPercepciones || 0;
+      result.ivaAmount = parseFloat((result.total - result.subtotalNeto + disc - perc).toFixed(2));
+    }
 
   } catch (err) {
     console.error('flexxusParser error:', err.message);

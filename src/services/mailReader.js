@@ -679,8 +679,17 @@ async function processSentMail(parsed, mailData, imap) {
               sortOrder:   i,
             })),
           });
-          const total = fd.items.filter(i => i.accepted !== false).reduce((s, i) => s + (i.total || 0), 0);
-          if (total > 0) await prisma.quote.update({ where: { id: existing.id }, data: { amount: total } });
+          const subtotal = fd.items.filter(i => i.accepted !== false).reduce((s, i) => s + (i.total || 0), 0);
+          const grandTotal = fd.total || subtotal;
+          if (grandTotal > 0) await prisma.quote.update({
+            where: { id: existing.id },
+            data: {
+              amount:            grandTotal,
+              subtotalNeto:      fd.subtotalNeto || subtotal || null,
+              ivaAmount:         fd.ivaAmount || null,
+              totalPercepciones: fd.totalPercepciones || null,
+            },
+          });
           console.log(`   📋 ${fd.items.length} ítems recuperados para ${existing.code} (enviado)`);
         }
       } catch (e) {
@@ -764,28 +773,32 @@ async function processSentMail(parsed, mailData, imap) {
 
   // ── Crear Quote ───────────────────────────────────────────────────────────
   const code = await nextCode(prisma.quote, 'COT-2026');
-  const flexxusTotal = flexxusData?.items?.length
+  const itemsSubtotal = flexxusData?.items?.length
     ? flexxusData.items.filter(i => i.accepted !== false).reduce((s, i) => s + (i.total || 0), 0)
     : null;
+  const flexxusGrandTotal = flexxusData?.total || itemsSubtotal; // total con IVA del PDF, fallback suma ítems
 
   const bodyText = parsed.text || (parsed.html ? stripHtml(parsed.html) : '');
 
   const quote = await prisma.quote.create({
     data: {
       code,
-      clientId:       client?.id || null,
-      sellerId:       sellerId,
-      stage:          'enviado',
-      source:         'EMAIL',
-      mailType:       'PRESUPUESTO',
-      flexxusCode:    flexxusData?.npCode || null,
-      amount:         flexxusTotal || null,
-      emailSubject:   subject.substring(0, 500),
-      emailMessageId: messageId,
-      emailFrom:      fromAddr,
-      emailBody:      bodyText.substring(0, 20000),
-      inReplyTo:      inReplyTo,
-      createdAt:      date,
+      clientId:          client?.id || null,
+      sellerId:          sellerId,
+      stage:             'enviado',
+      source:            'EMAIL',
+      mailType:          'PRESUPUESTO',
+      flexxusCode:       flexxusData?.npCode || null,
+      amount:            flexxusGrandTotal || null,
+      subtotalNeto:      flexxusData?.subtotalNeto || itemsSubtotal || null,
+      ivaAmount:         flexxusData?.ivaAmount || null,
+      totalPercepciones: flexxusData?.totalPercepciones || null,
+      emailSubject:      subject.substring(0, 500),
+      emailMessageId:    messageId,
+      emailFrom:         fromAddr,
+      emailBody:         bodyText.substring(0, 20000),
+      inReplyTo:         inReplyTo,
+      createdAt:         date,
     },
   });
 
@@ -1042,8 +1055,17 @@ async function processEmail(mailData, imap) {
                   sortOrder:   i,
                 })),
               });
-              const total = fd.items.filter(i => i.accepted !== false).reduce((s, i) => s + (i.total || 0), 0);
-              if (total > 0) await prisma.quote.update({ where: { id: existing.id }, data: { amount: total } });
+              const subtotal = fd.items.filter(i => i.accepted !== false).reduce((s, i) => s + (i.total || 0), 0);
+              const grandTotal = fd.total || subtotal;
+              if (grandTotal > 0) await prisma.quote.update({
+                where: { id: existing.id },
+                data: {
+                  amount:            grandTotal,
+                  subtotalNeto:      fd.subtotalNeto || subtotal || null,
+                  ivaAmount:         fd.ivaAmount || null,
+                  totalPercepciones: fd.totalPercepciones || null,
+                },
+              });
               console.log(`   📋 ${fd.items.length} ítems recuperados para ${existing.code}`);
             }
           } catch (e) {
@@ -1189,26 +1211,30 @@ async function processEmail(mailData, imap) {
     const code = await nextCode(prisma.quote, 'COT-2026');
 
     // Calcular monto total de ítems Flexxus (solo los aceptados)
-    const flexxusTotal = flexxusData?.items?.length
+    const itemsSubtotal = flexxusData?.items?.length
       ? flexxusData.items.filter(i => i.accepted).reduce((s, i) => s + (i.total || 0), 0)
       : null;
+    const flexxusGrandTotal = flexxusData?.total || itemsSubtotal; // total con IVA del PDF
 
     const quote = await prisma.quote.create({
       data: {
         code,
-        clientId:  client?.id || null,
-        sellerId:  sellerId,
-        stage:          mailType === 'PRESUPUESTO' ? 'enviado' : (client ? 'asignada' : 'recibida'),
-        source:         'EMAIL',
+        clientId:          client?.id || null,
+        sellerId:          sellerId,
+        stage:             mailType === 'PRESUPUESTO' ? 'enviado' : (client ? 'asignada' : 'recibida'),
+        source:            'EMAIL',
         mailType,
-        flexxusCode:    flexxusData?.npCode || null,
-        amount:         flexxusTotal || null,
-        emailSubject:   subject.substring(0, 500),
-        emailMessageId: messageId,
-        emailFrom:      originalSender,
-        emailBody:      bodyText.substring(0, 20000),
-        inReplyTo:      inReplyTo,
-        createdAt:      date,
+        flexxusCode:       flexxusData?.npCode || null,
+        amount:            flexxusGrandTotal || null,
+        subtotalNeto:      flexxusData?.subtotalNeto || itemsSubtotal || null,
+        ivaAmount:         flexxusData?.ivaAmount || null,
+        totalPercepciones: flexxusData?.totalPercepciones || null,
+        emailSubject:      subject.substring(0, 500),
+        emailMessageId:    messageId,
+        emailFrom:         originalSender,
+        emailBody:         bodyText.substring(0, 20000),
+        inReplyTo:         inReplyTo,
+        createdAt:         date,
       },
     });
 

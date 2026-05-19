@@ -132,7 +132,10 @@ model Quote {
   seller         User?     @relation("QuoteSeller", fields: [sellerId], references: [id])
   stage          String    @default("recibida")
   source         String    @default("MANUAL")   // MANUAL | EMAIL | WHATSAPP
-  amount         Float?                     // Monto estimado USD
+  amount         Float?                     // Total con IVA y percepciones (grand total)
+  subtotalNeto   Float?                     // Subtotal neto (ítems, sin impuestos)
+  ivaAmount      Float?                     // Monto IVA (21% típicamente)
+  totalPercepciones Float?                  // Total percepciones ARBA/AGIP
   flexxusCode    String?                    // Código NP de Flexxus
   deadline       DateTime?                  // Fecha límite de armado
   rejectReason   String?                    // Motivo de rechazo
