@@ -546,7 +546,7 @@ async function processNotaPedido(parsed, mailData, att, imap) {
       code,
       clientId:       client?.id || presupuesto?.clientId || null,
       sellerId:       presupuesto?.sellerId || client?.defaultSellerId || null,
-      stage:          'oc',
+      stage:          'np_enviada',
       source:         'EMAIL',
       mailType:       'NOTA_PEDIDO',
       flexxusCode:    npData.npCode,

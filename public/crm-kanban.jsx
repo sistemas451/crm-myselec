@@ -81,21 +81,12 @@ function OrderCard({ o, onOpen, compact }) {
       <div className="flex items-start justify-between gap-2">
         <div className="mono text-[11px] font-semibold text-navy-900">{o.code}</div>
         <div className="flex items-center gap-1">
-          {isEmailOC
-            ? <Badge tone="purple">EMAIL</Badge>
-            : <Badge tone={o.entrega==='AMBA' ? 'blue' : 'purple'}>{o.entrega}</Badge>}
+          {isEmailOC && <Badge tone="purple">EMAIL</Badge>}
           {o.flexxus && <Badge tone="slate">{o.flexxus}</Badge>}
         </div>
       </div>
       <div className="text-[13px] font-semibold text-ink-900 mt-1 leading-snug truncate">{displayName}</div>
       <div className="mono text-[11px] text-ink-500 truncate">{o.fromQuote ? `← ${o.fromQuote}` : '— sin presupuesto vinculado'}</div>
-
-      {o.transp && o.transp !== '—' && (
-        <div className="mt-2 text-[11px] text-ink-700 inline-flex items-center gap-1.5">
-          <Icon name="truck" size={12} className="text-ink-400"/> {o.transp}
-          {o.guia && <span className="mono text-ink-500">· {o.guia}</span>}
-        </div>
-      )}
 
       {!compact && sel && (
         <div className="mt-3 flex items-center justify-between">
@@ -237,11 +228,6 @@ function OrderFiltersBar() {
   const [moreOpen, setMoreOpen] = useS(false);
   const active = countActiveFilters(orderFilters);
 
-  const deliveryOptions = [
-    { value:'', label:'Todas las entregas', icon:'map-pin' },
-    { value:'AMBA', label:'AMBA propia', icon:'map-pin' },
-    { value:'Interior', label:'Interior', icon:'truck' },
-  ];
   const periodOptions = [
     { value:'7d',  label:'Últimos 7 días' },
     { value:'30d', label:'Últimos 30 días' },
@@ -251,20 +237,6 @@ function OrderFiltersBar() {
 
   return (
     <>
-      <PopoverButton icon="map-pin"
-        label={orderFilters.delivery ? `Entrega: ${orderFilters.delivery}` : 'Todas las entregas'}
-        value={orderFilters.delivery}
-        active={!!orderFilters.delivery}
-        onChange={(v)=>setOrderFilters(s=>({...s, delivery:v}))}
-        onClear={()=>setOrderFilters(s=>({...s, delivery:''}))}
-        options={deliveryOptions}
-      />
-      <div className="relative">
-        <Icon name="truck" size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-400"/>
-        <input className="inp pl-8 py-1.5 text-xs w-40" placeholder="Transporte…"
-          value={orderFilters.transport}
-          onChange={e=>setOrderFilters(s=>({...s, transport:e.target.value}))}/>
-      </div>
       <div className="relative">
         <Icon name="building-2" size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-400"/>
         <input className="inp pl-8 py-1.5 text-xs w-40" placeholder="Cliente…"
@@ -327,7 +299,7 @@ function KanbanOrders({ onOpen, logisticsMode }) {
         <>
           <OrderFiltersBar/>
           {!logisticsMode && (
-            <button className="btn-primary" onClick={()=>openModal('newOrder')}><Icon name="plus" size={14}/>Nueva OC</button>
+            <button className="btn-primary" onClick={()=>openModal('newOrder')}><Icon name="plus" size={14}/>Nueva Nota de Pedido</button>
           )}
         </>
       }

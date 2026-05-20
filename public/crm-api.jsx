@@ -124,6 +124,13 @@ const CrmApi = {
 
   // Orders
   getOrders: (p) => apiFetch(`/orders${toQS(p)}`),
+  parseNP: (file) => {
+    const token = CrmAuth.getToken();
+    const fd = new FormData(); fd.append('file', file);
+    return fetch(`${API_BASE}/orders/parse-np`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd,
+    }).then(r => r.ok ? r.json() : r.json().then(b => Promise.reject(new Error(b.error || `Error ${r.status}`))));
+  },
   createOrder: (data) => apiFetch('/orders', { method: 'POST', body: JSON.stringify(data) }),
   changeOrderStage: (id, stage) => apiFetch(`/orders/${id}/stage`, {
     method: 'PATCH', body: JSON.stringify({ stage })
@@ -155,6 +162,33 @@ const CrmApi = {
     method: 'POST', body: JSON.stringify({ email })
   }),
   removeClientEmail: (id, emailId) => apiFetch(`/clients/${id}/emails/${emailId}`, { method: 'DELETE' }),
+  deleteClient: (id) => apiFetch(`/clients/${id}`, { method: 'DELETE' }),
+  deleteAllClients: () => apiFetch('/clients/all', { method: 'DELETE' }),
+  exportClients: () => {
+    const token = CrmAuth.getToken();
+    return fetch(`${API_BASE}/clients/export`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then(async r => {
+      if (!r.ok) { const b = await r.json(); throw new Error(b.error || `Error ${r.status}`); }
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `clientes-${new Date().toISOString().slice(0,10)}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+  },
+  previewClientsXLS: (file) => {
+    const token = CrmAuth.getToken();
+    const fd = new FormData(); fd.append('file', file);
+    return fetch(`${API_BASE}/clients/preview`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd,
+    }).then(r => r.ok ? r.json() : r.json().then(b => Promise.reject(new Error(b.error || `Error ${r.status}`))));
+  },
+  syncClients: (token, deleteCodes) => apiFetch('/clients/sync', {
+    method: 'POST', body: JSON.stringify({ token, deleteCodes }),
+  }),
 
   // Data
   getUsers: () => apiFetch('/data/users'),
@@ -210,6 +244,7 @@ const CrmApi = {
   syncArticles: (token, deleteCodes) => apiFetch('/articles/sync', {
     method: 'POST', body: JSON.stringify({ token, deleteCodes }),
   }),
+  deleteAllArticles: () => apiFetch('/articles/all', { method: 'DELETE' }),
 
   // Attachments
   deleteAttachment: (id) => apiFetch(`/attachments/${id}`, { method: 'DELETE' }),

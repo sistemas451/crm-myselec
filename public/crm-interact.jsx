@@ -73,7 +73,7 @@ function AppProvider({ children }) {
 
   // Quote-level filters (shared by board)
   const [quoteFilters, setQuoteFilters] = useS({ seller:'', client:'', period:'30d', zone:'', activity:'', min:'', max:'' });
-  const [orderFilters, setOrderFilters] = useS({ seller:'', client:'', period:'30d', delivery:'', transport:'', min:'', max:'' });
+  const [orderFilters, setOrderFilters] = useS({ seller:'', client:'', period:'30d', min:'', max:'' });
 
   // Logged-in user (for notes)
   const [currentUserId, setCurrentUserId] = useS('');
@@ -139,12 +139,9 @@ function AppProvider({ children }) {
         seller: partial.seller,
         stage: 'oc',
         fromQuote: partial.fromQuote,
-        entrega: partial.entrega,
-        transp: partial.transp || '—',
         flexxus: partial.flexxus || '—',
         fecha: partial.fecha || new Date().toISOString().slice(0,10),
         ocCliente: partial.ocCliente,
-        observaciones: partial.observaciones,
       };
       pushToast(`Orden de compra ${code} creada`);
       return [o, ...os];
@@ -442,106 +439,176 @@ function NewQuoteModal({ defaultClient }) {
   );
 }
 
-// --- 2. Nueva OC ---
+// --- 2. Nueva Nota de Pedido ---
 function NewOrderModal() {
   const { closeModal, quotes, clients, users, setOrders, pushToast } = useApp();
-  const accepted = quotes.filter(q => q.stage === 'aceptada');
+  const presupuestos = quotes.filter(q => q.mailType === 'PRESUPUESTO' || (!q.mailType && q.stage !== 'rechazada'));
   const [form, setForm] = useS({
-    fromQuote: accepted[0]?.code || '',
+    fromQuote: '',
+    clientId:  '',
     ocCliente: '',
-    flexxus: '',
-    entrega: 'AMBA',
-    transp: '',
-    fecha: new Date().toISOString().slice(0,10),
-    observaciones: '',
+    flexxus:   '',
+    fecha:     new Date().toISOString().slice(0,10),
   });
-  const [saving, setSaving] = useS(false);
+  const [saving,   setSaving]   = useS(false);
+  const [parsing,  setParsing]  = useS(false);
+  const [npFile,   setNpFile]   = useS(null);   // File object
+  const [npResult, setNpResult] = useS(null);   // parsed data from server
+  const fileRef = React.useRef();
   const set = (k,v) => setForm(f => ({...f, [k]: v}));
-  const q = quotes.find(x => x.code === form.fromQuote);
-  const cli = q && clients.find(c => c.code === q.client);
-  const canSubmit = form.fromQuote && form.ocCliente;
+
+  const q   = quotes.find(x => x.code === form.fromQuote);
+  const cli = q ? clients.find(c => c.code === q.client)
+                : clients.find(c => c.id === form.clientId);
+  const canSubmit = (form.fromQuote || form.clientId) && form.ocCliente;
+
+  // Cuando el usuario selecciona un PDF de NP
+  const handleNpFile = async (file) => {
+    if (!file) return;
+    setNpFile(file);
+    setParsing(true);
+    try {
+      const data = await CrmApi.parseNP(file);
+      setNpResult(data);
+      // Auto-completar campos
+      if (data.ocNumber)  set('ocCliente', data.ocNumber);
+      if (data.npCode)    set('flexxus',   data.npCode);
+      if (data.presupuesto) set('fromQuote', quotes.find(x => x.id === data.presupuesto.id)?.code || '');
+      if (data.client && !form.fromQuote) set('clientId', data.client.id);
+      pushToast(`PDF parseado: ${data.npCode || '—'} · ${data.itemCount} ítem${data.itemCount !== 1 ? 's' : ''}`);
+    } catch (err) {
+      pushToast(err.message || 'No se pudo parsear el PDF', 'bad');
+    } finally {
+      setParsing(false);
+    }
+  };
 
   const submit = async () => {
-    if (!q) return;
     setSaving(true);
     try {
-      await CrmApi.createOrder({
-        fromQuoteId: q.id,
+      const payload = {
+        fromQuoteId:  q?.id || null,
+        clientId:     form.clientId || null,
         clientOCCode: form.ocCliente,
-        flexxusCode: form.flexxus || null,
-        deliveryType: form.entrega,
-        carrier: form.entrega === 'Interior' ? form.transp : null,
+        flexxusCode:  form.flexxus  || null,
         estimatedDate: form.fecha || null,
-      });
+      };
+      const order = await CrmApi.createOrder(payload);
+
+      // Si hay PDF, subirlo como adjunto (el servidor lo re-parsea y vincula)
+      if (npFile) {
+        try { await CrmApi.uploadOrderAttachments(order.id, [npFile]); } catch (_) {}
+      }
+
       const freshOrders = await CrmApi.getOrders();
       setOrders(freshOrders);
-      pushToast('Orden de compra creada correctamente');
+      pushToast('Nota de Pedido creada correctamente');
       closeModal();
     } catch (err) {
-      pushToast(err.message || 'Error al crear OC', 'bad');
+      pushToast(err.message || 'Error al crear NP', 'bad');
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <Modal onClose={closeModal} subtitle="Fase 2 · OC Recibida" title="Nueva orden de compra" width={620}
+    <Modal onClose={closeModal} subtitle="Fase 2 · Nota de Pedido" title="Nueva Nota de Pedido" width={640}
       footer={
         <>
           <button className="btn-ghost" onClick={closeModal} disabled={saving}>Cancelar</button>
-          <button className="btn-primary" disabled={!canSubmit || saving} onClick={submit}
-            style={!canSubmit || saving ? {opacity:.45, cursor:'not-allowed'} : {}}>
-            <Icon name="plus" size={13}/>{saving ? 'Guardando...' : 'Crear OC'}
+          <button className="btn-primary" disabled={!canSubmit || saving || parsing} onClick={submit}
+            style={!canSubmit || saving || parsing ? {opacity:.45, cursor:'not-allowed'} : {}}>
+            <Icon name="plus" size={13}/>{saving ? 'Guardando...' : 'Crear NP'}
           </button>
         </>
       }
     >
       <div className="grid grid-cols-2 gap-4">
-        <FormGroup label="Cotización vinculada" required cols={2}
-          hint={accepted.length === 0 ? 'No hay cotizaciones aceptadas disponibles.' : null}>
-          <Select value={form.fromQuote} onChange={v=>set('fromQuote',v)} placeholder="Seleccionar cotización aceptada"
-            options={accepted.map(a => {
+
+        {/* Upload PDF */}
+        <div className="col-span-2">
+          <label className="block text-[11px] font-semibold text-ink-500 uppercase tracking-wide mb-1.5">
+            PDF Nota de Pedido Flexxus <span className="font-normal text-ink-400 normal-case">(opcional — auto-completa los campos)</span>
+          </label>
+          <div
+            onClick={() => fileRef.current?.click()}
+            className={cx(
+              'flex items-center gap-3 px-4 py-3 rounded-lg border-2 border-dashed cursor-pointer transition-colors',
+              npFile ? 'border-brand bg-brandSoft/20' : 'border-line hover:border-brand/50 hover:bg-surface'
+            )}
+          >
+            <Icon name={parsing ? 'loader' : npFile ? 'file-check' : 'upload'} size={18}
+              className={cx(parsing ? 'animate-spin text-brand' : npFile ? 'text-brand' : 'text-ink-400')}/>
+            <div className="flex-1 min-w-0">
+              {parsing ? (
+                <span className="text-[13px] text-brand font-medium">Procesando PDF…</span>
+              ) : npFile ? (
+                <span className="text-[13px] text-ink-700 font-medium truncate">{npFile.name}</span>
+              ) : (
+                <span className="text-[13px] text-ink-400">Hacé clic para subir el PDF de la Nota de Pedido</span>
+              )}
+            </div>
+            {npFile && !parsing && (
+              <button onClick={e=>{e.stopPropagation();setNpFile(null);setNpResult(null);fileRef.current.value='';}}
+                className="text-ink-400 hover:text-red-500 transition-colors">
+                <Icon name="x" size={14}/>
+              </button>
+            )}
+          </div>
+          <input ref={fileRef} type="file" accept=".pdf" className="hidden"
+            onChange={e => handleNpFile(e.target.files[0])}/>
+        </div>
+
+        {/* Info del NP parseado */}
+        {npResult && (
+          <div className="col-span-2 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2.5 text-[12px] text-emerald-800 space-y-0.5">
+            <div className="font-semibold flex items-center gap-1.5"><Icon name="check-circle" size={13}/>PDF procesado correctamente</div>
+            <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-emerald-700">
+              {npResult.npCode    && <span>NP: <b>{npResult.npCode}</b></span>}
+              {npResult.ocNumber  && <span>OC cliente: <b>{npResult.ocNumber}</b></span>}
+              {npResult.clientName && <span>Cliente: <b>{npResult.clientName}</b></span>}
+              {npResult.presupuestoNP && <span>Pres. ref: <b>{npResult.presupuestoNP}</b>{npResult.presupuesto ? ` → ${npResult.presupuesto.code}` : ' (no encontrado en CRM)'}</span>}
+              {npResult.itemCount > 0 && <span>{npResult.itemCount} ítems</span>}
+            </div>
+          </div>
+        )}
+
+        {/* Cotización vinculada (opcional) */}
+        <FormGroup label="Presupuesto vinculado" cols={2}
+          hint="Opcional. Si subiste el PDF, se detecta automáticamente.">
+          <Select value={form.fromQuote} onChange={v=>{set('fromQuote',v);if(v)set('clientId','');}}
+            placeholder="Seleccionar presupuesto (opcional)"
+            options={presupuestos.map(a => {
               const c = clients.find(x => x.code === a.client);
-              return { value:a.code, label:`${a.code} — ${c?.name} · ${fmtMoney(a.monto)}` };
+              return { value: a.code, label: `${a.code}${a.flexxus ? ` (${a.flexxus})` : ''} — ${c?.name || a.clientName || '?'} · ${a.stage}` };
             })}/>
         </FormGroup>
 
+        {/* Si no hay presupuesto, elegir cliente directo */}
+        {!form.fromQuote && (
+          <FormGroup label="Cliente" cols={2} hint="Requerido si no seleccionás un presupuesto.">
+            <Select value={form.clientId} onChange={v=>set('clientId',v)}
+              placeholder="Seleccionar cliente"
+              options={clients.map(c => ({ value: c.id, label: `${c.name}${c.cuit ? ` · ${c.cuit}` : ''}` }))}/>
+          </FormGroup>
+        )}
+
         {cli && (
-          <div className="col-span-2 bg-surface rounded-lg px-3 py-2.5 border border-line text-[12px] text-ink-700 flex items-center gap-3">
+          <div className="col-span-2 bg-surface rounded-lg px-3 py-2 border border-line text-[12px] text-ink-600 flex items-center gap-2">
             <Icon name="info" size={13} className="text-brand"/>
-            <span>Auto-completado: <b>{cli.name}</b> · Vendedor: <b>{users.find(u=>u.id===q.seller)?.name}</b> · Monto: <span className="mono">{fmtMoney(q.monto)}</span></span>
+            <span><b>{cli.name}</b>{q ? ` · ${fmtMoney(q.monto)} · ${q.stage}` : ''}</span>
           </div>
         )}
 
         <FormGroup label="Código OC del cliente" required>
-          <input className="inp w-full" placeholder="Ej: OC-10043-2026" value={form.ocCliente} onChange={e=>set('ocCliente',e.target.value)}/>
+          <input className="inp w-full" placeholder="Ej: 4500038388" value={form.ocCliente} onChange={e=>set('ocCliente',e.target.value)}/>
         </FormGroup>
         <FormGroup label="Código NP Flexxus">
           <input className="inp w-full mono" placeholder="Ej: NP-20728" value={form.flexxus} onChange={e=>set('flexxus',e.target.value)}/>
         </FormGroup>
-        <FormGroup label="Tipo de entrega" cols={2}>
-          <div className="flex gap-2">
-            {[['AMBA','AMBA propia'],['Interior','Transportista interior']].map(([v,l]) => (
-              <label key={v} className={cx('flex-1 flex items-center gap-2 px-3 py-2.5 rounded-lg border cursor-pointer',
-                form.entrega===v ? 'border-brand bg-brandSoft/40' : 'border-line bg-white hover:bg-surface')}>
-                <input type="radio" checked={form.entrega===v} onChange={()=>set('entrega',v)} className="accent-brand"/>
-                <Icon name={v==='AMBA'?'map-pin':'truck'} size={13} className="text-ink-500"/>
-                <span className="text-[13px] font-medium">{l}</span>
-              </label>
-            ))}
-          </div>
-        </FormGroup>
-        {form.entrega === 'Interior' && (
-          <FormGroup label="Transportista" cols={2}>
-            <input className="inp w-full" placeholder="Ej: Cruz del Sur, Andesmar Cargas" value={form.transp} onChange={e=>set('transp',e.target.value)}/>
-          </FormGroup>
-        )}
+
         <FormGroup label="Fecha estimada de entrega" cols={2}>
           <input type="date" className="inp w-full" value={form.fecha} onChange={e=>set('fecha',e.target.value)}/>
-        </FormGroup>
-        <FormGroup label="Observaciones" cols={2}>
-          <textarea rows="3" className="inp w-full resize-none" placeholder="Instrucciones de entrega, condiciones especiales…"
-            value={form.observaciones} onChange={e=>set('observaciones',e.target.value)}/>
         </FormGroup>
       </div>
     </Modal>
@@ -1010,7 +1077,7 @@ function SearchPaletteModal() {
                     <Icon name="package" size={15} className="text-ink-500"/>
                     <div className="flex-1 min-w-0">
                       <div className="text-[13px] font-semibold truncate"><span className="mono text-navy-900">{o.code}</span> — {c?.name}</div>
-                      <div className="text-[11px] text-ink-500">{[o.entrega&&`Entrega ${o.entrega}`, o.transp].filter(Boolean).join(' · ')}</div>
+                      <div className="text-[11px] text-ink-500">{o.flexxus && o.flexxus !== '—' ? o.flexxus : o.fromQuote ? `← ${o.fromQuote}` : ''}</div>
                     </div>
                     {stg && <Badge tone={stg.tone} dot>{stg.label}</Badge>}
                   </button>

@@ -18,6 +18,7 @@ const prisma  = require('./db');
 const { authMiddleware } = require('./middleware/auth');
 const { runIdleCheck } = require('./services/notifier');
 const { syncMails }    = require('./services/mailReader');
+const { parseFlexxusPDF, isFlexxusPDF } = require('./services/flexxusParser');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -71,13 +72,89 @@ app.post('/api/quotes/:id/attachments', authMiddleware, upload.array('files', 10
         },
       })
     ));
-    res.json(created);
+
+    // ── Auto-parseo de PDF Flexxus ───────────────────────────────────────────
+    // Si alguno de los archivos subidos es un presupuesto Flexxus, lo parseamos
+    // automáticamente y completamos los datos de la cotización.
+    let flexxusParsed = null;
+    const flexxusFile = (req.files || []).find(f =>
+      isFlexxusPDF({ filename: f.originalname })
+    );
+
+    if (flexxusFile) {
+      try {
+        const fs = require('fs');
+        const buffer = fs.readFileSync(flexxusFile.path);
+        const data = await parseFlexxusPDF(buffer);
+
+        if (data.npCode || data.items?.length) {
+          const quote = await prisma.quote.findUnique({ where: { id: req.params.id } });
+          const updateData = {};
+
+          // Código Flexxus, monto y desglose de precios
+          if (data.npCode)              updateData.flexxusCode        = data.npCode;
+          if (data.total)               updateData.amount             = data.total;
+          if (data.subtotalNeto != null) updateData.subtotalNeto      = data.subtotalNeto;
+          if (data.ivaAmount != null)    updateData.ivaAmount         = data.ivaAmount;
+          if (data.totalPercepciones != null) updateData.totalPercepciones = data.totalPercepciones;
+
+          // Asignar cliente por CUIT si la cotización no tiene cliente aún
+          if (data.cuit && !quote?.clientId) {
+            const client = await prisma.client.findFirst({
+              where: { cuit: { equals: data.cuit, mode: 'insensitive' } },
+              include: { defaultSeller: true },
+            });
+            if (client) {
+              updateData.clientId = client.id;
+              if (!quote?.sellerId && client.defaultSellerId) {
+                updateData.sellerId = client.defaultSellerId;
+              }
+            }
+          }
+
+          if (Object.keys(updateData).length) {
+            await prisma.quote.update({ where: { id: req.params.id }, data: updateData });
+          }
+
+          // Ítems: reemplazar si el PDF tiene ítems
+          if (data.items?.length) {
+            await prisma.quoteItem.deleteMany({ where: { quoteId: req.params.id } });
+            await prisma.quoteItem.createMany({
+              data: data.items.map((item, i) => ({
+                quoteId:     req.params.id,
+                sku:         item.sku || null,
+                description: (item.description || '').substring(0, 500),
+                quantity:    item.quantity || 0,
+                unit:        item.unit || null,
+                unitPrice:   item.unitPrice || null,
+                total:       item.total || null,
+                accepted:    item.accepted !== false,
+                sortOrder:   i,
+              })),
+            });
+          }
+
+          flexxusParsed = {
+            npCode:     data.npCode,
+            cuit:       data.cuit,
+            clientName: data.clientName,
+            total:      data.total,
+            itemCount:  data.items?.length || 0,
+          };
+        }
+      } catch (parseErr) {
+        console.error('Auto-parseo Flexxus falló:', parseErr.message);
+        // No rompemos la respuesta — el archivo ya fue guardado igual
+      }
+    }
+
+    res.json({ attachments: created, flexxusParsed });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// POST /api/orders/:id/attachments — upload de adjunto a una OC
+// POST /api/orders/:id/attachments — upload de adjunto a una NP/OC
 app.post('/api/orders/:id/attachments', authMiddleware, upload.array('files', 10), async (req, res) => {
   try {
     const created = await Promise.all((req.files || []).map(f =>
@@ -91,7 +168,64 @@ app.post('/api/orders/:id/attachments', authMiddleware, upload.array('files', 10
         },
       })
     ));
-    res.json(created);
+
+    // ── Auto-parseo de Nota de Pedido Flexxus ───────────────────────────────
+    const { parseNotaPedidoPDF, isNotaPedidoPDF } = require('./services/flexxusParser');
+    let npParsed = null;
+    const npFile = (req.files || []).find(f => isNotaPedidoPDF({ filename: f.originalname }));
+    if (npFile) {
+      try {
+        const fs = require('fs');
+        const buffer = fs.readFileSync(npFile.path);
+        const data = await parseNotaPedidoPDF(buffer);
+
+        if (data.npCode || data.items?.length) {
+          const updateData = {};
+          if (data.npCode)   updateData.flexxusCode  = data.npCode;
+          if (data.ocNumber) updateData.clientOCCode = data.ocNumber;
+          if (data.total)    updateData.amount        = data.total;
+
+          // Asignar cliente por CUIT si la orden no tiene cliente
+          const order = await prisma.order.findUnique({ where: { id: req.params.id } });
+          if (data.cuit && !order?.clientId) {
+            const client = await prisma.client.findFirst({
+              where: { cuit: { equals: data.cuit, mode: 'insensitive' } },
+              select: { id: true, defaultSellerId: true },
+            });
+            if (client) {
+              updateData.clientId = client.id;
+              if (!order?.sellerId && client.defaultSellerId) updateData.sellerId = client.defaultSellerId;
+            }
+          }
+
+          // Vincular al presupuesto si no tiene fromQuote
+          if (!order?.fromQuoteId && data.presupuestoNP) {
+            const pres = await prisma.quote.findFirst({
+              where: { flexxusCode: data.presupuestoNP },
+            }) || await prisma.quote.findFirst({
+              where: { flexxusCode: { contains: data.presupuestoNP.replace('PR-', '') } },
+            });
+            if (pres) updateData.fromQuoteId = pres.id;
+          }
+
+          if (Object.keys(updateData).length) {
+            await prisma.order.update({ where: { id: req.params.id }, data: updateData });
+          }
+
+          npParsed = {
+            npCode:    data.npCode,
+            ocNumber:  data.ocNumber,
+            clientName: data.clientName,
+            total:     data.total,
+            itemCount: data.items?.length || 0,
+          };
+        }
+      } catch (parseErr) {
+        console.error('Auto-parseo NP falló:', parseErr.message);
+      }
+    }
+
+    res.json({ attachments: created, npParsed });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

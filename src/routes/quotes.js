@@ -23,8 +23,14 @@ async function nextCode(model, prefix) {
 // GET /api/quotes - All quotes (admin sees all, seller sees own)
 router.get('/', authMiddleware, async (req, res) => {
   try {
-    // Excluir OCs de email — esas van en el board de Fase 2 (órdenes)
-    const where = { NOT: { mailType: 'OC' } };
+    // Excluir OC y NOTA_PEDIDO — esas van en el board de Fase 2 (órdenes)
+    // Nota: mailType null (manuales) debe incluirse — OR para manejar nulls en PG
+    const where = {
+      OR: [
+        { mailType: null },
+        { mailType: { notIn: ['OC', 'NOTA_PEDIDO'] } },
+      ],
+    };
     if (req.user.role === 'VENDEDOR') {
       // Vendedor ve: sus propias quotes + las sin asignar (recibida, sin seller)
       where.OR = [
@@ -103,7 +109,8 @@ router.post('/', authMiddleware, async (req, res) => {
         sellerId: sellerId || null,
         amount: amount ? parseFloat(amount) : null,
         source: source || 'MANUAL',
-        stage: sellerId ? 'asignada' : 'recibida',
+        mailType: 'PRESUPUESTO',
+        stage: 'enviado',
         deadline: deadline ? new Date(deadline) : null,
       },
       include: {

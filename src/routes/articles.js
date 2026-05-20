@@ -183,9 +183,21 @@ router.patch('/:code', authMiddleware, async (req, res) => {
   }
 });
 
-// DELETE /api/articles/:code — eliminar artículo (admin only)
+// DELETE /api/articles/:code — eliminar artículo individual o todos (admin only)
 router.delete('/:code', authMiddleware, async (req, res) => {
   if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Solo administradores' });
+
+  // Caso especial: eliminar TODO el catálogo
+  if (req.params.code === 'all') {
+    try {
+      const result = await prisma.article.deleteMany({});
+      return res.json({ ok: true, deleted: result.count });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  // Eliminar artículo individual
   try {
     await prisma.article.delete({ where: { code: req.params.code } });
     res.json({ ok: true });

@@ -457,7 +457,8 @@ function QuoteDetail({ code, onClose, canReassign }) {
   const stg = STAGES_F1.find(s=>s.id===q.stage);
   const isSolicitud = q.mailType === 'SOLICITUD' || (q.source === 'EMAIL' && !q.mailType);
   const isOC = q.mailType === 'OC';
-  const defaultTab = isSolicitud ? 'mail' : (isOC ? 'items' : 'resumen');
+  const isManual = q.source !== 'EMAIL';
+  const defaultTab = isSolicitud ? 'mail' : isOC ? 'items' : 'resumen';
   const [tab, setTab] = useState(defaultTab);
   const [stageOpen, setStageOpen] = useState(false);
   const [rejectPending, setRejectPending] = useState(false);
@@ -492,9 +493,19 @@ function QuoteDetail({ code, onClose, canReassign }) {
     if (!files || files.length === 0) return;
     setUploading(true);
     try {
-      const created = await CrmApi.uploadAttachments(q.id, Array.from(files));
+      const result = await CrmApi.uploadAttachments(q.id, Array.from(files));
+      // El response puede ser array (legacy) o { attachments, flexxusParsed }
+      const created = Array.isArray(result) ? result : (result.attachments || []);
+      const parsed  = Array.isArray(result) ? null : result.flexxusParsed;
       setDetailAttachments(prev => [...prev, ...created]);
-      pushToast(`${created.length} archivo${created.length > 1 ? 's' : ''} subido${created.length > 1 ? 's' : ''}`);
+      if (parsed) {
+        // PDF de Flexxus detectado y parseado — recargar detalle completo
+        pushToast(`✅ PDF Flexxus parseado: ${parsed.npCode || ''} — ${parsed.itemCount} ítem${parsed.itemCount !== 1 ? 's' : ''}`, 'ok');
+        const fresh = await CrmApi.getQuoteDetail(q.id);
+        if (fresh && setQuotes) setQuotes(prev => prev.map(x => x.id === fresh.id ? { ...x, ...fresh } : x));
+      } else {
+        pushToast(`${created.length} archivo${created.length > 1 ? 's' : ''} subido${created.length > 1 ? 's' : ''}`);
+      }
     } catch (err) {
       pushToast(err.message || 'Error al subir archivo', 'bad');
     } finally {
@@ -1000,6 +1011,14 @@ function QuoteDetail({ code, onClose, canReassign }) {
               { id:'historial',label:'Historial' },
               { id:'notas',    label:'Notas', count: notes.length > 0 ? notes.length : null },
             ]
+          : isManual
+          ? [
+              { id:'resumen',  label:'Resumen' },
+              { id:'items',    label:'Ítems', count: detailItems.length > 0 ? detailItems.length : null },
+              { id:'adj',      label:'Adjuntos', count: nonImageAdj.length > 0 ? nonImageAdj.length : null },
+              { id:'historial',label:'Historial' },
+              { id:'notas',    label:'Notas', count: notes.length > 0 ? notes.length : null },
+            ]
           : [
               { id:'resumen',  label:'Resumen' },
               { id:'items',    label:'Ítems', count: detailItems.length > 0 ? detailItems.length : null },
@@ -1370,7 +1389,7 @@ function QuoteDetail({ code, onClose, canReassign }) {
 }
 
 function OrderDetail({ code, onClose, canReassign }) {
-  const { orders, clients, users, moveOrderStage, pushToast } = useApp();
+  const { orders, clients, users, moveOrderStage, pushToast, openModal } = useApp();
   const o = orders.find(x=>x.code===code);
   if (!o) return null;
 
@@ -1390,9 +1409,11 @@ function OrderDetail({ code, onClose, canReassign }) {
   const [savingNote, setSavingNote] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [pdfPreview, setPdfPreview] = useState(null); // { url, filename }
-  const [notaPedido, setNotaPedido] = useState(null); // datos de la NP vinculada
-  const [presItems, setPresItems]   = useState([]);   // ítems del presupuesto origen
+  const [notaPedido, setNotaPedido]   = useState(null); // datos de la NP vinculada (para Order real)
+  const [presItems, setPresItems]     = useState([]);   // ítems del presupuesto origen
   const [orderDetail, setOrderDetail] = useState(null); // detalle completo de la order
+  const [npItems, setNpItems]         = useState([]);   // ítems de la NP (para quote-source)
+  const [linkedPres, setLinkedPres]   = useState(null); // presupuesto vinculado (para quote-source)
   const noteInputRef = React.useRef(null);
   const fileInputRef = React.useRef(null);
 
@@ -1409,8 +1430,11 @@ function OrderDetail({ code, onClose, canReassign }) {
           ? (detail.unifiedHistory || detail.activities || [])
           : (detail.activities || []));
         setAtts(detail.attachments || []);
-        // Nota de Pedido y ítems del presupuesto (solo en Order real, no email-OC)
-        if (!isQuoteSource) {
+        if (isQuoteSource) {
+          // NP por mail: los ítems son de la quote misma, linkedQuote es el presupuesto
+          setNpItems(detail.items || []);
+          setLinkedPres(detail.linkedQuote || null);
+        } else {
           setOrderDetail(detail);
           setNotaPedido(detail.notaPedido || null);
           setPresItems(detail.fromQuote?.items || []);
@@ -1561,12 +1585,17 @@ function OrderDetail({ code, onClose, canReassign }) {
               : <span className="text-ink-400">Sin asignar</span>
             }
           </Field>
-          <Field label="Nota Pedido" mono value={o.flexxus || '—'}/>
-          <Field label="De cotización" mono value={o.fromQuote || '—'}/>
-          <Field label="Zona entrega" value={o.entrega || '—'}/>
-          <Field label="Transportista" value={o.transp || '—'}/>
+          <Field label="Nota Pedido" mono value={o.flexxus && o.flexxus !== '—' ? o.flexxus : '—'}/>
+          <Field label="De cotización">
+            {(o.fromQuote || linkedPres?.code) ? (
+              <button onClick={()=>{ onClose(); setTimeout(()=>openModal('quoteDetail',{code: o.fromQuote || linkedPres.code}),80); }}
+                className="mono text-brand hover:underline text-[13px] font-semibold">
+                {o.fromQuote || linkedPres?.code}
+              </button>
+            ) : <span className="text-ink-400">—</span>}
+          </Field>
           <Field label="Guía / Remito" mono value={o.guia || '—'}/>
-          <Field label="Fecha OC" mono value={o.fecha ? fmtDate(o.fecha) : '—'}/>
+          <Field label="Fecha" mono value={o.fecha ? fmtDate(o.fecha) : '—'}/>
         </div>
       </div>
 
@@ -1574,6 +1603,9 @@ function OrderDetail({ code, onClose, canReassign }) {
       <TabBar
         tabs={[
           { id:'resumen',  label:'Resumen' },
+          // Para NP por mail: tab con sus propios ítems
+          ...(isQuoteSource && npItems.length > 0 ? [{ id:'items-np', label:'Ítems NP', count: npItems.length }] : []),
+          // Para Order real: tab de NP vinculada
           ...(!isQuoteSource ? [{ id:'np', label: notaPedido ? `NP Enviada ✓` : 'Nota de Pedido', count: notaPedido?.items?.length || null }] : []),
           { id:'historial',label:'Historial', count: loading ? null : history.length },
           { id:'notas',    label:'Notas',     count: loading ? null : notes.length },
@@ -1583,7 +1615,64 @@ function OrderDetail({ code, onClose, canReassign }) {
         onChange={setTab}
       />
 
-      {/* ── Tab: Resumen ── */}
+      {/* ── Tab: Ítems NP (para NP por mail / quote-source) ── */}
+      {tab === 'items-np' && isQuoteSource && (
+        <div className="p-6 space-y-4">
+          {linkedPres && (
+            <div className="bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3 flex items-center gap-3">
+              <Icon name="link" size={14} className="text-indigo-500"/>
+              <span className="text-[13px] text-indigo-700">
+                Presupuesto vinculado:{' '}
+                <button onClick={()=>{ onClose(); setTimeout(()=>openModal('quoteDetail',{code: linkedPres.code}),80); }}
+                  className="font-semibold mono text-indigo-900 hover:underline">
+                  {linkedPres.code}{linkedPres.flexxusCode ? ` (${linkedPres.flexxusCode})` : ''}
+                </button>
+              </span>
+            </div>
+          )}
+          <div className="bg-white border border-line rounded-xl overflow-hidden">
+            <div className="px-4 py-3 border-b border-line">
+              <span className="text-sm font-semibold text-ink-900">Ítems de la Nota de Pedido</span>
+              <span className="ml-2 text-xs text-ink-400">{npItems.length} ítems</span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-[12.5px]">
+                <thead>
+                  <tr className="bg-ink-50 text-ink-500 text-xs">
+                    <th className="px-3 py-2 text-left">Código</th>
+                    <th className="px-3 py-2 text-left">Descripción</th>
+                    <th className="px-3 py-2 text-right">Cant.</th>
+                    <th className="px-3 py-2 text-right">P. Unit.</th>
+                    <th className="px-3 py-2 text-right">Total</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-ink-100">
+                  {npItems.map((it, i) => (
+                    <tr key={it.id || i} className="hover:bg-surface/50">
+                      <td className="px-3 py-2 mono text-ink-600 text-[11px]">{it.sku || '—'}</td>
+                      <td className="px-3 py-2 text-ink-800 max-w-xs truncate" title={it.description}>{it.description}</td>
+                      <td className="px-3 py-2 text-right mono">{it.quantity ?? '—'}</td>
+                      <td className="px-3 py-2 text-right mono">{it.unitPrice != null ? `U$S ${it.unitPrice.toLocaleString('es-AR',{minimumFractionDigits:2})}` : '—'}</td>
+                      <td className="px-3 py-2 text-right mono font-semibold">{it.total != null ? `U$S ${it.total.toLocaleString('es-AR',{minimumFractionDigits:2})}` : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                {npItems.length > 0 && (
+                  <tfoot>
+                    <tr className="bg-indigo-50 font-semibold">
+                      <td colSpan={4} className="px-3 py-2 text-right text-indigo-700">Total NP</td>
+                      <td className="px-3 py-2 text-right mono text-indigo-800">
+                        U$S {npItems.reduce((s,i) => s + (i.total||0), 0).toLocaleString('es-AR',{minimumFractionDigits:2})}
+                      </td>
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Tab: Nota de Pedido ── */}
       {tab === 'np' && !isQuoteSource && (
         <div className="p-6 space-y-5">

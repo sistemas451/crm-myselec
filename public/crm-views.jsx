@@ -308,9 +308,363 @@ function LogisticsView({ onOpen }) {
   );
 }
 
+// ---------- DeleteAllModal — confirmación con tipeo "ELIMINAR" ----------
+function DeleteAllModal({ title, description, onClose, onConfirm }) {
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const confirmed = input.trim() === 'ELIMINAR';
+
+  const handleConfirm = async () => {
+    if (!confirmed) return;
+    setLoading(true); setError('');
+    try {
+      await onConfirm();
+      onClose();
+    } catch(e) {
+      setError(e.message || 'Error al eliminar');
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-ink-900/50 backdrop-blur-[2px]" onClick={!loading ? onClose : undefined}/>
+      <div className="relative bg-white rounded-2xl shadow-pop w-full max-w-md modal-enter">
+        <div className="px-6 py-5">
+          <div className="w-12 h-12 rounded-xl bg-red-100 flex items-center justify-center mb-4">
+            <Icon name="trash-2" size={22} className="text-red-600"/>
+          </div>
+          <h3 className="text-base font-bold text-ink-900 mb-1">{title}</h3>
+          <p className="text-[13px] text-ink-600 mb-5">{description}</p>
+          <div className="mb-4">
+            <label className="text-[12px] font-semibold text-ink-700 mb-1.5 block">
+              Escribí <span className="font-mono bg-red-50 text-red-700 px-1.5 py-0.5 rounded">ELIMINAR</span> para confirmar
+            </label>
+            <input
+              className="inp w-full font-mono"
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              placeholder="ELIMINAR"
+              autoFocus
+              disabled={loading}
+            />
+          </div>
+          {error && <div className="text-[12px] text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-4">{error}</div>}
+          <div className="flex gap-3 justify-end">
+            <button onClick={onClose} disabled={loading} className="btn-ghost">Cancelar</button>
+            <button
+              onClick={handleConfirm}
+              disabled={!confirmed || loading}
+              className="btn-ghost border-red-300 text-red-600 hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5">
+              <Icon name={loading ? 'loader' : 'trash-2'} size={13} className={loading ? 'animate-spin' : ''}/>
+              {loading ? 'Eliminando…' : 'Eliminar todo'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------- ClientImportModal ----------
+function ClientImportModal({ onClose, onDone }) {
+  const STEP = { UPLOAD: 'upload', PREVIEW: 'preview', SYNCING: 'syncing', DONE: 'done' };
+  const [step, setStep]           = useState(STEP.UPLOAD);
+  const [dragging, setDragging]   = useState(false);
+  const [file, setFile]           = useState(null);
+  const [loading, setLoading]     = useState(false);
+  const [error, setError]         = useState('');
+  const [preview, setPreview]     = useState(null);
+  const [deleteSel, setDeleteSel] = useState({});
+  const [result, setResult]       = useState(null);
+
+  const pickFile = (f) => {
+    if (!f) return;
+    const ext = f.name.split('.').pop().toLowerCase();
+    if (!['xls','xlsx'].includes(ext)) { setError('Solo se aceptan archivos .xls o .xlsx'); return; }
+    setFile(f); setError('');
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault(); setDragging(false);
+    pickFile(e.dataTransfer.files[0]);
+  };
+
+  const doPreview = async () => {
+    if (!file) return;
+    setLoading(true); setError('');
+    try {
+      const data = await CrmApi.previewClientsXLS(file);
+      setPreview(data);
+      const sel = {};
+      data.toRemove.forEach(c => { sel[c.code] = false; }); // por defecto NO eliminar
+      setDeleteSel(sel);
+      setStep(STEP.PREVIEW);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const doSync = async () => {
+    setStep(STEP.SYNCING);
+    try {
+      const deleteCodes = Object.entries(deleteSel).filter(([,v])=>v).map(([k])=>k);
+      const res = await CrmApi.syncClients(preview.token, deleteCodes);
+      setResult(res);
+      setStep(STEP.DONE);
+    } catch (e) {
+      setError(e.message);
+      setStep(STEP.PREVIEW);
+    }
+  };
+
+  const toggleAll = (val) => {
+    const sel = {};
+    preview.toRemove.forEach(c => { sel[c.code] = val; });
+    setDeleteSel(sel);
+  };
+
+  const selectedDeleteCount = Object.values(deleteSel).filter(Boolean).length;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-ink-900/50 backdrop-blur-[2px]" onClick={step !== STEP.SYNCING ? onClose : undefined}/>
+      <div className="relative bg-white rounded-2xl shadow-pop w-full max-w-2xl max-h-[90vh] flex flex-col modal-enter">
+
+        {/* Header */}
+        <div className="px-6 py-4 border-b border-line flex items-center justify-between">
+          <div>
+            <div className="text-[11px] uppercase tracking-wider text-ink-500 font-semibold">Clientes · Importación masiva</div>
+            <h3 className="text-base font-bold text-ink-900">Actualizar base de clientes</h3>
+          </div>
+          {step !== STEP.SYNCING && (
+            <button onClick={onClose} className="w-8 h-8 rounded-lg hover:bg-surface flex items-center justify-center text-ink-500">
+              <Icon name="x" size={16}/>
+            </button>
+          )}
+        </div>
+
+        <div className="flex-1 overflow-y-auto scroll-thin p-6">
+
+          {/* ── Paso 1: Upload ── */}
+          {step === STEP.UPLOAD && (
+            <div className="space-y-4">
+              <p className="text-[13px] text-ink-600">
+                Subí el Excel de clientes. El sistema va a comparar con la base actual y mostrarte qué cambia antes de aplicar nada.
+              </p>
+              <div
+                onDragOver={e=>{e.preventDefault();setDragging(true)}}
+                onDragLeave={()=>setDragging(false)}
+                onDrop={handleDrop}
+                className={cx(
+                  'border-2 border-dashed rounded-xl p-10 flex flex-col items-center gap-3 transition-colors cursor-pointer',
+                  dragging ? 'border-brand bg-brand/5' : 'border-line hover:border-ink-300 hover:bg-surface'
+                )}
+                onClick={()=>document.getElementById('cli-xls-input').click()}
+              >
+                <div className="w-12 h-12 rounded-xl bg-surface border border-line flex items-center justify-center">
+                  <Icon name="upload-cloud" size={22} className="text-ink-400"/>
+                </div>
+                {file ? (
+                  <div className="text-center">
+                    <div className="font-semibold text-ink-900 text-[14px]">{file.name}</div>
+                    <div className="text-[12px] text-ink-500 mt-0.5">{(file.size/1024).toFixed(0)} KB · listo para procesar</div>
+                  </div>
+                ) : (
+                  <div className="text-center">
+                    <div className="font-medium text-ink-700 text-[13px]">Arrastrá el archivo acá o hacé click para seleccionarlo</div>
+                    <div className="text-[12px] text-ink-400 mt-0.5">Formato: .xls o .xlsx (columnas: Código, Razón Social, CUIT, Dirección, Teléfono, Localidad, Provincia, Zona, Vendedor, Actividad, Mail, CP)</div>
+                  </div>
+                )}
+                <input id="cli-xls-input" type="file" accept=".xls,.xlsx" className="hidden"
+                  onChange={e=>pickFile(e.target.files[0])}/>
+              </div>
+              {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-4 py-3">{error}</div>}
+            </div>
+          )}
+
+          {/* ── Paso 2: Preview ── */}
+          {step === STEP.PREVIEW && preview && (
+            <div className="space-y-5">
+              {/* KPIs */}
+              <div className="grid grid-cols-4 gap-3">
+                {[
+                  { label: 'Nuevos',      value: preview.summary.toAdd,     color: 'bg-green-50 border-green-200 text-green-700' },
+                  { label: 'Actualizados',value: preview.summary.toUpdate,  color: 'bg-blue-50 border-blue-200 text-blue-700' },
+                  { label: 'Sin cambios', value: preview.summary.unchanged, color: 'bg-surface border-line text-ink-500' },
+                  { label: 'A eliminar',  value: preview.summary.toRemove,  color: preview.summary.toRemove > 0 ? 'bg-red-50 border-red-200 text-red-700' : 'bg-surface border-line text-ink-500' },
+                ].map(s => (
+                  <div key={s.label} className={cx('border rounded-xl p-4 text-center', s.color)}>
+                    <div className="text-2xl font-bold">{s.value.toLocaleString()}</div>
+                    <div className="text-[11px] font-medium mt-0.5">{s.label}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Aviso vendedores no mapeados */}
+              {preview.unmatchedVendors?.length > 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-[12px] text-amber-800">
+                  <div className="font-semibold mb-1">⚠ Vendedores no reconocidos en el sistema</div>
+                  <div className="text-amber-700">Los siguientes vendedores del Excel no coinciden con ningún usuario activo y quedarán sin asignar: <span className="font-medium">{preview.unmatchedVendors.join(', ')}</span></div>
+                </div>
+              )}
+
+              {/* Nuevos */}
+              {preview.toAdd.length > 0 && (
+                <div>
+                  <div className="text-[12px] font-semibold text-ink-700 mb-2 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-green-400 inline-block"/>
+                    Clientes nuevos {preview.summary.toAdd > 20 && <span className="font-normal text-ink-400">(mostrando primeros 20 de {preview.summary.toAdd})</span>}
+                  </div>
+                  <div className="border border-line rounded-xl overflow-hidden max-h-40 overflow-y-auto scroll-thin">
+                    {preview.toAdd.map(c => (
+                      <div key={c.code} className="px-3 py-2 border-b border-line last:border-0 flex gap-3 text-[12px]">
+                        <span className="mono font-semibold text-blue-600 w-16 shrink-0">{c.code}</span>
+                        <span className="text-ink-700 flex-1 truncate">{c.name}</span>
+                        <span className="text-ink-400 shrink-0">{[c.city, c.province].filter(Boolean).join(', ')}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Actualizados */}
+              {preview.toUpdate.length > 0 && (
+                <div>
+                  <div className="text-[12px] font-semibold text-ink-700 mb-2 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-blue-400 inline-block"/>
+                    Clientes con cambios {preview.summary.toUpdate > 20 && <span className="font-normal text-ink-400">(mostrando primeros 20 de {preview.summary.toUpdate})</span>}
+                  </div>
+                  <div className="border border-line rounded-xl overflow-hidden max-h-40 overflow-y-auto scroll-thin">
+                    {preview.toUpdate.map(c => (
+                      <div key={c.code} className="px-3 py-2 border-b border-line last:border-0 flex gap-3 text-[12px]">
+                        <span className="mono font-semibold text-blue-600 w-16 shrink-0">{c.code}</span>
+                        <span className="text-ink-700 flex-1 truncate">{c.name}</span>
+                        <span className="text-ink-400 shrink-0 text-[11px]">{c._old?.name !== c.name ? `era: ${c._old?.name}` : [c.city, c.province].filter(Boolean).join(', ')}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* A eliminar — con checkboxes */}
+              {preview.toRemove.length > 0 && (
+                <div>
+                  <div className="text-[12px] font-semibold text-red-700 mb-2 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-red-400 inline-block"/>
+                      Clientes que ya no están en el XLS — elegí cuáles eliminar
+                    </span>
+                    <div className="flex gap-2">
+                      <button onClick={()=>toggleAll(true)}  className="text-[11px] text-brand hover:underline">Todos</button>
+                      <span className="text-ink-300">·</span>
+                      <button onClick={()=>toggleAll(false)} className="text-[11px] text-ink-500 hover:underline">Ninguno</button>
+                    </div>
+                  </div>
+                  <div className="border border-red-200 rounded-xl overflow-hidden max-h-48 overflow-y-auto scroll-thin">
+                    {preview.toRemove.map(c => (
+                      <label key={c.code} className="px-3 py-2 border-b border-red-100 last:border-0 flex gap-3 text-[12px] cursor-pointer hover:bg-red-50 items-center">
+                        <input type="checkbox" className="accent-red-500 shrink-0"
+                          checked={!!deleteSel[c.code]}
+                          onChange={e => setDeleteSel(s => ({...s, [c.code]: e.target.checked}))}/>
+                        <span className="mono font-semibold text-red-600 w-16 shrink-0">{c.code}</span>
+                        <span className="text-ink-700 flex-1 truncate">{c.name}</span>
+                        <span className="text-ink-400 shrink-0">{c.city || ''}</span>
+                      </label>
+                    ))}
+                  </div>
+                  <div className="mt-2 text-[12px] text-ink-500">
+                    {selectedDeleteCount > 0
+                      ? <span className="text-red-600 font-medium">⚠ Se van a eliminar {selectedDeleteCount} cliente{selectedDeleteCount !== 1 ? 's' : ''} sin cotizaciones ni OCs.</span>
+                      : 'Los clientes con cotizaciones u OCs no pueden eliminarse aunque estén marcados.'}
+                  </div>
+                </div>
+              )}
+
+              {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-4 py-3">{error}</div>}
+            </div>
+          )}
+
+          {/* ── Paso 3: Procesando ── */}
+          {step === STEP.SYNCING && (
+            <div className="flex flex-col items-center justify-center py-16 gap-4">
+              <div className="w-12 h-12 rounded-full border-4 border-brand border-t-transparent animate-spin"/>
+              <div className="text-[14px] text-ink-600 font-medium">Importando clientes…</div>
+              <div className="text-[12px] text-ink-400">Esto puede tardar unos segundos</div>
+            </div>
+          )}
+
+          {/* ── Paso 4: Resultado ── */}
+          {step === STEP.DONE && result && (
+            <div className="space-y-5">
+              <div className="flex items-center gap-3 p-4 bg-green-50 border border-green-200 rounded-xl">
+                <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center shrink-0">
+                  <Icon name="check" size={20} className="text-green-600"/>
+                </div>
+                <div>
+                  <div className="font-semibold text-green-800 text-[14px]">Base de clientes actualizada</div>
+                  <div className="text-[13px] text-green-700 mt-0.5">
+                    {result.upserted.toLocaleString()} clientes procesados
+                    {result.deleted > 0 && ` · ${result.deleted} eliminado${result.deleted !== 1 ? 's' : ''}`}
+                    {result.skipped > 0 && ` · ${result.skipped} no eliminado${result.skipped !== 1 ? 's' : ''} (tienen historial)`}
+                  </div>
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="bg-surface border border-line rounded-xl p-4 text-center">
+                  <div className="text-2xl font-bold text-ink-900">{result.upserted.toLocaleString()}</div>
+                  <div className="text-[11px] text-ink-500 mt-0.5">Clientes sincronizados</div>
+                </div>
+                <div className="bg-surface border border-line rounded-xl p-4 text-center">
+                  <div className="text-2xl font-bold text-red-600">{result.deleted}</div>
+                  <div className="text-[11px] text-ink-500 mt-0.5">Eliminados</div>
+                </div>
+                <div className="bg-surface border border-line rounded-xl p-4 text-center">
+                  <div className="text-2xl font-bold text-amber-600">{result.skipped}</div>
+                  <div className="text-[11px] text-ink-500 mt-0.5">Omitidos (con historial)</div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-4 border-t border-line flex items-center justify-end gap-3 bg-surface rounded-b-2xl">
+          {step === STEP.UPLOAD && (
+            <>
+              <button onClick={onClose} className="btn-ghost">Cancelar</button>
+              <button onClick={doPreview} disabled={!file || loading}
+                className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed">
+                {loading ? 'Procesando…' : 'Analizar archivo'}
+              </button>
+            </>
+          )}
+          {step === STEP.PREVIEW && (
+            <>
+              <button onClick={()=>{setStep(STEP.UPLOAD);setPreview(null);}} className="btn-ghost">← Volver</button>
+              <button onClick={doSync} className="btn-primary">
+                Confirmar importación
+                {selectedDeleteCount > 0 && ` (${selectedDeleteCount} eliminaciones)`}
+              </button>
+            </>
+          )}
+          {step === STEP.DONE && (
+            <button onClick={() => { onDone(); onClose(); }} className="btn-primary">
+              Cerrar y actualizar lista
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ---------- Clients ----------
 function Clients({ readonly=false }) {
-  const { openModal, clients, users, quotes, orders } = useApp();
+  const { openModal, clients, setClients, users, quotes, orders } = useApp();
   const [sel, setSel] = useState('');
   const [search, setSearch] = useState('');
   const [filterSeller, setFilterSeller] = useState('');
@@ -320,6 +674,34 @@ function Clients({ readonly=false }) {
   const [emailsExpanded, setEmailsExpanded] = useState(false);
   const [listWidth, setListWidth] = useState(320);
   const [listCollapsed, setListCollapsed] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [showDeleteAll, setShowDeleteAll] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [listPage, setListPage] = useState(0);
+  const LIST_PAGE_SIZE = 80;
+  const isAdmin = CrmAuth.getUser()?.role === 'ADMIN';
+
+  const reloadClients = async () => {
+    try {
+      const fresh = await CrmApi.getClients();
+      const mapped = fresh.map(c => ({
+        id: c.id, code: c.code, name: c.name,
+        cuit: c.cuit || '', city: c.city || '', prov: c.province || '',
+        zone: c.zone || '', activity: c.activity || '',
+        seller: c.defaultSellerId || '', sellerName: c.defaultSeller?.name || '',
+        email: c.email || '', phone: c.phone || '', address: c.address || '',
+      }));
+      setClients(mapped);
+    } catch(e) { /* silencioso */ }
+  };
+
+  const handleExport = async () => {
+    setExporting(true);
+    try { await CrmApi.exportClients(); }
+    catch (e) { alert(e.message || 'Error al exportar'); }
+    finally { setExporting(false); }
+  };
 
   const startDrag = (e) => {
     e.preventDefault();
@@ -351,7 +733,18 @@ function Clients({ readonly=false }) {
     return matchSearch && matchSeller && matchZone && matchProv;
   });
   const hasFilters = !!(search || filterSeller || filterZone || filterProv);
-  const activeSel = sel || filteredClients[0]?.code || '';
+
+  // Opciones dinámicas basadas en los datos reales
+  const availableZones   = [...new Set(clients.map(c => c.zone).filter(Boolean))].sort();
+  const availableProvs   = [...new Set(clients.map(c => c.prov).filter(Boolean))].sort();
+  const availableSellers = users.filter(u => clients.some(c => c.seller === u.id));
+
+  // Reset página cuando cambian filtros
+  useEffect(() => { setListPage(0); setSel(''); }, [search, filterSeller, filterZone, filterProv]);
+
+  const totalPages = Math.ceil(filteredClients.length / LIST_PAGE_SIZE);
+  const pagedClients = filteredClients.slice(listPage * LIST_PAGE_SIZE, (listPage + 1) * LIST_PAGE_SIZE);
+  const activeSel = sel || pagedClients[0]?.code || '';
   const cli = clients.find(c => c.code === activeSel);
   const seller = users.find(u => u.id === cli?.seller);
 
@@ -395,22 +788,30 @@ function Clients({ readonly=false }) {
             </div>
             <select className="inp text-xs py-1.5" value={filterSeller} onChange={e=>setFilterSeller(e.target.value)}>
               <option value="">Todos los vendedores</option>
-              {users.filter(u=>u.role==='Vendedor'||u.role==='Administrador').map(u=>(
-                <option key={u.id} value={u.id}>{u.name}</option>
-              ))}
+              {availableSellers.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}
             </select>
             <select className="inp text-xs py-1.5" value={filterZone} onChange={e=>setFilterZone(e.target.value)}>
               <option value="">Todas las zonas</option>
-              {ZONES.map(z=><option key={z} value={z}>{z}</option>)}
+              {availableZones.map(z=><option key={z} value={z}>{z}</option>)}
             </select>
             <select className="inp text-xs py-1.5" value={filterProv} onChange={e=>setFilterProv(e.target.value)}>
               <option value="">Todas las provincias</option>
-              {PROVINCES.map(p=><option key={p} value={p}>{p}</option>)}
+              {availableProvs.map(p=><option key={p} value={p}>{p}</option>)}
             </select>
             {hasFilters && (
               <button className="btn-ghost text-xs" onClick={()=>{setSearch('');setFilterSeller('');setFilterZone('');setFilterProv('');}}>
                 <Icon name="x" size={12}/>Limpiar
               </button>
+            )}
+            {isAdmin && !readonly && (
+              <>
+                <button onClick={()=>setShowImport(true)} className="btn-ghost text-xs flex items-center gap-1.5">
+                  <Icon name="upload" size={13}/>Importar XLS
+                </button>
+                <button onClick={()=>setShowDeleteAll(true)} className="btn-ghost text-xs flex items-center gap-1.5 text-red-500 hover:bg-red-50 hover:border-red-200">
+                  <Icon name="trash-2" size={13}/>Eliminar todos
+                </button>
+              </>
             )}
             {!readonly && <button className="btn-primary" onClick={()=>openModal('newClient')}><Icon name="plus" size={14}/>Nuevo cliente</button>}
           </>
@@ -422,30 +823,48 @@ function Clients({ readonly=false }) {
           className="shrink-0 bg-white overflow-hidden"
           style={{ width: listCollapsed ? 0 : listWidth, transition: 'width 0.18s ease', minWidth: 0 }}
         >
-          <div className="h-full overflow-y-auto scroll-thin border-r border-line" style={{ width: listWidth, minWidth: 200 }}>
-            {filteredClients.map(c => {
-              const s = users.find(u=>u.id===c.seller);
-              const active = c.code === sel;
-              return (
-                <button key={c.code}
-                  onClick={()=>setSel(c.code)}
-                  className={cx('w-full text-left px-4 py-3 border-b border-line flex gap-3 items-start transition-colors',
-                    active ? 'bg-brandSoft/40' : 'hover:bg-surface')}>
-                  <div className="w-10 h-10 rounded-lg bg-navy-900 text-white flex items-center justify-center text-xs font-bold shrink-0">
-                    {c.name.slice(0,2)}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[13px] font-semibold text-ink-900 truncate">{c.name}</div>
-                    <div className="text-[11px] text-ink-500 truncate">{c.city}, {c.prov}</div>
-                    <div className="text-[10.5px] text-ink-500 mt-1.5 flex items-center gap-1.5">
-                      <Avatar name={s?.name||'?'} size={14}/><span>{s?.name?.split(' ')?.[0]||'—'}</span>
-                      <span className="text-ink-300">·</span>
-                      <span className="mono">{c.code}</span>
+          <div className="h-full overflow-y-auto scroll-thin border-r border-line flex flex-col" style={{ width: listWidth, minWidth: 200 }}>
+            <div className="flex-1">
+              {pagedClients.map(c => {
+                const s = users.find(u=>u.id===c.seller);
+                const active = c.code === activeSel;
+                return (
+                  <button key={c.code}
+                    onClick={()=>setSel(c.code)}
+                    className={cx('w-full text-left px-4 py-3 border-b border-line flex gap-3 items-start transition-colors',
+                      active ? 'bg-brandSoft/40' : 'hover:bg-surface')}>
+                    <div className="w-10 h-10 rounded-lg bg-navy-900 text-white flex items-center justify-center text-xs font-bold shrink-0">
+                      {c.name.slice(0,2)}
                     </div>
-                  </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[13px] font-semibold text-ink-900 truncate">{c.name}</div>
+                      <div className="text-[11px] text-ink-500 truncate">{c.city}, {c.prov}</div>
+                      <div className="text-[10.5px] text-ink-500 mt-1.5 flex items-center gap-1.5">
+                        <Avatar name={s?.name||'?'} size={14}/><span>{s?.name?.split(' ')?.[0]||'—'}</span>
+                        <span className="text-ink-300">·</span>
+                        <span className="mono">{c.code}</span>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            {/* Paginación */}
+            {totalPages > 1 && (
+              <div className="shrink-0 border-t border-line px-3 py-2 flex items-center justify-between bg-surface">
+                <button onClick={()=>setListPage(p=>Math.max(0,p-1))} disabled={listPage===0}
+                  className="w-7 h-7 rounded flex items-center justify-center hover:bg-line disabled:opacity-30">
+                  <Icon name="chevron-left" size={13}/>
                 </button>
-              );
-            })}
+                <span className="text-[11px] text-ink-500">
+                  {listPage+1} / {totalPages} <span className="text-ink-300">·</span> {filteredClients.length} clientes
+                </span>
+                <button onClick={()=>setListPage(p=>Math.min(totalPages-1,p+1))} disabled={listPage===totalPages-1}
+                  className="w-7 h-7 rounded flex items-center justify-center hover:bg-line disabled:opacity-30">
+                  <Icon name="chevron-right" size={13}/>
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -493,6 +912,25 @@ function Clients({ readonly=false }) {
             {!readonly && (
               <div className="flex gap-2">
                 <button className="btn-ghost" onClick={()=>openModal('editClient', { clientId: cli.id })}><Icon name="pencil" size={13}/>Editar</button>
+                {isAdmin && (
+                  <button
+                    disabled={deleting}
+                    onClick={async () => {
+                      if (!window.confirm(`¿Eliminar a ${cli.name}?\n\nSolo se puede eliminar si no tiene cotizaciones ni órdenes.`)) return;
+                      setDeleting(true);
+                      try {
+                        await CrmApi.deleteClient(cli.id);
+                        setClients(prev => prev.filter(c => c.id !== cli.id));
+                        setSel('');
+                      } catch(e) {
+                        alert(e.message || 'Error al eliminar cliente');
+                      } finally { setDeleting(false); }
+                    }}
+                    className="btn-ghost text-red-500 hover:bg-red-50 hover:border-red-200 disabled:opacity-50">
+                    <Icon name={deleting ? 'loader' : 'trash-2'} size={13} className={deleting ? 'animate-spin' : ''}/>
+                    Eliminar
+                  </button>
+                )}
                 <button className="btn-primary" onClick={()=>openModal('newQuote', { defaultClient: cli.code })}><Icon name="file-plus" size={13}/>Nueva cotización</button>
               </div>
             )}
@@ -618,6 +1056,27 @@ function Clients({ readonly=false }) {
           </>}
         </div>
       </div>
+
+      {/* Import modal */}
+      {showImport && (
+        <ClientImportModal
+          onClose={() => setShowImport(false)}
+          onDone={reloadClients}
+        />
+      )}
+      {/* Delete all modal */}
+      {showDeleteAll && (
+        <DeleteAllModal
+          title="Eliminar todos los clientes"
+          description={`Se van a eliminar todos los clientes sin historial (cotizaciones u órdenes). Los que tengan historial se conservan.`}
+          onClose={() => setShowDeleteAll(false)}
+          onConfirm={async () => {
+            const res = await CrmApi.deleteAllClients();
+            await reloadClients();
+            setSel('');
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -2136,9 +2595,10 @@ function Articles() {
   const [limit, setLimit]             = useState(100);
   const [sortBy, setSortBy]           = useState('code');
   const [sortDir, setSortDir]         = useState('asc');
-  const [showImport, setShowImport]   = useState(false);
+  const [showImport, setShowImport]     = useState(false);
+  const [showDeleteAll, setShowDeleteAll] = useState(false);
   const [articleModal, setArticleModal] = useState(null); // null | { mode:'new' } | { mode:'edit', article }
-  const [reloadKey, setReloadKey]     = useState(0);
+  const [reloadKey, setReloadKey]       = useState(0);
   const isAdmin = CrmAuth.getUser()?.role === 'ADMIN';
 
   const reload = () => setReloadKey(k => k + 1);
@@ -2219,6 +2679,9 @@ function Articles() {
             </div>
             {isAdmin && (
               <div className="flex items-center gap-2">
+                <button onClick={() => setShowDeleteAll(true)} className="btn-ghost text-xs flex items-center gap-1.5 text-red-500 hover:bg-red-50 hover:border-red-200">
+                  <Icon name="trash-2" size={13}/> Eliminar todos
+                </button>
                 <button onClick={() => setShowImport(true)} className="btn-ghost text-xs flex items-center gap-1.5">
                   <Icon name="upload-cloud" size={13}/> Actualizar catálogo
                 </button>
@@ -2230,6 +2693,17 @@ function Articles() {
           </div>
         </div>
 
+        {showDeleteAll && (
+          <DeleteAllModal
+            title="Eliminar todos los artículos"
+            description="Se va a eliminar el catálogo completo de artículos. Esta acción no se puede deshacer."
+            onClose={() => setShowDeleteAll(false)}
+            onConfirm={async () => {
+              await CrmApi.deleteAllArticles();
+              reload();
+            }}
+          />
+        )}
         {showImport && (
           <ArticleImportModal
             onClose={() => setShowImport(false)}
@@ -2656,4 +3130,4 @@ function Comparativa() {
   );
 }
 
-Object.assign(window, { MySalesView, LogisticsView, Clients, Articles, Team, Config, PageHead, Comparativa, ArticleFormModal });
+Object.assign(window, { MySalesView, LogisticsView, Clients, Articles, Team, Config, PageHead, Comparativa, ArticleFormModal, ClientImportModal });

@@ -1,8 +1,11 @@
 const express = require('express');
+const multer  = require('multer');
 const { authMiddleware } = require('../middleware/auth');
+const { parseNotaPedidoPDF } = require('../services/flexxusParser');
 const prisma = require('../db');
 
-const router = express.Router();
+const router  = express.Router();
+const memUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
 async function nextCode(model, prefix) {
   const last = await model.findFirst({
@@ -34,8 +37,8 @@ router.get('/', authMiddleware, async (req, res) => {
       take: 1000,
     });
 
-    // OCs ingresadas por email (modelo Quote con mailType='OC')
-    const quoteWhere = { mailType: 'OC' };
+    // Solo Notas de Pedido ingresadas por email (OC por mail ya no se usa)
+    const quoteWhere = { mailType: 'NOTA_PEDIDO' };
     if (req.user.role === 'VENDEDOR') quoteWhere.sellerId = req.user.id;
     const emailOCs = await prisma.quote.findMany({
       where: quoteWhere,
@@ -96,30 +99,90 @@ router.get('/', authMiddleware, async (req, res) => {
   }
 });
 
-// POST /api/orders - Create order manually from an accepted quote
+// POST /api/orders/parse-np — parsear PDF de Nota de Pedido sin crear nada
+router.post('/parse-np', authMiddleware, memUpload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No se recibió archivo' });
+    const data = await parseNotaPedidoPDF(req.file.buffer);
+
+    // Buscar presupuesto por código PR del COMENTARIO
+    let presupuesto = null;
+    if (data.presupuestoNP) {
+      presupuesto = await prisma.quote.findFirst({
+        where: { flexxusCode: data.presupuestoNP },
+        select: { id: true, code: true, flexxusCode: true, stage: true, amount: true },
+      });
+      if (!presupuesto) {
+        const rawNum = data.presupuestoNP.replace('PR-', '');
+        presupuesto = await prisma.quote.findFirst({
+          where: { flexxusCode: { contains: rawNum } },
+          select: { id: true, code: true, flexxusCode: true, stage: true, amount: true },
+        });
+      }
+    }
+
+    // Buscar cliente por CUIT
+    let client = null;
+    if (data.cuit) {
+      client = await prisma.client.findFirst({
+        where: { cuit: { equals: data.cuit, mode: 'insensitive' } },
+        select: { id: true, code: true, name: true },
+      });
+    }
+
+    res.json({
+      npCode:        data.npCode,
+      cuit:          data.cuit,
+      clientName:    data.clientName,
+      ocNumber:      data.ocNumber,
+      presupuestoNP: data.presupuestoNP,
+      total:         data.total,
+      itemCount:     data.items?.length || 0,
+      presupuesto,
+      client,
+    });
+  } catch (err) {
+    console.error('Error parseando NP:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/orders - Crear NP manualmente (fromQuoteId opcional si viene del PDF)
 router.post('/', authMiddleware, async (req, res) => {
   try {
-    const { fromQuoteId, clientOCCode, flexxusCode, deliveryType, carrier, estimatedDate } = req.body;
+    const { fromQuoteId, clientId: directClientId, clientOCCode, flexxusCode, deliveryType, carrier, estimatedDate } = req.body;
 
-    const quote = await prisma.quote.findUnique({
-      where: { id: fromQuoteId },
-      include: { client: true },
-    });
-    if (!quote) return res.status(404).json({ error: 'Cotización no encontrada' });
+    let resolvedClientId = directClientId || null;
+    let resolvedSellerId = req.user.id;
+    let quoteCode = null;
+
+    if (fromQuoteId) {
+      const quote = await prisma.quote.findUnique({ where: { id: fromQuoteId } });
+      if (!quote) return res.status(404).json({ error: 'Cotización no encontrada' });
+      resolvedClientId = quote.clientId || resolvedClientId;
+      resolvedSellerId = quote.sellerId || resolvedSellerId;
+      quoteCode = quote.code;
+    } else if (resolvedClientId) {
+      const client = await prisma.client.findUnique({
+        where: { id: resolvedClientId },
+        select: { defaultSellerId: true },
+      });
+      if (client?.defaultSellerId) resolvedSellerId = client.defaultSellerId;
+    }
 
     const code = await nextCode(prisma.order, 'OC-2026');
 
     const order = await prisma.order.create({
       data: {
         code,
-        clientId: quote.clientId,
-        sellerId: quote.sellerId,
-        fromQuoteId,
-        stage: 'oc',
+        clientId:     resolvedClientId,
+        sellerId:     resolvedSellerId,
+        fromQuoteId:  fromQuoteId || null,
+        stage:        'oc',
         clientOCCode: clientOCCode || null,
-        flexxusCode: flexxusCode || null,
+        flexxusCode:  flexxusCode  || null,
         deliveryType: deliveryType || 'AMBA',
-        carrier: carrier || null,
+        carrier:      carrier      || null,
         estimatedDate: estimatedDate ? new Date(estimatedDate) : null,
       },
     });
@@ -127,8 +190,10 @@ router.post('/', authMiddleware, async (req, res) => {
     await prisma.activity.create({
       data: {
         action: 'CREATED',
-        detail: `OC ${code} creada manualmente desde ${quote.code}`,
-        userId: req.user.id,
+        detail: quoteCode
+          ? `NP ${code} creada desde ${quoteCode}`
+          : `NP ${code} creada manualmente${flexxusCode ? ` (${flexxusCode})` : ''}`,
+        userId:  req.user.id,
         orderId: order.id,
       },
     });
@@ -136,7 +201,7 @@ router.post('/', authMiddleware, async (req, res) => {
     res.status(201).json(order);
   } catch (err) {
     console.error('Error creating order:', err);
-    res.status(500).json({ error: 'Error al crear OC' });
+    res.status(500).json({ error: 'Error al crear NP' });
   }
 });
 
