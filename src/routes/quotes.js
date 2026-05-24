@@ -357,11 +357,19 @@ router.post('/:id/reparse-items', authMiddleware, async (req, res) => {
       })),
     });
 
-    const flexxusTotal = flexxusData.items
+    // Preferir el grand total del PDF (con IVA + percepciones); fallback a suma de ítems
+    const itemsTotal = flexxusData.items
       .filter(i => i.accepted !== false)
       .reduce((s, i) => s + (i.total || 0), 0);
-    if (flexxusTotal > 0) {
-      await prisma.quote.update({ where: { id: quote.id }, data: { amount: flexxusTotal } });
+    const flexxusTotal = flexxusData.total || itemsTotal;
+
+    const updateData = {};
+    if (flexxusTotal > 0)                          updateData.amount             = flexxusTotal;
+    if (flexxusData.subtotalNeto != null)           updateData.subtotalNeto       = flexxusData.subtotalNeto;
+    if (flexxusData.ivaAmount != null)              updateData.ivaAmount          = flexxusData.ivaAmount;
+    if (flexxusData.totalPercepciones != null)      updateData.totalPercepciones  = flexxusData.totalPercepciones;
+    if (Object.keys(updateData).length) {
+      await prisma.quote.update({ where: { id: quote.id }, data: updateData });
     }
 
     res.json({ ok: true, itemCount: flexxusData.items.length, total: flexxusTotal });

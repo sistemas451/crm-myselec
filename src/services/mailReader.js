@@ -351,7 +351,7 @@ async function syncMails() {
     return { synced: 0, errors: ['Sync ya en progreso. Esperá que termine el anterior.'], mails: [] };
   }
   syncInProgress = true;
-  // Construir lista de cuentas
+  // Construir lista de cuentas: env vars + cuentas agregadas via UI (AppSetting)
   let accounts = [];
 
   if (process.env.MAIL_ACCOUNTS) {
@@ -368,6 +368,21 @@ async function syncMails() {
   if (accounts.length === 0 && process.env.MAIL_USER && process.env.MAIL_PASSWORD) {
     accounts = [{ user: process.env.MAIL_USER, password: process.env.MAIL_PASSWORD }];
   }
+
+  // Agregar cuentas configuradas desde la UI (AppSetting key='mail_accounts')
+  try {
+    const setting = await prisma.appSetting.findUnique({ where: { key: 'mail_accounts' } });
+    if (setting?.value) {
+      const dbAccounts = JSON.parse(setting.value);
+      if (Array.isArray(dbAccounts)) {
+        for (const a of dbAccounts) {
+          if (!accounts.find(x => x.user.toLowerCase() === a.user.toLowerCase())) {
+            accounts.push(a);
+          }
+        }
+      }
+    }
+  } catch (_) {}
 
   if (accounts.length === 0) {
     console.log('⚠️  No hay cuentas de mail configuradas, skipping sync');

@@ -77,6 +77,7 @@ const CrmApi = {
   updateProfile: (id, data) => apiFetch(`/users/${id}/profile`, {
     method: 'PATCH', body: JSON.stringify(data)
   }),
+  deleteAvatar: (id) => apiFetch(`/users/${id}/avatar`, { method: 'DELETE' }),
   uploadAvatar: async (id, file) => {
     const form = new FormData();
     form.append('avatar', file);
@@ -132,6 +133,7 @@ const CrmApi = {
     }).then(r => r.ok ? r.json() : r.json().then(b => Promise.reject(new Error(b.error || `Error ${r.status}`))));
   },
   createOrder: (data) => apiFetch('/orders', { method: 'POST', body: JSON.stringify(data) }),
+  deleteOrder: (id) => apiFetch(`/orders/${id}`, { method: 'DELETE' }),
   changeOrderStage: (id, stage) => apiFetch(`/orders/${id}/stage`, {
     method: 'PATCH', body: JSON.stringify({ stage })
   }),
@@ -218,6 +220,8 @@ const CrmApi = {
   // Mail
   syncMail: () => apiFetch('/mail/sync', { method: 'POST' }),
   getInbox: (limit = 20) => apiFetch(`/mail/inbox?limit=${limit}`),
+  addMailAccount:    (user, password) => apiFetch('/mail/accounts', { method: 'POST', body: JSON.stringify({ user, password }) }),
+  deleteMailAccount: (email) => apiFetch(`/mail/accounts/${encodeURIComponent(email)}`, { method: 'DELETE' }),
 
   // Notifications
   getNotificationRules: () => apiFetch('/notifications/rules'),

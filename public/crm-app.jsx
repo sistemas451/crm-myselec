@@ -5,6 +5,12 @@ const { useState, useEffect } = React;
 
 function AppRoot() {
   const [logged, setLogged] = useState(CrmAuth.isLoggedIn());
+  // Si hay token pero no crm_user guardado, reconstruirlo del JWT para que
+  // el sidebar y topbar siempre tengan nombre y rol sin depender del fetch.
+  if (CrmAuth.isLoggedIn() && !CrmAuth.getUser()) {
+    const _jwt = decodeJwtPayload(CrmAuth.getToken());
+    if (_jwt) CrmAuth.setUser({ id: _jwt.id, name: _jwt.name, email: _jwt.email, role: _jwt.role, zone: _jwt.zone });
+  }
   const [apiData, setApiData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -25,6 +31,12 @@ function AppRoot() {
         window.STAGES_F1 = data.stagesF1;
         window.STAGES_F2 = data.stagesF2;
         window.ACTIVITY = data.activity;
+        // Actualizar crm_user con el avatar real del API (el login no lo incluye en el JWT)
+        const stored = CrmAuth.getUser();
+        if (stored && data.users) {
+          const me = data.users.find(u => u.id === stored.id);
+          if (me?.avatar) CrmAuth.setUser({ ...stored, avatar: me.avatar });
+        }
         setApiData(data);
         setLoading(false);
       } else {
@@ -127,8 +139,12 @@ function App() {
   }, [openModal, closeAllModals]);
 
   const user = users.find(u => u.id === currentUserId) || users[0];
-  // Merge avatar desde profileUser si fue actualizado en esta sesión
-  const displayUser = profileUser ? { ...user, ...profileUser } : user;
+  // Merge avatar desde profileUser si fue actualizado en esta sesión.
+  // role siempre viene del JWT como fallback por si el contexto de users aún no cargó.
+  const displayUser = {
+    role: loggedUser?.role,
+    ...(profileUser ? { ...user, ...profileUser } : user),
+  };
 
   const openDetail = (code, kind='quote') => openModal(kind==='quote'?'quoteDetail':'orderDetail', { code });
 
@@ -264,8 +280,9 @@ function ProfileModal({ user, onClose, onUpdated }) {
   const [pass,        setPass]        = useState('');
   const [pass2,       setPass2]       = useState('');
   const [logoutAll,   setLogoutAll]   = useState(false);
-  const [preview,     setPreview]     = useState(user?.avatar || null);
+  const [preview,     setPreview]     = useState(user?.avatar || CrmAuth.getUser()?.avatar || null);
   const [avatarFile,  setAvatarFile]  = useState(null);
+  const [removeAvatar,setRemoveAvatar]= useState(false);
   const [cropSrc,     setCropSrc]     = useState(null);
   const [loading,     setLoading]     = useState(false);
   const [error,       setError]       = useState('');
@@ -298,12 +315,16 @@ function ProfileModal({ user, onClose, onUpdated }) {
         const res = await CrmApi.updateProfile(user.id, { name: name.trim(), phone: phone.trim() });
         updated = { ...updated, ...res };
       }
-      if (avatarFile) {
+      if (removeAvatar) {
+        const res = await CrmApi.deleteAvatar(user.id);
+        updated = { ...updated, ...res, avatar: null };
+      } else if (avatarFile) {
         const res = await CrmApi.uploadAvatar(user.id, avatarFile);
         updated = { ...updated, ...res };
       }
       onUpdated(updated);
       setAvatarFile(null);
+      setRemoveAvatar(false);
       setInfo('Datos actualizados');
     } catch (err) {
       setError(err.message || 'Error al guardar');
@@ -386,8 +407,15 @@ function ProfileModal({ user, onClose, onUpdated }) {
                         <Icon name="camera" size={20} className="text-white"/>
                       </div>
                     </div>
-                    <button type="button" onClick={() => fileRef.current?.click()}
-                      className="text-xs text-brand hover:underline">{preview ? 'Cambiar foto' : 'Subir foto'}</button>
+                    <div className="flex items-center gap-3">
+                      <button type="button" onClick={() => fileRef.current?.click()}
+                        className="text-xs text-brand hover:underline">{preview ? 'Cambiar foto' : 'Subir foto'}</button>
+                      {preview && (
+                        <button type="button"
+                          onClick={() => { setPreview(null); setAvatarFile(null); setRemoveAvatar(true); }}
+                          className="text-xs text-red-500 hover:underline">Eliminar foto</button>
+                      )}
+                    </div>
                     <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFileSelect}/>
                   </div>
 
@@ -762,8 +790,19 @@ function Login({ onLogin }) {
   );
 }
 
+// Decodifica el payload del JWT sin verificación (solo para display)
+function decodeJwtPayload(token) {
+  try { return JSON.parse(atob(token.split('.')[1])); } catch { return null; }
+}
+
 // ---------- Sidebar ----------
 function Sidebar({ role, screen, setScreen, user, onProfileOpen, collapsed, onToggle }) {
+  // Mismo patrón que Topbar: JWT como fallback confiable
+  const _authUser = CrmAuth.getUser();
+  const _jwt = decodeJwtPayload(CrmAuth.getToken());
+  const resolvedUser = _authUser || _jwt;
+  const effectiveRole = resolvedUser?.role;
+  const effectiveName = user?.name || resolvedUser?.name;
   const navAdmin = [
     { id:'dashboard', label:'Dashboard',             icon:'layout-dashboard' },
     { id:'quotes',    label:'Cotizaciones',          icon:'clipboard-list', sub:'Fase 1' },
@@ -851,12 +890,12 @@ function Sidebar({ role, screen, setScreen, user, onProfileOpen, collapsed, onTo
             collapsed ? 'justify-center px-0' : 'gap-3 px-3 text-left'
           )}
         >
-          <Avatar name={user?.name} size={34} src={user?.avatar}/>
+          <Avatar name={effectiveName} size={34} src={user?.avatar || resolvedUser?.avatar}/>
           {!collapsed && (
             <>
               <div className="flex-1 min-w-0 overflow-hidden">
-                <div className="text-[13px] font-semibold text-white truncate">{user?.name || '—'}</div>
-                <div className="text-[11px] text-white/45">{roleLabel[user?.role] || '—'}</div>
+                <div className="text-[13px] font-semibold text-white truncate">{effectiveName || '—'}</div>
+                <div className="text-[12px] text-white/75">{roleLabel[effectiveRole] || '—'}</div>
               </div>
               <Icon name="settings" size={14} className="text-white/30 group-hover:text-white/60 shrink-0"/>
             </>
@@ -946,7 +985,9 @@ function Topbar({ user, roleKey, setRoleKey }) {
   const [notifOpen, setNotifOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState(null); // muestra el modal de resultado
-  const loggedUser = CrmAuth.getUser();
+  const _authUser = CrmAuth.getUser();
+  const _jwt = decodeJwtPayload(CrmAuth.getToken());
+  const loggedUser = _authUser || _jwt; // JWT como fallback si crm_user no está guardado
   const isAdmin = loggedUser?.role === 'ADMIN';
   const unreadCount = notifications.filter(n => !n.read).length;
 
@@ -974,7 +1015,7 @@ function Topbar({ user, roleKey, setRoleKey }) {
         <Logo size={20}/>
         <span className="text-ink-300">/</span>
         <span className="font-semibold text-ink-900 truncate">
-          {user?.name?.split(' ')?.[0] || 'MySelec CRM'}
+          {(user?.name || loggedUser?.name)?.split(' ')?.[0] || 'MySelec CRM'}
         </span>
         {loggedUser?.role && (
           <span className="text-[11px] text-ink-400 font-medium hidden sm:inline">

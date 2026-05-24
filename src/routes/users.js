@@ -327,4 +327,26 @@ router.post('/:id/avatar', authMiddleware, uploadAvatar.single('avatar'), async 
   }
 });
 
+// DELETE /api/users/:id/avatar — eliminar foto de perfil
+router.delete('/:id/avatar', authMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'ADMIN' && req.user.id !== req.params.id) {
+      return res.status(403).json({ error: 'Sin permiso' });
+    }
+    const existing = await prisma.user.findUnique({ where: { id: req.params.id }, select: { avatar: true } });
+    if (existing?.avatar) {
+      const oldPath = path.join(__dirname, '..', '..', existing.avatar.replace(/^\//, ''));
+      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+    }
+    const user = await prisma.user.update({
+      where: { id: req.params.id },
+      data: { avatar: null },
+      select: { id: true, name: true, email: true, role: true, zone: true, avatar: true },
+    });
+    res.json(user);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

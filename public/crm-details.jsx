@@ -1389,7 +1389,7 @@ function QuoteDetail({ code, onClose, canReassign }) {
 }
 
 function OrderDetail({ code, onClose, canReassign }) {
-  const { orders, clients, users, moveOrderStage, pushToast, openModal } = useApp();
+  const { orders, clients, users, moveOrderStage, pushToast, openModal, setOrders, setQuotes } = useApp();
   const o = orders.find(x=>x.code===code);
   if (!o) return null;
 
@@ -1495,6 +1495,32 @@ function OrderDetail({ code, onClose, canReassign }) {
     onClose();
   };
 
+  // ── Delete order / NP ──
+  const [deleting, setDeleting] = useState(false);
+  const handleDeleteOrder = async () => {
+    const label = isQuoteSource ? 'Nota de Pedido' : 'Orden de Compra';
+    const extra = (o.fromQuote || linkedPres?.code)
+      ? `\n\nEl presupuesto ${o.fromQuote || linkedPres?.code} volverá a etapa "Enviado".`
+      : '';
+    if (!window.confirm(`¿Eliminar ${label} ${code}? Esta acción no se puede deshacer.${extra}`)) return;
+    setDeleting(true);
+    try {
+      await CrmApi.deleteOrder(o.id);
+      // Remove from orders list
+      setOrders(prev => prev.filter(x => x.id !== o.id));
+      // If linked to a quote, restore its stage to 'enviado'
+      const linkedCode = o.fromQuote || linkedPres?.code;
+      if (linkedCode && setQuotes) {
+        setQuotes(prev => prev.map(q => q.code === linkedCode ? { ...q, stage: 'enviado' } : q));
+      }
+      pushToast(`${label} ${code} eliminada`);
+      onClose();
+    } catch (err) {
+      pushToast(err.message || 'Error al eliminar', 'bad');
+      setDeleting(false);
+    }
+  };
+
   // ── File helpers ──
   const fmtBytes = (b) => {
     if (!b) return '';
@@ -1547,6 +1573,12 @@ function OrderDetail({ code, onClose, canReassign }) {
                 </>
               )}
             </div>
+          )}
+          {CrmAuth.getUser()?.role === 'ADMIN' && (
+            <button className="btn-ghost text-red-500 hover:bg-red-50 border-red-200"
+              onClick={handleDeleteOrder} disabled={deleting}>
+              <Icon name="trash-2" size={13}/>{deleting ? 'Eliminando…' : 'Eliminar'}
+            </button>
           )}
         </div>
       }
@@ -1785,7 +1817,7 @@ function OrderDetail({ code, onClose, canReassign }) {
                         </td>
                         <td colSpan="2" className="px-3 py-2 text-right text-ink-500 text-xs">TOTAL NP</td>
                         <td className="px-3 py-2 text-right font-mono text-indigo-700">
-                          {(notaPedido.amount || (notaPedido.items||[]).reduce((s,i)=>s+(i.total||0),0)).toLocaleString('es-AR',{minimumFractionDigits:2})}
+                          {(notaPedido.items||[]).reduce((s,i)=>s+(i.total||0),0).toLocaleString('es-AR',{minimumFractionDigits:2})}
                         </td>
                       </tr>
                     </tfoot>

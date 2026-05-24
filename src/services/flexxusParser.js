@@ -398,10 +398,13 @@ async function parseNotaPedidoPDF(buffer) {
     }
 
     // ── Total ─────────────────────────────────────────────────────────────────
+    // El primer "U$S XXXX" suelto es el subtotal de ítems; el ÚLTIMO es el
+    // gran total (ya incluye IVA + percepciones). Por eso recorremos todo el
+    // array sin break para quedarnos con el último valor que coincida.
     for (const line of lines) {
       if (/^U\$S\s+[\d,.]+$/.test(line)) {
         const m = line.match(/U\$S\s+([\d,.]+)/);
-        if (m) { result.total = parseArFloat(m[1]); break; }
+        if (m) result.total = parseArFloat(m[1]); // sin break → prevalece el último
       }
     }
 

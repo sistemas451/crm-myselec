@@ -1286,7 +1286,7 @@ function Team() {
       <tr className={cx(!u.active && 'opacity-40')}>
         <td>
           <div className="flex items-center gap-2.5">
-            <Avatar name={u.name} size={32}/>
+            <Avatar name={u.name} size={32} src={u.avatar}/>
             <div>
               <div className="font-semibold text-[13px]">{u.name}</div>
               <div className="text-[11px] text-ink-500">{u.email}</div>
@@ -1387,7 +1387,7 @@ function Team() {
                       <tr key={u.id}>
                         <td>
                           <div className="flex items-center gap-2.5">
-                            <Avatar name={u.name} size={32}/>
+                            <Avatar name={u.name} size={32} src={u.avatar}/>
                             <div>
                               <div className="font-semibold text-[13px]">{u.name}</div>
                               <div className="text-[11px] text-ink-500">{u.email}</div>
@@ -1585,7 +1585,7 @@ function NotifModal({ rule, stages, onSave, onClose }) {
 }
 
 function Config() {
-  const { pushToast } = useApp();
+  const { pushToast, users } = useApp();
   const [tab, setTab] = useState('stages');
   const [stagesData, setStagesData] = useState(null);
   const [stagesLoading, setStagesLoading] = useState(true);
@@ -1605,6 +1605,11 @@ function Config() {
   const [mailLoading,   setMailLoading]   = useState(false);
   const [mailSyncing,   setMailSyncing]   = useState({}); // { [email]: true/false }
   const [mailSyncingAll, setMailSyncingAll] = useState(false);
+  const [addAccountOpen, setAddAccountOpen] = useState(false);
+  const [addAccountForm, setAddAccountForm] = useState({ user: '', password: '' });
+  const [addAccountMode, setAddAccountMode] = useState('selector'); // 'selector' | 'manual'
+  const [addAccountLoading, setAddAccountLoading] = useState(false);
+  const [addAccountError, setAddAccountError] = useState('');
 
   useEffect(() => {
     CrmApi.getStagesFull()
@@ -1673,6 +1678,39 @@ function Config() {
       setMailAccounts(Array.isArray(accounts) ? accounts : []);
     } catch { pushToast('Error al sincronizar', 'bad'); }
     setMailSyncing(s => ({ ...s, [email]: false }));
+  };
+
+  const reloadMailAccounts = async () => {
+    const accounts = await fetch('/api/mail/accounts', { headers: { Authorization: `Bearer ${localStorage.getItem('crm_token')}` } }).then(r => r.json());
+    setMailAccounts(Array.isArray(accounts) ? accounts : []);
+  };
+
+  const handleAddAccount = async (e) => {
+    e.preventDefault();
+    setAddAccountError('');
+    if (!addAccountForm.user || !addAccountForm.password) { setAddAccountError('Completá email y contraseña'); return; }
+    setAddAccountLoading(true);
+    try {
+      await CrmApi.addMailAccount(addAccountForm.user.trim(), addAccountForm.password.trim());
+      await reloadMailAccounts();
+      setAddAccountOpen(false);
+      setAddAccountForm({ user: '', password: '' });
+      setAddAccountMode('selector');
+      pushToast('Cuenta agregada');
+    } catch (err) {
+      setAddAccountError(err.message || 'Error al agregar cuenta');
+    } finally { setAddAccountLoading(false); }
+  };
+
+  const handleDeleteAccount = async (email) => {
+    if (!confirm(`¿Eliminar la cuenta ${email}?`)) return;
+    try {
+      await CrmApi.deleteMailAccount(email);
+      await reloadMailAccounts();
+      pushToast('Cuenta eliminada');
+    } catch (err) {
+      pushToast(err.message || 'Error al eliminar', 'bad');
+    }
   };
 
   const handleToggleMandatory = async (stage) => {
@@ -1930,24 +1968,86 @@ function Config() {
           <div className="bg-white border border-line rounded-xl overflow-hidden">
             <div className="px-5 py-3.5 border-b border-line flex items-center justify-between">
               <div className="font-semibold text-[13px]">Cuentas configuradas</div>
-              <button onClick={handleSyncAll} disabled={mailSyncingAll}
-                className="btn-primary text-[12px] flex items-center gap-1.5 disabled:opacity-60">
-                <Icon name="refresh-cw" size={13} className={mailSyncingAll ? 'animate-spin' : ''}/>
-                {mailSyncingAll ? 'Sincronizando…' : 'Sincronizar todas'}
-              </button>
+              <div className="flex items-center gap-2">
+                <button onClick={() => { setAddAccountOpen(o => !o); setAddAccountError(''); }}
+                  className="btn-ghost text-[12px] flex items-center gap-1.5">
+                  <Icon name="plus" size={13}/>Agregar cuenta
+                </button>
+                <button onClick={handleSyncAll} disabled={mailSyncingAll}
+                  className="btn-primary text-[12px] flex items-center gap-1.5 disabled:opacity-60">
+                  <Icon name="refresh-cw" size={13} className={mailSyncingAll ? 'animate-spin' : ''}/>
+                  {mailSyncingAll ? 'Sincronizando…' : 'Sincronizar todas'}
+                </button>
+              </div>
             </div>
+
+            {/* Formulario agregar cuenta */}
+            {addAccountOpen && (
+              <form onSubmit={handleAddAccount} className="px-5 py-4 border-b border-line bg-surface space-y-3">
+                <div className="flex items-center justify-between mb-1">
+                  <div className="text-[12px] font-semibold text-ink-700">Nueva cuenta de mail</div>
+                  {/* Toggle selector / manual */}
+                  <div className="flex items-center gap-1 bg-line rounded-lg p-0.5">
+                    <button type="button"
+                      onClick={() => { setAddAccountMode('selector'); setAddAccountForm(f => ({...f, user: ''})); }}
+                      className={`text-[11px] px-2.5 py-1 rounded-md transition-colors ${addAccountMode === 'selector' ? 'bg-white text-ink-800 shadow-sm font-medium' : 'text-ink-500 hover:text-ink-700'}`}>
+                      Seleccionar vendedor
+                    </button>
+                    <button type="button"
+                      onClick={() => { setAddAccountMode('manual'); setAddAccountForm(f => ({...f, user: ''})); }}
+                      className={`text-[11px] px-2.5 py-1 rounded-md transition-colors ${addAccountMode === 'manual' ? 'bg-white text-ink-800 shadow-sm font-medium' : 'text-ink-500 hover:text-ink-700'}`}>
+                      Ingresar manual
+                    </button>
+                  </div>
+                </div>
+                {addAccountError && <div className="text-red-600 text-[12px]">{addAccountError}</div>}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] text-ink-500 mb-1 block">
+                      {addAccountMode === 'selector' ? 'Vendedor' : 'Email (Gmail)'}
+                    </label>
+                    {addAccountMode === 'selector' ? (
+                      <select className="inp w-full text-[13px]"
+                        value={addAccountForm.user}
+                        onChange={e => setAddAccountForm(f => ({...f, user: e.target.value}))}>
+                        <option value="">— Seleccioná un vendedor —</option>
+                        {(users || []).filter(u => u.email).map(u => (
+                          <option key={u.id} value={u.email}>{u.name} — {u.email}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input className="inp w-full text-[13px]" type="email" placeholder="vendedor@gmail.com"
+                        value={addAccountForm.user} onChange={e => setAddAccountForm(f => ({...f, user: e.target.value}))}/>
+                    )}
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-ink-500 mb-1 block">Contraseña de aplicación</label>
+                    <input className="inp w-full text-[13px]" type="password" placeholder="xxxx xxxx xxxx xxxx"
+                      value={addAccountForm.password} onChange={e => setAddAccountForm(f => ({...f, password: e.target.value}))}/>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button type="submit" className="btn-primary text-[12px]" disabled={addAccountLoading}>
+                    {addAccountLoading ? 'Guardando…' : 'Guardar cuenta'}
+                  </button>
+                  <button type="button" className="btn-ghost text-[12px]" onClick={() => { setAddAccountOpen(false); setAddAccountMode('selector'); setAddAccountForm({ user: '', password: '' }); }}>Cancelar</button>
+                  <span className="text-[11px] text-ink-400 ml-1">Usá una <a href="https://myaccount.google.com/apppasswords" target="_blank" className="text-brand underline">contraseña de aplicación</a> de Google, no tu contraseña normal.</span>
+                </div>
+              </form>
+            )}
 
             {mailLoading ? (
               <div className="py-10 text-center text-ink-400 text-[13px]">Cargando cuentas…</div>
             ) : mailAccounts.length === 0 ? (
               <div className="py-10 text-center text-ink-400 text-[13px]">
                 No hay cuentas configuradas.<br/>
-                <span className="text-[12px]">Agrega <code className="mono bg-surface px-1 rounded">MAIL_ACCOUNTS</code> en Railway.</span>
+                <span className="text-[12px]">Hacé clic en "Agregar cuenta" para configurar la primera.</span>
               </div>
             ) : (
               <table className="tbl w-full">
                 <thead><tr>
                   <th>Cuenta</th>
+                  <th>Origen</th>
                   <th>Último sync</th>
                   <th>Estado</th>
                   <th></th>
@@ -1956,6 +2056,11 @@ function Config() {
                   {mailAccounts.map(acc => (
                     <tr key={acc.user}>
                       <td className="mono text-[12px]">{acc.user}</td>
+                      <td>
+                        <Badge tone={acc.origin === 'db' ? 'blue' : 'slate'}>
+                          {acc.origin === 'db' ? 'Manual' : 'Sistema'}
+                        </Badge>
+                      </td>
                       <td className="text-[12px] text-ink-500">
                         {acc.lastSyncAt
                           ? new Date(acc.lastSyncAt).toLocaleString('es-AR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })
@@ -1967,12 +2072,20 @@ function Config() {
                         </Badge>
                       </td>
                       <td className="text-right">
-                        <button onClick={() => handleSyncOne(acc.user)}
-                          disabled={mailSyncing[acc.user]}
-                          className="btn-ghost text-[12px] flex items-center gap-1.5 ml-auto disabled:opacity-60">
-                          <Icon name="refresh-cw" size={12} className={mailSyncing[acc.user] ? 'animate-spin' : ''}/>
-                          {mailSyncing[acc.user] ? 'Sync…' : 'Sincronizar'}
-                        </button>
+                        <div className="flex items-center justify-end gap-1">
+                          <button onClick={() => handleSyncOne(acc.user)}
+                            disabled={mailSyncing[acc.user]}
+                            className="btn-ghost text-[12px] flex items-center gap-1.5 disabled:opacity-60">
+                            <Icon name="refresh-cw" size={12} className={mailSyncing[acc.user] ? 'animate-spin' : ''}/>
+                            {mailSyncing[acc.user] ? 'Sync…' : 'Sincronizar'}
+                          </button>
+                          {acc.origin === 'db' && (
+                            <button onClick={() => handleDeleteAccount(acc.user)}
+                              className="btn-ghost p-1.5" title="Eliminar cuenta">
+                              <Icon name="trash-2" size={13} className="text-red-400"/>
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}

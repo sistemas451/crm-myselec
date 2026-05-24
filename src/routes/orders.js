@@ -355,4 +355,52 @@ router.patch('/:id/stage', authMiddleware, async (req, res) => {
   }
 });
 
+// DELETE /api/orders/:id — elimina NP/OC y devuelve el presupuesto a 'enviado'
+router.delete('/:id', authMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'ADMIN') {
+      return res.status(403).json({ error: 'Solo administradores pueden eliminar órdenes' });
+    }
+
+    // ¿Es una NOTA_PEDIDO (Quote)?
+    const npQuote = await prisma.quote.findFirst({
+      where: { id: req.params.id, mailType: 'NOTA_PEDIDO' },
+      select: { id: true, code: true, linkedQuoteId: true },
+    });
+
+    if (npQuote) {
+      // Si tiene presupuesto vinculado, devolverlo a 'enviado'
+      if (npQuote.linkedQuoteId) {
+        await prisma.quote.update({
+          where: { id: npQuote.linkedQuoteId },
+          data: { stage: 'enviado' },
+        });
+      }
+      await prisma.quote.delete({ where: { id: req.params.id } });
+      return res.json({ ok: true, code: npQuote.code });
+    }
+
+    // Es una Order manual
+    const order = await prisma.order.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, code: true, fromQuoteId: true },
+    });
+    if (!order) return res.status(404).json({ error: 'Orden no encontrada' });
+
+    // Si vino de un presupuesto, devolverlo a 'enviado'
+    if (order.fromQuoteId) {
+      await prisma.quote.update({
+        where: { id: order.fromQuoteId },
+        data: { stage: 'enviado' },
+      });
+    }
+
+    await prisma.order.delete({ where: { id: req.params.id } });
+    res.json({ ok: true, code: order.code });
+  } catch (err) {
+    console.error('Error deleting order:', err);
+    res.status(500).json({ error: 'Error al eliminar' });
+  }
+});
+
 module.exports = router;
