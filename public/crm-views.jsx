@@ -1613,7 +1613,7 @@ function Config() {
 
   useEffect(() => {
     CrmApi.getStagesFull()
-      .then(data => { setStagesData(data); setStagesLoading(false); })
+      .then(data => { setStagesData(data.map(s => ({ ...s, _unit: 'días' }))); setStagesLoading(false); })
       .catch(() => setStagesLoading(false));
   }, []);
 
@@ -1725,8 +1725,9 @@ function Config() {
     }
   };
 
-  const handleUpdateMaxHours = async (stage, value) => {
-    const hours = value ? parseInt(value) : null;
+  const UNIT_MULT = { días: 24, semanas: 168, meses: 720 };
+
+  const handleUpdateMaxHours = async (stage, hours) => {
     if (hours === stage.maxHours) return;
     setStagesData(sd => sd.map(s => s.id === stage.id ? {...s, maxHours: hours} : s));
     try {
@@ -1869,14 +1870,31 @@ function Config() {
                     </button>
                   </div>
                   <input type="number" min="1" placeholder="∞"
-                    value={s.maxHours || ''}
-                    onChange={e => setStagesData(sd => sd.map(x =>
-                      x.id === s.id ? {...x, maxHours: e.target.value ? parseInt(e.target.value) : null} : x
-                    ))}
-                    onBlur={e => handleUpdateMaxHours(s, e.target.value)}
-                    className="inp text-xs py-1 w-16 text-center"
+                    value={s.maxHours && s._unit ? Math.round(s.maxHours / UNIT_MULT[s._unit]) : (s.maxHours ? s.maxHours : '')}
+                    onChange={e => {
+                      const mult = UNIT_MULT[s._unit || 'días'];
+                      setStagesData(sd => sd.map(x =>
+                        x.id === s.id ? {...x, maxHours: e.target.value ? parseInt(e.target.value) * mult : null} : x
+                      ));
+                    }}
+                    onBlur={e => {
+                      const mult = UNIT_MULT[s._unit || 'días'];
+                      const hours = e.target.value ? parseInt(e.target.value) * mult : null;
+                      handleUpdateMaxHours(s, hours);
+                    }}
+                    className="inp text-xs py-1 w-14 text-center"
                   />
-                  <span className="text-[11px] text-ink-400">hs</span>
+                  <select
+                    value={s._unit || 'días'}
+                    onChange={e => setStagesData(sd => sd.map(x =>
+                      x.id === s.id ? {...x, _unit: e.target.value} : x
+                    ))}
+                    className="inp text-xs py-1 pl-2 pr-6 w-auto"
+                  >
+                    <option value="días">días</option>
+                    <option value="semanas">sem.</option>
+                    <option value="meses">meses</option>
+                  </select>
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button onClick={() => startEdit(s)} className="btn-ghost p-1" title="Editar">
                       <Icon name="pencil" size={13} className="text-ink-500"/>

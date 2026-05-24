@@ -1183,6 +1183,27 @@ function Dashboard() {
             />
           </div>
 
+          {/* Chips de mes rápido — últimos 6 meses */}
+          {(() => {
+            const MES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+            const now = new Date();
+            return Array.from({ length: 6 }, (_, i) => {
+              const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
+              const from = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`;
+              const last = new Date(d.getFullYear(), d.getMonth()+1, 0);
+              const to   = `${last.getFullYear()}-${String(last.getMonth()+1).padStart(2,'0')}-${String(last.getDate()).padStart(2,'0')}`;
+              const label = MES[d.getMonth()] + (d.getFullYear() !== now.getFullYear() ? ` '${String(d.getFullYear()).slice(2)}` : '');
+              const active = filters.from === from && filters.to === to;
+              return (
+                <button key={from}
+                  onClick={() => setFilters(f => ({ ...f, from, to }))}
+                  className={`h-8 px-3 rounded-lg border text-xs font-medium transition-colors ${active ? 'bg-navy-900 text-white border-navy-900' : 'bg-white text-ink-600 border-line hover:border-navy-900 hover:text-navy-900'}`}>
+                  {label}
+                </button>
+              );
+            });
+          })()}
+
           {hasFilters && (
             <button
               onClick={resetFilters}
