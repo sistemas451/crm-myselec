@@ -1650,18 +1650,6 @@ function OrderDetail({ code, onClose, canReassign }) {
       {/* ── Tab: Ítems NP (para NP por mail / quote-source) ── */}
       {tab === 'items-np' && isQuoteSource && (
         <div className="p-6 space-y-4">
-          {linkedPres && (
-            <div className="bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3 flex items-center gap-3">
-              <Icon name="link" size={14} className="text-indigo-500"/>
-              <span className="text-[13px] text-indigo-700">
-                Presupuesto vinculado:{' '}
-                <button onClick={()=>{ onClose(); setTimeout(()=>openModal('quoteDetail',{code: linkedPres.code}),80); }}
-                  className="font-semibold mono text-indigo-900 hover:underline">
-                  {linkedPres.code}{linkedPres.flexxusCode ? ` (${linkedPres.flexxusCode})` : ''}
-                </button>
-              </span>
-            </div>
-          )}
           <div className="bg-white border border-line rounded-xl overflow-hidden">
             <div className="px-4 py-3 border-b border-line">
               <span className="text-sm font-semibold text-ink-900">Ítems de la Nota de Pedido</span>

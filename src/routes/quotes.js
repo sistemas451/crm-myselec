@@ -455,7 +455,10 @@ router.patch('/:id/client', authMiddleware, async (req, res) => {
     const resolvedSellerId = sellerId || client.defaultSellerId || null;
     if (resolvedSellerId) {
       updateData.sellerId = resolvedSellerId;
-      updateData.stage = 'asignada';
+      // Solo avanzar a 'asignada' si la quote está en etapa inicial (nueva/sin asignar).
+      // Si ya pasó por etapas posteriores, no la retrocedemos.
+      const current = await prisma.quote.findUnique({ where: { id: req.params.id }, select: { stage: true } });
+      if (current?.stage === 'nueva') updateData.stage = 'asignada';
     }
 
     const updated = await prisma.quote.update({
