@@ -1594,6 +1594,13 @@ function Config() {
   const [editTone, setEditTone] = useState('gray');
   const [newStage, setNewStage] = useState({ label: '', tone: 'gray', phase: null });
 
+  // Email templates state
+  const [emailTemplates, setEmailTemplates]   = useState([]);
+  const [emailCCDefault, setEmailCCDefault]   = useState('');
+  const [emailTplLoading, setEmailTplLoading] = useState(false);
+  const [editingTpl, setEditingTpl]           = useState(null); // null | template-object
+  const [tplSaving, setTplSaving]             = useState(false);
+
   // Notifications state
   const [notifRules, setNotifRules] = useState([]);
   const [notifLoading, setNotifLoading] = useState(false);
@@ -1623,6 +1630,18 @@ function Config() {
     CrmApi.getNotificationRules()
       .then(r => { setNotifRules(r); setNotifLoading(false); })
       .catch(() => setNotifLoading(false));
+  }, [tab]);
+
+  useEffect(() => {
+    if (tab !== 'email') return;
+    setEmailTplLoading(true);
+    CrmApi.getEmailTemplates()
+      .then(({ templates, ccDefault }) => {
+        setEmailTemplates(templates || []);
+        setEmailCCDefault(ccDefault || '');
+        setEmailTplLoading(false);
+      })
+      .catch(() => setEmailTplLoading(false));
   }, [tab]);
 
   useEffect(() => {
@@ -1936,6 +1955,7 @@ function Config() {
       <TabBar active={tab} onChange={setTab} tabs={[
         { id:'stages',    label:'Etapas' },
         { id:'mails',     label:'Cuentas de mail' },
+        { id:'email',     label:'Plantillas email' },
         { id:'notifs',    label:'Notificaciones' },
       ]}/>
 
@@ -2111,6 +2131,137 @@ function Config() {
               </table>
             )}
           </div>
+        </div>
+      )}
+
+      {tab==='email' && (
+        <div className="p-6 space-y-6 max-w-3xl">
+          {/* ── CC por defecto ──────────────────────────── */}
+          <div className="bg-white border border-line rounded-xl p-5">
+            <div className="text-sm font-semibold mb-1">CC por defecto</div>
+            <div className="text-[12px] text-ink-500 mb-3">Dirección(es) que se agregan automáticamente al CC al enviar un presupuesto. Separar múltiples con comas.</div>
+            <div className="flex gap-2">
+              <input className="inp flex-1 text-sm" type="text"
+                placeholder="ventas@myselec.com.ar, gerencia@myselec.com.ar"
+                value={emailCCDefault}
+                onChange={e => setEmailCCDefault(e.target.value)}/>
+              <button className="btn-primary"
+                onClick={async () => {
+                  try {
+                    await CrmApi.saveEmailTemplates({ ccDefault: emailCCDefault });
+                    pushToast('CC guardado');
+                  } catch (err) { pushToast(err.message || 'Error', 'bad'); }
+                }}>
+                Guardar
+              </button>
+            </div>
+          </div>
+
+          {/* ── Plantillas ──────────────────────────────── */}
+          <div className="bg-white border border-line rounded-xl p-5">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <div className="text-sm font-semibold">Plantillas de email</div>
+                <div className="text-[12px] text-ink-500 mt-0.5">
+                  Variables disponibles: <code className="bg-surface px-1 rounded text-[11px]">{'{cliente}'}</code> <code className="bg-surface px-1 rounded text-[11px]">{'{codigo}'}</code> <code className="bg-surface px-1 rounded text-[11px]">{'{np_flexxus}'}</code> <code className="bg-surface px-1 rounded text-[11px]">{'{vendedor}'}</code> <code className="bg-surface px-1 rounded text-[11px]">{'{asunto_original}'}</code> <code className="bg-surface px-1 rounded text-[11px]">{'{fecha}'}</code>
+                </div>
+              </div>
+              <button className="btn-primary text-xs py-1.5 px-3"
+                onClick={() => setEditingTpl({ id: `tpl-${Date.now()}`, name: '', subject: '', body: '', _isNew: true })}>
+                <Icon name="plus" size={13}/>Nueva plantilla
+              </button>
+            </div>
+
+            {emailTplLoading ? (
+              <div className="py-6 text-center text-ink-400 text-sm">Cargando…</div>
+            ) : (
+              <div className="space-y-2">
+                {emailTemplates.map(tpl => (
+                  <div key={tpl.id} className="flex items-start gap-3 p-3 border border-line rounded-lg hover:bg-surface/50">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[13px] font-semibold text-ink-900">{tpl.name}</div>
+                      <div className="text-[11.5px] text-ink-500 mt-0.5 truncate">Asunto: {tpl.subject}</div>
+                      <div className="text-[11.5px] text-ink-400 mt-0.5 line-clamp-2 whitespace-pre-line">{tpl.body}</div>
+                    </div>
+                    <div className="flex gap-1 shrink-0">
+                      <button className="btn-ghost text-xs py-1 px-2" onClick={() => setEditingTpl({ ...tpl })}>
+                        <Icon name="pencil" size={12}/>Editar
+                      </button>
+                      <button className="btn-ghost text-xs py-1 px-2 text-bad border-red-200 hover:bg-red-50"
+                        onClick={async () => {
+                          if (!confirm(`¿Eliminar la plantilla "${tpl.name}"?`)) return;
+                          const updated = emailTemplates.filter(t => t.id !== tpl.id);
+                          setEmailTemplates(updated);
+                          try { await CrmApi.saveEmailTemplates({ templates: updated }); pushToast('Plantilla eliminada'); }
+                          catch (err) { pushToast(err.message || 'Error', 'bad'); }
+                        }}>
+                        <Icon name="trash-2" size={12}/>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {emailTemplates.length === 0 && (
+                  <div className="py-6 text-center text-ink-400 text-sm">No hay plantillas. Creá una o recargá la página para cargar las de defecto.</div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* ── Modal editar plantilla ───────────────────── */}
+          {editingTpl && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center">
+              <div className="absolute inset-0 bg-ink-900/40 backdrop-blur-[2px]" onClick={() => setEditingTpl(null)}/>
+              <div className="relative bg-white rounded-2xl shadow-pop w-full max-w-lg mx-4 flex flex-col max-h-[90vh]">
+                <div className="px-5 py-4 border-b border-line flex items-center justify-between">
+                  <div className="text-[14px] font-bold text-ink-900">{editingTpl._isNew ? 'Nueva plantilla' : 'Editar plantilla'}</div>
+                  <button onClick={() => setEditingTpl(null)} className="w-8 h-8 rounded-lg hover:bg-surface flex items-center justify-center text-ink-500">
+                    <Icon name="x" size={15}/>
+                  </button>
+                </div>
+                <div className="flex-1 overflow-y-auto scroll-thin px-5 py-4 space-y-3">
+                  <div>
+                    <label className="text-[11px] font-semibold text-ink-600 uppercase tracking-wide mb-1 block">Nombre</label>
+                    <input className="inp w-full text-sm" placeholder="Ej: Presupuesto estándar"
+                      value={editingTpl.name} onChange={e => setEditingTpl(t => ({ ...t, name: e.target.value }))}/>
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-semibold text-ink-600 uppercase tracking-wide mb-1 block">Asunto</label>
+                    <input className="inp w-full text-sm" placeholder="Presupuesto {codigo} - Myselec"
+                      value={editingTpl.subject} onChange={e => setEditingTpl(t => ({ ...t, subject: e.target.value }))}/>
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-semibold text-ink-600 uppercase tracking-wide mb-1 block">Cuerpo</label>
+                    <textarea className="inp w-full text-sm resize-y" rows={8}
+                      placeholder="Estimado/a {cliente},&#10;&#10;Adjunto el presupuesto {codigo}...&#10;&#10;Saludos,&#10;{vendedor}"
+                      value={editingTpl.body} onChange={e => setEditingTpl(t => ({ ...t, body: e.target.value }))}/>
+                  </div>
+                </div>
+                <div className="px-5 py-3 border-t border-line bg-surface flex justify-end gap-2">
+                  <button className="btn-ghost" onClick={() => setEditingTpl(null)} disabled={tplSaving}>Cancelar</button>
+                  <button className="btn-primary" disabled={tplSaving || !editingTpl.name || !editingTpl.subject || !editingTpl.body}
+                    onClick={async () => {
+                      setTplSaving(true);
+                      try {
+                        const { _isNew, ...tplData } = editingTpl;
+                        let updated;
+                        if (_isNew) {
+                          updated = [...emailTemplates, tplData];
+                        } else {
+                          updated = emailTemplates.map(t => t.id === tplData.id ? tplData : t);
+                        }
+                        await CrmApi.saveEmailTemplates({ templates: updated });
+                        setEmailTemplates(updated);
+                        setEditingTpl(null);
+                        pushToast(_isNew ? 'Plantilla creada' : 'Plantilla guardada');
+                      } catch (err) { pushToast(err.message || 'Error', 'bad'); }
+                      finally { setTplSaving(false); }
+                    }}>
+                    {tplSaving ? 'Guardando…' : 'Guardar'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

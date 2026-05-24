@@ -1,9 +1,11 @@
 const express = require('express');
 const fs = require('fs');
+const path = require('path');
 const { authMiddleware } = require('../middleware/auth');
 const { onStageChange } = require('../services/notifier');
 const { resyncQuoteEmail } = require('../services/mailReader');
 const { parseFlexxusPDF } = require('../services/flexxusParser');
+const { sendQuoteEmail, getTemplates, saveTemplates, getDefaultCC, applyTemplate } = require('../services/mailSender');
 const prisma = require('../db');
 
 const router = express.Router();
@@ -646,6 +648,68 @@ router.delete('/:id/items/:itemId', authMiddleware, async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Email sending ─────────────────────────────────────────────────────────────
+
+// GET /api/quotes/email-templates — lista de plantillas + CC default
+router.get('/email-templates', authMiddleware, async (req, res) => {
+  try {
+    const [templates, cc] = await Promise.all([getTemplates(), getDefaultCC()]);
+    res.json({ templates, ccDefault: cc });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/quotes/email-templates — guardar plantillas + CC default
+router.put('/email-templates', authMiddleware, async (req, res) => {
+  try {
+    const { templates, ccDefault } = req.body;
+    if (templates) await saveTemplates(templates);
+    if (ccDefault !== undefined) {
+      await prisma.appSetting.upsert({
+        where:  { key: 'email_cc_default' },
+        update: { value: ccDefault },
+        create: { key: 'email_cc_default', value: ccDefault },
+      });
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/quotes/:id/send-email — enviar presupuesto por email
+router.post('/:id/send-email', authMiddleware, async (req, res) => {
+  try {
+    const { to, cc, subject, body, attachmentId } = req.body;
+    if (!to)      return res.status(400).json({ error: '"to" es requerido' });
+    if (!subject) return res.status(400).json({ error: '"subject" es requerido' });
+    if (!body)    return res.status(400).json({ error: '"body" es requerido' });
+
+    // Buscar adjunto si se especificó
+    let attachmentPath = null;
+    let attachmentName = null;
+    if (attachmentId) {
+      const att = await prisma.attachment.findUnique({ where: { id: attachmentId } });
+      if (att) {
+        attachmentPath = att.path;
+        attachmentName = att.filename;
+      }
+    }
+
+    const result = await sendQuoteEmail(req.params.id, {
+      to, cc, subject, body,
+      attachmentPath, attachmentName,
+      userId: req.user.id,
+    });
+
+    res.json(result);
+  } catch (err) {
+    console.error('Error sending email:', err);
+    res.status(500).json({ error: err.message || 'Error al enviar el email' });
   }
 });
 

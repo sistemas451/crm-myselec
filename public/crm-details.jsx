@@ -448,6 +448,181 @@ function OCItemsTab({ q, detailItems, setDetailItems }) {
   );
 }
 
+// ─── Modal: Enviar presupuesto por email ─────────────────────────────────────
+function SendEmailModal({ quote, attachments, onClose, onSent }) {
+  const { pushToast } = useApp();
+  const [templates, setTemplates]       = React.useState([]);
+  const [selTemplate, setSelTemplate]   = React.useState('');
+  const [to, setTo]                     = React.useState('');
+  const [cc, setCc]                     = React.useState('');
+  const [subject, setSubject]           = React.useState('');
+  const [body, setBody]                 = React.useState('');
+  const [attachmentId, setAttachmentId] = React.useState('');
+  const [sending, setSending]           = React.useState(false);
+
+  // Cargar plantillas y CC default al abrir
+  React.useEffect(() => {
+    CrmApi.getEmailTemplates().then(({ templates: tpls, ccDefault }) => {
+      setTemplates(tpls || []);
+      setCc(ccDefault || '');
+      if (tpls && tpls.length > 0) applyTpl(tpls[0], tpls);
+    }).catch(() => {});
+    // Pre-fill destinatario con email del cliente
+    if (quote.clientEmail) setTo(quote.clientEmail);
+    // Pre-seleccionar primer PDF adjunto si hay
+    const pdfAtt = (attachments || []).find(a => (a.filename||'').toLowerCase().endsWith('.pdf') || a.mimeType === 'application/pdf');
+    if (pdfAtt) setAttachmentId(pdfAtt.id);
+  }, []);
+
+  const buildVars = (tpls) => {
+    const today = new Date();
+    const fecha = today.toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric' });
+    return {
+      cliente:         quote.clientName || quote.client || '',
+      codigo:          quote.code || '',
+      np_flexxus:      quote.flexxus || '',
+      vendedor:        quote.sellerName || quote.seller || '',
+      asunto_original: quote.emailSubject || '',
+      fecha,
+    };
+  };
+
+  const applyTpl = (tpl, tpls) => {
+    const vars = buildVars(tpls);
+    const subst = (t) => t
+      .replace(/\{cliente\}/g,         vars.cliente)
+      .replace(/\{codigo\}/g,          vars.codigo)
+      .replace(/\{np_flexxus\}/g,      vars.np_flexxus)
+      .replace(/\{np_line\}/g,         vars.np_flexxus ? ` (NP Flexxus: ${vars.np_flexxus})` : '')
+      .replace(/\{vendedor\}/g,        vars.vendedor)
+      .replace(/\{asunto_original\}/g, vars.asunto_original)
+      .replace(/\{fecha\}/g,           vars.fecha);
+    setSelTemplate(tpl.id);
+    setSubject(subst(tpl.subject));
+    setBody(subst(tpl.body));
+  };
+
+  const handleSelectTemplate = (id) => {
+    const tpl = templates.find(t => t.id === id);
+    if (tpl) applyTpl(tpl, templates);
+  };
+
+  const handleSend = async () => {
+    if (!to.trim())      { pushToast('El destinatario (Para) es requerido', 'bad'); return; }
+    if (!subject.trim()) { pushToast('El asunto es requerido', 'bad'); return; }
+    if (!body.trim())    { pushToast('El cuerpo del email es requerido', 'bad'); return; }
+    setSending(true);
+    try {
+      const result = await CrmApi.sendQuoteEmail(quote.id, {
+        to: to.trim(),
+        cc: cc.trim(),
+        subject: subject.trim(),
+        body: body.trim(),
+        attachmentId: attachmentId || undefined,
+      });
+      pushToast(`✅ Email enviado${result.stageAdvanced ? ' · Etapa → Enviado' : ''}`, 'ok');
+      onSent && onSent(result);
+      onClose();
+    } catch (err) {
+      pushToast(err.message || 'Error al enviar email', 'bad');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const pdfAttachments = (attachments || []).filter(a =>
+    (a.filename||'').toLowerCase().endsWith('.pdf') || a.mimeType === 'application/pdf'
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-ink-900/50 backdrop-blur-[2px]" onClick={onClose}/>
+      <div className="relative bg-white rounded-2xl shadow-pop w-full max-w-xl mx-4 flex flex-col max-h-[90vh]">
+        {/* Header */}
+        <div className="px-5 py-4 border-b border-line flex items-center justify-between">
+          <div>
+            <div className="text-[11px] uppercase tracking-wider text-ink-500 font-semibold">Enviar presupuesto</div>
+            <h3 className="text-[15px] font-bold text-ink-900 mt-0.5">{quote.code}</h3>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 rounded-lg hover:bg-surface flex items-center justify-center text-ink-500">
+            <Icon name="x" size={16}/>
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto scroll-thin px-5 py-4 space-y-3">
+          {/* Template selector */}
+          {templates.length > 0 && (
+            <div>
+              <label className="text-[11px] font-semibold text-ink-600 uppercase tracking-wide mb-1 block">Plantilla</label>
+              <select className="inp w-full text-sm" value={selTemplate} onChange={e => handleSelectTemplate(e.target.value)}>
+                {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            </div>
+          )}
+
+          {/* Para */}
+          <div>
+            <label className="text-[11px] font-semibold text-ink-600 uppercase tracking-wide mb-1 block">Para *</label>
+            <input className="inp w-full text-sm" type="email" placeholder="cliente@empresa.com"
+              value={to} onChange={e => setTo(e.target.value)}/>
+          </div>
+
+          {/* CC */}
+          <div>
+            <label className="text-[11px] font-semibold text-ink-600 uppercase tracking-wide mb-1 block">CC</label>
+            <input className="inp w-full text-sm" type="text" placeholder="ventas@myselec.com.ar, ..."
+              value={cc} onChange={e => setCc(e.target.value)}/>
+          </div>
+
+          {/* Asunto */}
+          <div>
+            <label className="text-[11px] font-semibold text-ink-600 uppercase tracking-wide mb-1 block">Asunto *</label>
+            <input className="inp w-full text-sm" type="text" placeholder="Asunto del email"
+              value={subject} onChange={e => setSubject(e.target.value)}/>
+          </div>
+
+          {/* Cuerpo */}
+          <div>
+            <label className="text-[11px] font-semibold text-ink-600 uppercase tracking-wide mb-1 block">Cuerpo *</label>
+            <textarea className="inp w-full text-sm resize-y" rows={8} placeholder="Escribí el cuerpo del email..."
+              value={body} onChange={e => setBody(e.target.value)}/>
+          </div>
+
+          {/* Adjunto PDF */}
+          <div>
+            <label className="text-[11px] font-semibold text-ink-600 uppercase tracking-wide mb-1 block">Adjuntar PDF</label>
+            {pdfAttachments.length === 0 ? (
+              <div className="text-[12px] text-ink-400 px-3 py-2 border border-dashed border-line rounded-lg">
+                No hay PDFs adjuntos en esta cotización. Subí uno desde la pestaña Adjuntos.
+              </div>
+            ) : (
+              <select className="inp w-full text-sm" value={attachmentId} onChange={e => setAttachmentId(e.target.value)}>
+                <option value="">— Sin adjunto —</option>
+                {pdfAttachments.map(a => (
+                  <option key={a.id} value={a.id}>{a.filename}</option>
+                ))}
+              </select>
+            )}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="px-5 py-3 border-t border-line bg-surface flex items-center justify-end gap-2">
+          <button className="btn-ghost" onClick={onClose} disabled={sending}>Cancelar</button>
+          <button className="btn-primary" onClick={handleSend} disabled={sending}>
+            {sending ? (
+              <><span className="inline-block w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin mr-1.5"/>Enviando...</>
+            ) : (
+              <><Icon name="send" size={13}/>Enviar email</>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function QuoteDetail({ code, onClose, canReassign }) {
   const { quotes, clients, users, moveQuoteStage, setQuotes, pushToast, closeModal, openModal } = useApp();
   const q = quotes.find(x => x.code === code);
@@ -488,6 +663,7 @@ function QuoteDetail({ code, onClose, canReassign }) {
   const fileInputRef = React.useRef(null);
   const [uploading, setUploading] = useState(false);
   const [pdfPreview, setPdfPreview] = useState(null); // { url, filename }
+  const [emailModalOpen, setEmailModalOpen] = useState(false);
 
   const handleUploadFiles = async (files) => {
     if (!files || files.length === 0) return;
@@ -695,6 +871,10 @@ function QuoteDetail({ code, onClose, canReassign }) {
             <Badge tone="slate"><span className="mono">{q.flexxus}</span></Badge>
           )}
           <button className="btn-ghost"><Icon name="download" size={13}/>PDF</button>
+          <button className="btn-ghost text-brand border-brand/30 hover:bg-brand/5"
+            onClick={() => setEmailModalOpen(true)}>
+            <Icon name="send" size={13}/>Enviar
+          </button>
           {canReassign && (
             <div className="relative">
               <button className="btn-primary" onClick={()=>setStageOpen(o=>!o)}>
@@ -1383,6 +1563,26 @@ function QuoteDetail({ code, onClose, canReassign }) {
           </div>
         </div>
       </div>
+    )}
+    {emailModalOpen && (
+      <SendEmailModal
+        quote={{
+          ...q,
+          clientName:  cli?.name  || q.clientName || '',
+          clientEmail: cli?.email || '',
+          sellerName:  sel?.name  || '',
+          flexxus:     q.flexxus  || '',
+        }}
+        attachments={detailAttachments}
+        onClose={() => setEmailModalOpen(false)}
+        onSent={async () => {
+          // Refrescar quote para actualizar etapa si avanzó
+          try {
+            const fresh = await CrmApi.getQuotes();
+            setQuotes(fresh);
+          } catch (_) {}
+        }}
+      />
     )}
     </>
   );

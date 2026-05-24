@@ -253,6 +253,11 @@ const CrmApi = {
   // Attachments
   deleteAttachment: (id) => apiFetch(`/attachments/${id}`, { method: 'DELETE' }),
 
+  // Email templates
+  getEmailTemplates: () => apiFetch('/quotes/email-templates'),
+  saveEmailTemplates: (data) => apiFetch('/quotes/email-templates', { method: 'PUT', body: JSON.stringify(data) }),
+  sendQuoteEmail: (quoteId, data) => apiFetch(`/quotes/${quoteId}/send-email`, { method: 'POST', body: JSON.stringify(data) }),
+
   // Upload attachments
   uploadAttachments: (quoteId, files) => {
     const token = CrmAuth.getToken();
