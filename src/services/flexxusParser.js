@@ -104,6 +104,20 @@ function parseArFloat(s) {
   return parseFloat((s || '0').replace(/\./g, '').replace(',', '.')) || 0;
 }
 
+/**
+ * Busca un valor "U$S XXXX,XX" en la línea idx-1, idx+1 o idx misma.
+ * Necesario porque pdf-parse puede poner la etiqueta antes O después del valor
+ * dependiendo del orden de los objetos de texto en el PDF.
+ */
+function getAdjacentUsd(lines, idx) {
+  for (const i of [idx - 1, idx + 1, idx]) {
+    if (i < 0 || i >= lines.length) continue;
+    const m = lines[i].match(/U\$S\s*([\d,.]+)/);
+    if (m) return parseArFloat(m[1]);
+  }
+  return null;
+}
+
 // ─── Función principal ────────────────────────────────────────────────────────
 
 /**
@@ -182,35 +196,37 @@ async function parseFlexxusPDF(buffer) {
     result.items = parseItems(lines);
 
     // ── Breakdown de precios ──────────────────────────────────────────────────
-    // El PDF puede concatenar label+valor en la misma línea o separarlos.
-    // Manejamos ambos casos con marcador de contexto (totalMarker).
-    let totalMarker = false;
+    // IMPORTANTE: pdf-parse puede entregar la etiqueta y el valor en líneas
+    // adyacentes en cualquier orden (valor antes o después de la etiqueta).
+    // Usamos getAdjacentUsd() para buscar en línea anterior, posterior y misma.
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       let m;
-      // "Subtotal. Neto: U$S 4896,00"
-      if (!result.subtotalNeto && (m = line.match(/Subtotal[.\s]+Neto\s*:?\s*U\$S\s*([\d,.]+)/i)))
-        result.subtotalNeto = parseArFloat(m[1]);
-      // "Desc. 0,00 % : U$S 0,00"
-      if (!result.discountAmt && (m = line.match(/Desc\.\s*([\d,.]+)\s*%\s*:?\s*U\$S\s*([\d,.]+)/i))) {
-        result.discountPct = parseArFloat(m[1]);
-        result.discountAmt = parseArFloat(m[2]);
+
+      // Subtotal neto
+      if (!result.subtotalNeto && /Subtotal[\s.]+Neto/i.test(line))
+        result.subtotalNeto = getAdjacentUsd(lines, i);
+
+      // Descuento: "Desc.0,00 %:" o "Desc. 0,00 % :"
+      if (result.discountAmt == null && /Desc\./i.test(line) && /%/.test(line)) {
+        const pctM = line.match(/([\d,.]+)\s*%/);
+        if (pctM) result.discountPct = parseArFloat(pctM[1]);
+        result.discountAmt = getAdjacentUsd(lines, i) ?? 0;
       }
-      // "Total Perc.: U$S 146,88"
-      if (!result.totalPercepciones && (m = line.match(/Total\s+Perc\.?\s*:?\s*U\$S\s*([\d,.]+)/i)))
-        result.totalPercepciones = parseArFloat(m[1]);
-      // Grand total — "Total: U$S 6071,04" en la misma línea (mixed case)
-      if (!result.total && (m = line.match(/^Total\s*:\s*U\$S\s*([\d,.]+)$/)))
-        result.total = parseArFloat(m[1]);
-      // Grand total — "Total:" en una línea, "U$S 6071,04" en la siguiente
-      if (!result.total && /^Total\s*:?\s*$/.test(line)) {
-        totalMarker = true;
-      } else if (totalMarker) {
-        if (!result.total && (m = line.match(/^U\$S\s+([\d,.]+)$/)))
+
+      // Total percepciones
+      if (!result.totalPercepciones && /Total\s+Perc/i.test(line))
+        result.totalPercepciones = getAdjacentUsd(lines, i);
+
+      // Grand total — inline "Total: U$S 6071,04" o etiqueta sola "Total:"
+      if (!result.total) {
+        if ((m = line.match(/^Total\s*:\s*U\$S\s*([\d,.]+)$/)))
           result.total = parseArFloat(m[1]);
-        totalMarker = false;
+        else if (/^Total\s*:?\s*$/.test(line))
+          result.total = getAdjacentUsd(lines, i);
       }
     }
+
     // Calcular IVA si no fue parseado directamente:
     // Total = (SubtotalNeto - Descuento) + IVA + Percepciones
     // → IVA  = Total - SubtotalNeto + Descuento - Percepciones
@@ -418,13 +434,16 @@ async function parseNotaPedidoPDF(buffer) {
     }
 
     // ── Total ─────────────────────────────────────────────────────────────────
-    // El primer "U$S XXXX" suelto es el subtotal de ítems; el ÚLTIMO es el
-    // gran total (ya incluye IVA + percepciones). Por eso recorremos todo el
-    // array sin break para quedarnos con el último valor que coincida.
-    for (const line of lines) {
-      if (/^U\$S\s+[\d,.]+$/.test(line)) {
-        const m = line.match(/U\$S\s+([\d,.]+)/);
-        if (m) result.total = parseArFloat(m[1]); // sin break → prevalece el último
+    // pdf-parse puede poner "U$S 6071,04" en la línea ANTERIOR a "Total:".
+    // Usamos getAdjacentUsd() para buscar bidireccional (prev/next).
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      let m;
+      if (!result.total) {
+        if ((m = line.match(/^Total\s*:\s*U\$S\s*([\d,.]+)$/)))
+          result.total = parseArFloat(m[1]);
+        else if (/^Total\s*:?\s*$/.test(line))
+          result.total = getAdjacentUsd(lines, i);
       }
     }
 
