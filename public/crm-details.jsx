@@ -1608,6 +1608,7 @@ function OrderDetail({ code, onClose, canReassign }) {
   const [orderDetail, setOrderDetail] = useState(null); // detalle completo de la order
   const [npItems, setNpItems]         = useState([]);   // ítems de la NP (para quote-source)
   const [linkedPres, setLinkedPres]   = useState(null); // presupuesto vinculado (para quote-source)
+  const [emailModalOpen, setEmailModalOpen] = useState(false);
   const noteInputRef = React.useRef(null);
   const fileInputRef = React.useRef(null);
 
@@ -1768,6 +1769,10 @@ function OrderDetail({ code, onClose, canReassign }) {
               )}
             </div>
           )}
+          <button className="btn-ghost text-brand border-brand/30 hover:bg-brand/5"
+            onClick={() => setEmailModalOpen(true)}>
+            <Icon name="send" size={13}/>Enviar mail
+          </button>
           {CrmAuth.getUser()?.role === 'ADMIN' && (
             <button className="btn-ghost text-red-500 hover:bg-red-50 border-red-200"
               onClick={handleDeleteOrder} disabled={deleting}>
@@ -2224,6 +2229,21 @@ function OrderDetail({ code, onClose, canReassign }) {
           <iframe src={pdfPreview.url} className="w-full h-full border-0" title={pdfPreview.filename}/>
         </div>
       </div>
+    )}
+    {emailModalOpen && (
+      <SendEmailModal
+        quote={{
+          ...o,
+          clientName:  cli?.name  || o.clientName || '',
+          clientEmail: cli?.email || '',
+          sellerName:  sel?.name  || '',
+          flexxus:     o.flexxus  || '',
+          emailSubject: o.emailSubject || '',
+        }}
+        attachments={attachments}
+        onClose={() => setEmailModalOpen(false)}
+        onSent={() => {}}
+      />
     )}
     </>
   );
