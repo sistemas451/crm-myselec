@@ -295,11 +295,8 @@ function KanbanQuotes({ onOpen }) {
 function KanbanOrders({ onOpen, logisticsMode }) {
   const { orders, clients, orderFilters, openModal } = useApp();
   const filtered = applyOrderFilters(orders, orderFilters, clients);
-  // Abrir detail correcto: Quote-OC de email → quoteDetail, OC manual → orderDetail
-  const handleOpen = (code) => {
-    const item = filtered.find(i => i.code === code);
-    onOpen(code, item?._source === 'QUOTE' ? 'quote' : 'order');
-  };
+  // Siempre abrir OrderDetail — ya maneja internamente isQuoteSource para NPs por email
+  const handleOpen = (code) => onOpen(code, 'order');
   return (
     <KanbanBoard
       title={logisticsMode ? 'Órdenes en operación' : 'Órdenes de Compra'}

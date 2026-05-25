@@ -402,8 +402,8 @@ router.get('/comparativa', authMiddleware, async (req, res) => {
     const where = { mailType: 'PRESUPUESTO' };
     if (clientId) where.clientId = clientId;
     if (sellerId) where.sellerId = sellerId;
-    // quoteId puede ser un UUID (si viene de otro contexto) o un código como "COT-2026-041"
-    if (quoteId)  where.code = { contains: quoteId, mode: 'insensitive' };
+    // quoteId es un código exacto como "COT-2026-041"
+    if (quoteId)  where.code = { equals: quoteId, mode: 'insensitive' };
     if (from || to) {
       where.createdAt = {};
       if (from) where.createdAt.gte = new Date(from);

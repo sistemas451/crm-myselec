@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(netstat -ano)",
+      "Bash(node --check *)",
+      "mcp__Claude_in_Chrome__find"
+    ]
+  }
+}

@@ -410,7 +410,8 @@ router.post('/:id/notes', authMiddleware, async (req, res) => {
     // VENDEDOR solo puede agregar notas a sus propias cotizaciones
     if (req.user.role === 'VENDEDOR') {
       const q = await prisma.quote.findUnique({ where: { id: req.params.id }, select: { sellerId: true } });
-      if (q && q.sellerId !== req.user.id) return res.status(403).json({ error: 'Sin permiso sobre esta cotización' });
+      if (!q) return res.status(404).json({ error: 'Cotización no encontrada' });
+      if (q.sellerId !== req.user.id) return res.status(403).json({ error: 'Sin permiso sobre esta cotización' });
     }
 
     const note = await prisma.note.create({
@@ -466,7 +467,8 @@ router.patch('/:id/client', authMiddleware, async (req, res) => {
     // VENDEDOR solo puede asignar cliente a sus propias cotizaciones
     if (req.user.role === 'VENDEDOR') {
       const q = await prisma.quote.findUnique({ where: { id: req.params.id }, select: { sellerId: true } });
-      if (q && q.sellerId !== req.user.id) return res.status(403).json({ error: 'Sin permiso sobre esta cotización' });
+      if (!q) return res.status(404).json({ error: 'Cotización no encontrada' });
+      if (q.sellerId !== req.user.id) return res.status(403).json({ error: 'Sin permiso sobre esta cotización' });
     }
 
     const client = await prisma.client.findUnique({
@@ -621,7 +623,8 @@ router.patch('/:id/items/:itemId', authMiddleware, async (req, res) => {
     // VENDEDOR solo puede modificar ítems de sus propias cotizaciones
     if (req.user.role === 'VENDEDOR') {
       const q = await prisma.quote.findUnique({ where: { id: req.params.id }, select: { sellerId: true } });
-      if (q && q.sellerId !== req.user.id) return res.status(403).json({ error: 'Sin permiso sobre esta cotización' });
+      if (!q) return res.status(404).json({ error: 'Cotización no encontrada' });
+      if (q.sellerId !== req.user.id) return res.status(403).json({ error: 'Sin permiso sobre esta cotización' });
     }
 
     const { accepted, checked, quantity, description, sku, unitPrice } = req.body;
@@ -692,7 +695,8 @@ router.delete('/:id/items/:itemId', authMiddleware, async (req, res) => {
     // VENDEDOR solo puede eliminar ítems de sus propias cotizaciones
     if (req.user.role === 'VENDEDOR') {
       const q = await prisma.quote.findUnique({ where: { id: req.params.id }, select: { sellerId: true } });
-      if (q && q.sellerId !== req.user.id) return res.status(403).json({ error: 'Sin permiso sobre esta cotización' });
+      if (!q) return res.status(404).json({ error: 'Cotización no encontrada' });
+      if (q.sellerId !== req.user.id) return res.status(403).json({ error: 'Sin permiso sobre esta cotización' });
     }
 
     await prisma.quoteItem.delete({ where: { id: req.params.itemId } });
@@ -742,6 +746,14 @@ router.post('/:id/send-email', authMiddleware, async (req, res) => {
 
     // Modo Gmail: solo logear actividad y avanzar etapa, sin envío SMTP
     if (_gmailOnly) {
+      // Fetch quote first — valida existencia y permite check de ownership
+      const STAGES_TO_ADVANCE = ['asignada', 'armado', 'revision', 'presupuestado', 'recibida', 'oferta', 'proveedor'];
+      const quote = await prisma.quote.findUnique({ where: { id: req.params.id }, select: { stage: true, sellerId: true } });
+      if (!quote) return res.status(404).json({ error: 'Presupuesto no encontrado' });
+      if (req.user.role === 'VENDEDOR' && quote.sellerId !== req.user.id) {
+        return res.status(403).json({ error: 'Sin permiso para este presupuesto' });
+      }
+
       await prisma.activity.create({
         data: {
           action:  'EMAIL_SENT',
@@ -750,10 +762,8 @@ router.post('/:id/send-email', authMiddleware, async (req, res) => {
           quoteId: req.params.id,
         },
       });
-      const STAGES_TO_ADVANCE = ['asignada', 'armado', 'revision', 'presupuestado', 'recibida', 'oferta', 'proveedor'];
-      const quote = await prisma.quote.findUnique({ where: { id: req.params.id }, select: { stage: true } });
       let stageAdvanced = false;
-      if (quote && STAGES_TO_ADVANCE.includes(quote.stage)) {
+      if (STAGES_TO_ADVANCE.includes(quote.stage)) {
         const followUpDate = new Date();
         followUpDate.setDate(followUpDate.getDate() + 4);
         await prisma.quote.update({ where: { id: req.params.id }, data: { stage: 'enviado', followUpDate } });
