@@ -189,7 +189,7 @@ async function syncAccount(account) {
       host:        process.env.MAIL_HOST || 'imap.gmail.com',
       port:        parseInt(process.env.MAIL_PORT || '993'),
       tls:         true,
-      tlsOptions:  { rejectUnauthorized: false },
+      tlsOptions:  { rejectUnauthorized: true },
       authTimeout: 15000,   // 15s para autenticar
       connTimeout: 30000,   // 30s para conectar
     });
@@ -1418,7 +1418,7 @@ async function listRecentMails(limit = 20) {
       host:        process.env.MAIL_HOST || 'imap.gmail.com',
       port:        parseInt(process.env.MAIL_PORT || '993'),
       tls:         true,
-      tlsOptions:  { rejectUnauthorized: false },
+      tlsOptions:  { rejectUnauthorized: true },
       authTimeout: 15000,
       connTimeout: 30000,
     });
@@ -1487,7 +1487,7 @@ async function resyncQuoteEmail(quoteId) {
       host:        process.env.MAIL_HOST || 'imap.gmail.com',
       port:        parseInt(process.env.MAIL_PORT || '993'),
       tls:         true,
-      tlsOptions:  { rejectUnauthorized: false },
+      tlsOptions:  { rejectUnauthorized: true },
       authTimeout: 15000,
       connTimeout: 30000,
     });

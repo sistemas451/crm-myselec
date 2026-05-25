@@ -406,6 +406,13 @@ router.post('/:id/notes', authMiddleware, async (req, res) => {
   try {
     const text = (req.body.text || '').trim();
     if (!text) return res.status(400).json({ error: 'El texto de la nota no puede estar vacío' });
+
+    // VENDEDOR solo puede agregar notas a sus propias cotizaciones
+    if (req.user.role === 'VENDEDOR') {
+      const q = await prisma.quote.findUnique({ where: { id: req.params.id }, select: { sellerId: true } });
+      if (q && q.sellerId !== req.user.id) return res.status(403).json({ error: 'Sin permiso sobre esta cotización' });
+    }
+
     const note = await prisma.note.create({
       data: {
         text,
@@ -455,6 +462,12 @@ router.delete('/:id', authMiddleware, async (req, res) => {
 router.patch('/:id/client', authMiddleware, async (req, res) => {
   try {
     const { clientId, sellerId } = req.body;
+
+    // VENDEDOR solo puede asignar cliente a sus propias cotizaciones
+    if (req.user.role === 'VENDEDOR') {
+      const q = await prisma.quote.findUnique({ where: { id: req.params.id }, select: { sellerId: true } });
+      if (q && q.sellerId !== req.user.id) return res.status(403).json({ error: 'Sin permiso sobre esta cotización' });
+    }
 
     const client = await prisma.client.findUnique({
       where: { id: clientId },
@@ -531,6 +544,11 @@ router.patch('/:id/link', authMiddleware, async (req, res) => {
     const quote = await prisma.quote.findUnique({ where: { id: req.params.id } });
     if (!quote) return res.status(404).json({ error: 'Cotización no encontrada' });
 
+    // VENDEDOR solo puede vincular sus propias cotizaciones
+    if (req.user.role === 'VENDEDOR' && quote.sellerId !== req.user.id) {
+      return res.status(403).json({ error: 'Sin permiso sobre esta cotización' });
+    }
+
     let target = null;
     if (linkedQuoteId) {
       target = await prisma.quote.findUnique({ where: { id: linkedQuoteId } });
@@ -596,6 +614,16 @@ router.patch('/:id/link', authMiddleware, async (req, res) => {
 // PATCH /api/quotes/:id/items/:itemId — actualizar ítem (accepted, checked, quantity, description, sku, unitPrice)
 router.patch('/:id/items/:itemId', authMiddleware, async (req, res) => {
   try {
+    // Verificar que el ítem pertenece a esta cotización
+    const item = await prisma.quoteItem.findUnique({ where: { id: req.params.itemId } });
+    if (!item || item.quoteId !== req.params.id) return res.status(404).json({ error: 'Ítem no encontrado en esta cotización' });
+
+    // VENDEDOR solo puede modificar ítems de sus propias cotizaciones
+    if (req.user.role === 'VENDEDOR') {
+      const q = await prisma.quote.findUnique({ where: { id: req.params.id }, select: { sellerId: true } });
+      if (q && q.sellerId !== req.user.id) return res.status(403).json({ error: 'Sin permiso sobre esta cotización' });
+    }
+
     const { accepted, checked, quantity, description, sku, unitPrice } = req.body;
     const data = {};
     if (accepted   !== undefined) data.accepted   = accepted;
@@ -611,7 +639,6 @@ router.patch('/:id/items/:itemId', authMiddleware, async (req, res) => {
     }
     // recalcular total si cambia quantity y hay unitPrice
     if (quantity !== undefined && unitPrice === undefined) {
-      const item = await prisma.quoteItem.findUnique({ where: { id: req.params.itemId } });
       if (item?.unitPrice != null) data.total = item.unitPrice * data.quantity;
     }
     const updated = await prisma.quoteItem.update({ where: { id: req.params.itemId }, data });
@@ -626,6 +653,11 @@ router.post('/:id/items', authMiddleware, async (req, res) => {
   try {
     const quote = await prisma.quote.findUnique({ where: { id: req.params.id } });
     if (!quote) return res.status(404).json({ error: 'Cotización no encontrada' });
+
+    // VENDEDOR solo puede agregar ítems a sus propias cotizaciones
+    if (req.user.role === 'VENDEDOR' && quote.sellerId !== req.user.id) {
+      return res.status(403).json({ error: 'Sin permiso sobre esta cotización' });
+    }
 
     const { description, sku, quantity = 1, unit, unitPrice } = req.body;
     if (!description) return res.status(400).json({ error: 'description es requerida' });
@@ -653,6 +685,16 @@ router.post('/:id/items', authMiddleware, async (req, res) => {
 // DELETE /api/quotes/:id/items/:itemId — eliminar ítem definitivamente
 router.delete('/:id/items/:itemId', authMiddleware, async (req, res) => {
   try {
+    // Verificar que el ítem pertenece a esta cotización (evita IDOR cross-quote)
+    const item = await prisma.quoteItem.findUnique({ where: { id: req.params.itemId } });
+    if (!item || item.quoteId !== req.params.id) return res.status(404).json({ error: 'Ítem no encontrado en esta cotización' });
+
+    // VENDEDOR solo puede eliminar ítems de sus propias cotizaciones
+    if (req.user.role === 'VENDEDOR') {
+      const q = await prisma.quote.findUnique({ where: { id: req.params.id }, select: { sellerId: true } });
+      if (q && q.sellerId !== req.user.id) return res.status(403).json({ error: 'Sin permiso sobre esta cotización' });
+    }
+
     await prisma.quoteItem.delete({ where: { id: req.params.itemId } });
     res.json({ ok: true });
   } catch (err) {
