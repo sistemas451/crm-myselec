@@ -1000,21 +1000,31 @@ function SearchPaletteModal() {
   const norm = (s='') => s.toLowerCase();
   const query = norm(q);
 
-  const matchedQuotes = !query ? quotes.slice(0,3) :
+  const matchedQuotes = !query ? [] :
     quotes.filter(x => norm(x.code).includes(query)
-      || norm(clients.find(c=>c.code===x.client)?.name||'').includes(query)
+      || norm(x.clientName||'').includes(query)
       || norm(x.flexxus||'').includes(query)
-      || norm(x.mailSubject||'').includes(query)
-      || norm(x.mailType||'').includes(query)
+      || norm(x.emailSubject||'').includes(query)
+    ).slice(0,6);
+  const matchedClients = !query ? [] :
+    clients.filter(c => norm(c.name).includes(query) || norm(c.cuit||'').includes(query)
+      || norm(c.code||'').includes(query) || norm(c.email||'').includes(query)).slice(0,5);
+  const matchedOrders = !query ? [] :
+    orders.filter(o => norm(o.code).includes(query)
+      || norm(o.clientName||clients.find(c=>c.code===o.client)?.name||'').includes(query)
+      || norm(o.flexxus||'').includes(query)
     ).slice(0,5);
-  const matchedClients = !query ? clients.slice(0,3) :
-    clients.filter(c => norm(c.name).includes(query) || norm(c.cuit).includes(query) || norm(c.city).includes(query) || norm(c.email||'').includes(query)).slice(0,5);
-  const matchedOrders = !query ? orders.slice(0,3) :
-    orders.filter(o => norm(o.code).includes(query) || norm(clients.find(c=>c.code===o.client)?.name||'').includes(query)).slice(0,5);
+
+  const hasResults = matchedQuotes.length + matchedClients.length + matchedOrders.length > 0;
 
   const go = (ref) => {
     closeModal();
     openModal(ref.kind==='quote'?'quoteDetail':'orderDetail', { code: ref.code });
+  };
+
+  const goClient = (c) => {
+    closeModal();
+    setTimeout(() => openModal('editClient', { clientId: c.id }), 50);
   };
 
   return (
@@ -1053,12 +1063,12 @@ function SearchPaletteModal() {
             <div className="p-2 border-t border-line">
               <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider font-semibold text-ink-500">Clientes</div>
               {matchedClients.map(c => (
-                <button key={c.code} onClick={closeModal}
+                <button key={c.code} onClick={() => goClient(c)}
                   className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-surface text-left">
                   <Icon name="building-2" size={15} className="text-ink-500"/>
                   <div className="flex-1 min-w-0">
                     <div className="text-[13px] font-semibold truncate">{c.name}</div>
-                    <div className="text-[11px] text-ink-500">{c.city}, {c.prov} · <span className="mono">{c.cuit}</span></div>
+                    <div className="text-[11px] text-ink-500">{[c.city, c.prov].filter(Boolean).join(', ')}{c.cuit ? ` · ${c.cuit}` : ''}</div>
                   </div>
                   <span className="mono text-[11px] text-ink-400">{c.code}</span>
                 </button>
@@ -1085,7 +1095,14 @@ function SearchPaletteModal() {
               })}
             </div>
           )}
-          {matchedQuotes.length+matchedClients.length+matchedOrders.length === 0 && (
+          {!query && (
+            <div className="py-10 text-center space-y-1">
+              <Icon name="search" size={22} className="text-ink-300 mx-auto"/>
+              <div className="text-[13px] text-ink-400 mt-2">Buscá por código, cliente, NP o asunto</div>
+              <div className="text-[11px] text-ink-300">Cotizaciones · Órdenes · Clientes</div>
+            </div>
+          )}
+          {query && !hasResults && (
             <div className="py-12 text-center text-ink-500 text-[13px]">
               Sin resultados para "<b>{q}</b>"
             </div>

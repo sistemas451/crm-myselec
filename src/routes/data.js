@@ -307,32 +307,37 @@ router.get('/charts/monthly', authMiddleware, async (req, res) => {
   }
 });
 
-// GET /data/alerts — presupuestos en etapa "enviado" sin movimiento por X días
-// Acepta: ?sellerId=&threshold=3
+// GET /data/alerts — presupuestos en etapa "enviado" cuyo followUpDate ya venció
+// Acepta: ?sellerId=
 router.get('/alerts', authMiddleware, async (req, res) => {
   try {
-    const { sellerId, threshold = 3 } = req.query;
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - parseInt(threshold));
-    const where = { stage: 'enviado', updatedAt: { lte: cutoff } };
+    const { sellerId } = req.query;
+    const now = new Date();
+    const where = {
+      stage: 'enviado',
+      followUpDate: { lte: now },   // solo los que tienen fecha de seguimiento vencida
+    };
     if (sellerId) where.sellerId = sellerId;
+    if (req.user.role === 'VENDEDOR') where.sellerId = req.user.id;
     const quotes = await prisma.quote.findMany({
       where,
-      orderBy: { updatedAt: 'asc' },
+      orderBy: { followUpDate: 'asc' },
       include: {
         client: { select: { name: true } },
         seller: { select: { name: true } },
       },
       take: 30,
     });
-    const now = new Date();
     res.json(quotes.map(q => ({
       id:          q.id,
       code:        q.code,
       clientName:  q.client?.name  || '—',
       sellerName:  q.seller?.name  || '—',
       amount:      q.amount,
-      daysWaiting: Math.floor((now - new Date(q.updatedAt)) / (1000 * 60 * 60 * 24)),
+      followUpDate: q.followUpDate?.toISOString() || null,
+      daysWaiting: q.followUpDate
+        ? Math.floor((now - new Date(q.followUpDate)) / (1000 * 60 * 60 * 24))
+        : 0,
     })));
   } catch (err) {
     res.status(500).json({ error: err.message });

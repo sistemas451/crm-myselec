@@ -23,12 +23,17 @@ function QuoteCard({ q, onOpen, compact }) {
   const cli = clients.find(c=>c.code===q.client);
   const sel = users.find(u=>u.id===q.seller);
   const overdue = q.dias >= 5 && !['aceptada','rechazada'].includes(q.stage);
+  // Seguimiento vencido: está en "enviado" y el followUpDate ya pasó
+  const followUpOverdue = q.stage === 'enviado' && q.followUpDate && new Date(q.followUpDate) <= new Date();
+  const followUpDays = followUpOverdue
+    ? Math.floor((Date.now() - new Date(q.followUpDate)) / (1000*60*60*24))
+    : 0;
   const displayName = cli?.name || q.emailSubject || 'Sin cliente asignado';
   const displaySub  = cli ? `${cli.city || ''}${cli.city && cli.prov ? ', ' : ''}${cli.prov || ''}` : 'Cliente por asignar';
   return (
     <div
       onClick={onOpen}
-      className="kcard bg-white border border-line rounded-lg p-3 cursor-pointer"
+      className={`kcard bg-white border rounded-lg p-3 cursor-pointer ${followUpOverdue ? 'border-amber-300 ring-1 ring-amber-200' : 'border-line'}`}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="mono text-[11px] font-semibold text-navy-900">{q.code}</div>
@@ -37,7 +42,13 @@ function QuoteCard({ q, onOpen, compact }) {
           {q.mailType === 'PRESUPUESTO' && <Badge tone="blue">PRES</Badge>}
           {q.mailType === 'OC'          && <Badge tone="purple">OC</Badge>}
           {q.flexxus && <Badge tone="slate">{q.flexxus}</Badge>}
-          {overdue && <Badge tone="red" dot>{q.dias}d</Badge>}
+          {followUpOverdue && (
+            <span title={`Sin respuesta hace ${followUpDays}d`}
+              className="inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-300">
+              ⏰ {followUpDays}d
+            </span>
+          )}
+          {!followUpOverdue && overdue && <Badge tone="red" dot>{q.dias}d</Badge>}
         </div>
       </div>
       <div className="text-[13px] font-semibold text-ink-900 mt-1 leading-snug truncate">{displayName}</div>

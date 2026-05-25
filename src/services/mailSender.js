@@ -271,7 +271,9 @@ async function sendQuoteEmail(quoteId, opts) {
   const quote = await prisma.quote.findUnique({ where: { id: quoteId }, select: { stage: true } });
   let stageAdvanced = false;
   if (quote && STAGES_TO_ADVANCE.includes(quote.stage)) {
-    await prisma.quote.update({ where: { id: quoteId }, data: { stage: 'enviado' } });
+    const followUpDate = new Date();
+    followUpDate.setDate(followUpDate.getDate() + 4); // alerta en 4 días si no hay respuesta
+    await prisma.quote.update({ where: { id: quoteId }, data: { stage: 'enviado', followUpDate } });
     await prisma.activity.create({
       data: {
         action: 'STAGE_CHANGE',
