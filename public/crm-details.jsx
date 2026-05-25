@@ -457,8 +457,7 @@ function SendEmailModal({ quote, attachments, onClose, onSent }) {
   const [cc, setCc]                     = React.useState('');
   const [subject, setSubject]           = React.useState('');
   const [body, setBody]                 = React.useState('');
-  const [attachmentId, setAttachmentId] = React.useState('');
-  const [sending, setSending]           = React.useState(false);
+  const [sending, setSending] = React.useState(false);
 
   // Cargar plantillas y CC default al abrir
   React.useEffect(() => {
@@ -469,9 +468,6 @@ function SendEmailModal({ quote, attachments, onClose, onSent }) {
     }).catch(() => {});
     // Pre-fill destinatario con email del cliente
     if (quote.clientEmail) setTo(quote.clientEmail);
-    // Pre-seleccionar primer PDF adjunto si hay
-    const pdfAtt = (attachments || []).find(a => (a.filename||'').toLowerCase().endsWith('.pdf') || a.mimeType === 'application/pdf');
-    if (pdfAtt) setAttachmentId(pdfAtt.id);
   }, []);
 
   const buildVars = (tpls) => {
@@ -507,32 +503,43 @@ function SendEmailModal({ quote, attachments, onClose, onSent }) {
     if (tpl) applyTpl(tpl, templates);
   };
 
-  const handleSend = async () => {
+  // Construye la URL de Gmail compose con todos los campos pre-cargados
+  const buildGmailUrl = () => {
+    const params = new URLSearchParams();
+    if (to.trim())      params.set('to', to.trim());
+    if (cc.trim())      params.set('cc', cc.trim());
+    if (subject.trim()) params.set('su', subject.trim());
+    if (body.trim())    params.set('body', body.trim());
+    params.set('view', 'cm');
+    params.set('fs', '1');
+    return `https://mail.google.com/mail/?${params.toString()}`;
+  };
+
+  const handleOpenGmail = async () => {
     if (!to.trim())      { pushToast('El destinatario (Para) es requerido', 'bad'); return; }
     if (!subject.trim()) { pushToast('El asunto es requerido', 'bad'); return; }
-    if (!body.trim())    { pushToast('El cuerpo del email es requerido', 'bad'); return; }
+    if (!body.trim())    { pushToast('El cuerpo es requerido', 'bad'); return; }
+
+    // Abrir Gmail en nueva pestaña
+    window.open(buildGmailUrl(), '_blank');
+
+    // Registrar actividad y avanzar etapa en background
     setSending(true);
     try {
       const result = await CrmApi.sendQuoteEmail(quote.id, {
-        to: to.trim(),
-        cc: cc.trim(),
-        subject: subject.trim(),
-        body: body.trim(),
-        attachmentId: attachmentId || undefined,
+        to: to.trim(), cc: cc.trim(),
+        subject: subject.trim(), body: body.trim(),
+        _gmailOnly: true,  // indicador — el servidor igual logea y avanza etapa
       });
-      pushToast(`✅ Email enviado${result.stageAdvanced ? ' · Etapa → Enviado' : ''}`, 'ok');
+      pushToast(`Gmail abierto${result.stageAdvanced ? ' · Etapa → Enviado' : ''}`, 'ok');
       onSent && onSent(result);
-      onClose();
-    } catch (err) {
-      pushToast(err.message || 'Error al enviar email', 'bad');
+    } catch (_) {
+      // No bloqueamos si falla el log — el mail ya se abrió
     } finally {
       setSending(false);
     }
+    onClose();
   };
-
-  const pdfAttachments = (attachments || []).filter(a =>
-    (a.filename||'').toLowerCase().endsWith('.pdf') || a.mimeType === 'application/pdf'
-  );
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -589,33 +596,21 @@ function SendEmailModal({ quote, attachments, onClose, onSent }) {
               value={body} onChange={e => setBody(e.target.value)}/>
           </div>
 
-          {/* Adjunto PDF */}
-          <div>
-            <label className="text-[11px] font-semibold text-ink-600 uppercase tracking-wide mb-1 block">Adjuntar PDF</label>
-            {pdfAttachments.length === 0 ? (
-              <div className="text-[12px] text-ink-400 px-3 py-2 border border-dashed border-line rounded-lg">
-                No hay PDFs adjuntos en esta cotización. Subí uno desde la pestaña Adjuntos.
-              </div>
-            ) : (
-              <select className="inp w-full text-sm" value={attachmentId} onChange={e => setAttachmentId(e.target.value)}>
-                <option value="">— Sin adjunto —</option>
-                {pdfAttachments.map(a => (
-                  <option key={a.id} value={a.id}>{a.filename}</option>
-                ))}
-              </select>
-            )}
+          {/* Nota adjunto */}
+          <div className="flex items-start gap-2 px-3 py-2.5 bg-amber-50 border border-amber-200 rounded-lg text-[12px] text-amber-800">
+            <Icon name="info" size={13} className="shrink-0 mt-0.5 text-amber-500"/>
+            <span>El adjunto (PDF) lo tenés que agregar desde Gmail una vez que se abra. Podés descargarlo desde la pestaña <strong>Adjuntos</strong>.</span>
           </div>
         </div>
 
         {/* Footer */}
         <div className="px-5 py-3 border-t border-line bg-surface flex items-center justify-end gap-2">
           <button className="btn-ghost" onClick={onClose} disabled={sending}>Cancelar</button>
-          <button className="btn-primary" onClick={handleSend} disabled={sending}>
-            {sending ? (
-              <><span className="inline-block w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin mr-1.5"/>Enviando...</>
-            ) : (
-              <><Icon name="send" size={13}/>Enviar email</>
-            )}
+          <button className="btn-primary" onClick={handleOpenGmail} disabled={sending}>
+            {sending
+              ? <><span className="inline-block w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin mr-1.5"/>Abriendo...</>
+              : <><Icon name="external-link" size={13}/>Abrir en Gmail</>
+            }
           </button>
         </div>
       </div>
@@ -870,10 +865,9 @@ function QuoteDetail({ code, onClose, canReassign }) {
           {q.flexxus && (
             <Badge tone="slate"><span className="mono">{q.flexxus}</span></Badge>
           )}
-          <button className="btn-ghost"><Icon name="download" size={13}/>PDF</button>
           <button className="btn-ghost text-brand border-brand/30 hover:bg-brand/5"
             onClick={() => setEmailModalOpen(true)}>
-            <Icon name="send" size={13}/>Enviar
+            <Icon name="send" size={13}/>Enviar mail
           </button>
           {canReassign && (
             <div className="relative">
