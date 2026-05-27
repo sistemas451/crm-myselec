@@ -30,6 +30,10 @@ const { parseFlexxusPDF, isFlexxusPDF } = require('./services/flexxusParser');
 const app  = express();
 const PORT = process.env.PORT || 3000;
 
+// ── Trust proxy — necesario en Railway (reverse proxy) ───────────────────────
+// Sin esto express-rate-limit lanza ERR_ERL_UNEXPECTED_X_FORWARDED_FOR
+app.set('trust proxy', 1);
+
 // ── Seguridad HTTP (headers) ──────────────────────────────────────────────────
 // Babel Standalone + Tailwind CDN requieren 'unsafe-eval' y scripts externos.
 app.use(helmet({

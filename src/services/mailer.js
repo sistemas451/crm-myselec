@@ -9,13 +9,16 @@ function smtpHost() {
 let _transporter = null;
 function getTransporter() {
   if (_transporter) return _transporter;
+  // Puerto 465 (SSL) en lugar de 587 (STARTTLS) — Railway bloquea el 587 saliente.
+  // Gmail soporta ambos; con 465 + secure:true no se hace upgrade TLS, la conexión
+  // es cifrada desde el inicio y más compatible con firewalls de cloud providers.
   _transporter = nodemailer.createTransport({
     host: smtpHost(),
-    port: 587,
-    secure: false,
-    connectionTimeout: 10000, // 10s — evita que un SMTP lento cuelgue la app
-    greetingTimeout: 10000,
-    socketTimeout: 15000,
+    port: 465,
+    secure: true,             // SSL desde el inicio (puerto 465)
+    connectionTimeout: 15000, // 15s
+    greetingTimeout: 15000,
+    socketTimeout: 20000,
     auth: {
       user: process.env.MAIL_USER,
       pass: process.env.MAIL_PASSWORD,
