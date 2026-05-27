@@ -24,6 +24,12 @@ async function apiFetch(path, options = {}) {
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
 
   if (res.status === 401) {
+    // Si es el endpoint de auth (login, forgot-password, etc.), NO recargar —
+    // dejar que el formulario muestre el error inline.
+    if (path.startsWith('/auth/')) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || 'Credenciales inválidas');
+    }
     CrmAuth.clearToken();
     window.location.reload();
     throw new Error('Sesión expirada');

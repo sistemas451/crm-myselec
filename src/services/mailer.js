@@ -13,6 +13,9 @@ function getTransporter() {
     host: smtpHost(),
     port: 587,
     secure: false,
+    connectionTimeout: 10000, // 10s — evita que un SMTP lento cuelgue la app
+    greetingTimeout: 10000,
+    socketTimeout: 15000,
     auth: {
       user: process.env.MAIL_USER,
       pass: process.env.MAIL_PASSWORD,

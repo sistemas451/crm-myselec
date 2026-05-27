@@ -147,9 +147,12 @@ router.post('/forgot-password', async (req, res) => {
     await prisma.passwordResetToken.create({ data: { token, userId: user.id, expiresAt } });
 
     const baseUrl = process.env.APP_URL || `http://localhost:${process.env.PORT || 3000}`;
-    await sendPasswordReset(email, `${baseUrl}/?reset=${token}`);
 
+    // Responder inmediatamente — el mail se envía en background para no bloquear la UI
     res.json({ ok: true });
+    sendPasswordReset(email, `${baseUrl}/?reset=${token}`).catch(err => {
+      console.error('forgot-password mail error:', err.message);
+    });
   } catch (err) {
     console.error('forgot-password error:', err);
     res.status(500).json({ error: 'Error al enviar mail de recuperación' });
