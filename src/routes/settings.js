@@ -7,6 +7,7 @@ const router = express.Router();
 const DEFAULTS = {
   mail_sync_interval_hours: '2',
   mail_lookback_days:       '2',
+  mail_sync_enabled:        'true',
 };
 
 // GET /api/settings — devuelve todos los settings con defaults

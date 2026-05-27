@@ -286,9 +286,18 @@ app.listen(PORT, () => {
   // Sync automático de mails — intervalo configurable desde AppSetting
   async function scheduleMailSync() {
     try {
-      const setting = await prisma.appSetting.findUnique({ where: { key: 'mail_sync_interval_hours' } });
-      const hours   = parseFloat(setting?.value || '2');
+      const [settingInterval, settingEnabled] = await Promise.all([
+        prisma.appSetting.findUnique({ where: { key: 'mail_sync_interval_hours' } }),
+        prisma.appSetting.findUnique({ where: { key: 'mail_sync_enabled' } }),
+      ]);
+      const hours   = parseFloat(settingInterval?.value || '2');
+      const enabled = settingEnabled?.value !== 'false'; // default true
       const ms      = Math.max(0.25, hours) * 60 * 60 * 1000; // mínimo 15 min
+      if (!enabled) {
+        console.log(`📧 Mail sync automático DESACTIVADO — reintentando en ${hours}h`);
+        setTimeout(scheduleMailSync, ms);
+        return;
+      }
       console.log(`📧 Mail sync automático cada ${hours}h`);
       setTimeout(async () => {
         console.log('📧 Auto-sync de mails...');

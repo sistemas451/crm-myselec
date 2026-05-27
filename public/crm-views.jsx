@@ -1608,7 +1608,7 @@ function Config() {
 
   // Mail state
   const [mailAccounts,  setMailAccounts]  = useState([]);
-  const [mailSettings,  setMailSettings]  = useState({ mail_sync_interval_hours: '2', mail_lookback_days: '2' });
+  const [mailSettings,  setMailSettings]  = useState({ mail_sync_interval_hours: '2', mail_lookback_days: '2', mail_sync_enabled: 'true' });
   const [mailLoading,   setMailLoading]   = useState(false);
   const [mailSyncing,   setMailSyncing]   = useState({}); // { [email]: true/false }
   const [mailSyncingAll, setMailSyncingAll] = useState(false);
@@ -1744,7 +1744,7 @@ function Config() {
     }
   };
 
-  const UNIT_MULT = { días: 24, semanas: 168, meses: 720 };
+  const UNIT_MULT = { horas: 1, días: 24, semanas: 168, meses: 720 };
 
   const handleUpdateMaxHours = async (stage, hours) => {
     if (hours === stage.maxHours) return;
@@ -1910,6 +1910,7 @@ function Config() {
                     ))}
                     className="inp text-xs py-1 pl-2 pr-6 w-auto"
                   >
+                    <option value="horas">hs.</option>
                     <option value="días">días</option>
                     <option value="semanas">sem.</option>
                     <option value="meses">meses</option>
@@ -1971,8 +1972,21 @@ function Config() {
 
           {/* ── Configuración de sync ─────────────────────────── */}
           <div className="bg-white border border-line rounded-xl p-5">
-            <div className="text-sm font-semibold mb-4">Configuración de sincronización</div>
-            <div className="grid grid-cols-2 gap-4 mb-4">
+            <div className="flex items-center justify-between mb-4">
+              <div className="text-sm font-semibold">Configuración de sincronización</div>
+              <button
+                onClick={() => setMailSettings(s => ({ ...s, mail_sync_enabled: s.mail_sync_enabled === 'false' ? 'true' : 'false' }))}
+                className="flex items-center gap-2 text-[12px] text-ink-600 select-none"
+              >
+                <span className={cx('text-[11px] font-medium', mailSettings.mail_sync_enabled === 'false' ? 'text-ink-400' : 'text-emerald-600')}>
+                  {mailSettings.mail_sync_enabled === 'false' ? 'Desactivado' : 'Activado'}
+                </span>
+                <div className={cx('w-10 h-5 rounded-full relative transition-colors', mailSettings.mail_sync_enabled === 'false' ? 'bg-ink-300' : 'bg-emerald-500')}>
+                  <div className={cx('absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all', mailSettings.mail_sync_enabled === 'false' ? 'left-0.5' : 'left-[22px]')}/>
+                </div>
+              </button>
+            </div>
+            <div className={cx('grid grid-cols-2 gap-4 mb-4 transition-opacity', mailSettings.mail_sync_enabled === 'false' ? 'opacity-40 pointer-events-none' : '')}>
               <div>
                 <label className="block text-[12px] text-ink-500 mb-1">Frecuencia automática</label>
                 <select className="inp text-[13px]" value={mailSettings.mail_sync_interval_hours}

@@ -983,25 +983,11 @@ function SyncResultModal({ result, onClose }) {
 function Topbar({ user, roleKey, setRoleKey }) {
   const { notifications, openModal, pushToast } = useApp();
   const [notifOpen, setNotifOpen] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [syncResult, setSyncResult] = useState(null); // muestra el modal de resultado
   const _authUser = CrmAuth.getUser();
   const _jwt = decodeJwtPayload(CrmAuth.getToken());
   const loggedUser = _authUser || _jwt; // JWT como fallback si crm_user no está guardado
   const isAdmin = loggedUser?.role === 'ADMIN';
   const unreadCount = notifications.filter(n => !n.read).length;
-
-  const handleSync = async () => {
-    setSyncing(true);
-    try {
-      const result = await CrmApi.syncMail();
-      setSyncResult(result); // abre el modal con el detalle
-    } catch (err) {
-      pushToast('Error al sincronizar: ' + err.message, 'bad');
-    } finally {
-      setSyncing(false);
-    }
-  };
 
   const handleLogout = () => {
     CrmAuth.clearToken();
@@ -1033,14 +1019,6 @@ function Topbar({ user, roleKey, setRoleKey }) {
         <kbd className="ml-2 text-[10px] font-mono px-1.5 py-0.5 rounded border border-line bg-white text-ink-500">⌘K</kbd>
       </button>
 
-      {roleKey === 'admin' && (
-        <button onClick={handleSync} disabled={syncing}
-          className="inline-flex items-center gap-2 px-3 h-9 rounded-lg bg-brand/10 hover:bg-brand/20 text-brand text-xs font-medium border border-brand/20 transition-colors">
-          <Icon name="mail" size={14}/>
-          {syncing ? 'Sincronizando...' : 'Sincronizar Mail'}
-        </button>
-      )}
-
       <div className="relative">
         <button onClick={()=>setNotifOpen(o=>!o)}
           className="relative w-9 h-9 rounded-lg hover:bg-surface flex items-center justify-center text-ink-700">
@@ -1057,8 +1035,6 @@ function Topbar({ user, roleKey, setRoleKey }) {
         <Icon name="log-out" size={15}/>
       </button>
 
-      {/* Modal resultado de sincronización */}
-      {syncResult && <SyncResultModal result={syncResult} onClose={() => setSyncResult(null)}/>}
     </header>
   );
 }
