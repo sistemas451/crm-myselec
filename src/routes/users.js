@@ -215,6 +215,23 @@ router.patch('/:id/toggle', authMiddleware, adminOnly, async (req, res) => {
       }
     }
 
+    // Al desactivar un vendedor, advertir si tiene cotizaciones abiertas
+    if (user.active && user.role === 'VENDEDOR' && !req.body.forceDeactivate) {
+      const openQuotes = await prisma.quote.count({
+        where: {
+          sellerId: req.params.id,
+          stage: { notIn: ['aceptada', 'rechazada'] },
+        },
+      });
+      if (openQuotes > 0) {
+        return res.status(409).json({
+          error: `${user.name} tiene ${openQuotes} cotización(es) activa(s). ¿Confirmar desactivación?`,
+          openQuotes,
+          requiresConfirmation: true,
+        });
+      }
+    }
+
     const updated = await prisma.user.update({
       where: { id: req.params.id },
       data: { active: !user.active },

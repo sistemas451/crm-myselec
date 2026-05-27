@@ -362,9 +362,9 @@ router.delete('/:id', authMiddleware, async (req, res) => {
       return res.status(403).json({ error: 'Solo administradores pueden eliminar órdenes' });
     }
 
-    // ¿Es una NOTA_PEDIDO (Quote)?
+    // ¿Es una NOTA_PEDIDO u OC de email (Quote-source)?
     const npQuote = await prisma.quote.findFirst({
-      where: { id: req.params.id, mailType: 'NOTA_PEDIDO' },
+      where: { id: req.params.id, mailType: { in: ['NOTA_PEDIDO', 'OC'] } },
       select: { id: true, code: true, linkedQuoteId: true },
     });
 

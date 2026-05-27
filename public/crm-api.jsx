@@ -307,7 +307,7 @@ async function loadAllData() {
       activity: c.activity || '',
       seller: c.defaultSellerId || '',
       sellerName: c.defaultSeller?.name || '',
-      email: c.email || '',
+      email: c.emailPrimary || c.email || '',
       phone: c.phone || '',
       address: c.address || '',
     }));

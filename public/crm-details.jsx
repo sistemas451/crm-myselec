@@ -1162,8 +1162,8 @@ function QuoteDetail({ code, onClose, canReassign }) {
           <Field label="Cod. Flexxus NP" mono value={q.flexxus || '—'}/>
           <Field label="Zona de entrega" value={cli?.zone || '—'}/>
           <Field label="Contacto">
-            {(cli?.email || q.emailFrom)
-              ? <a href={`mailto:${cli?.email || q.emailFrom}`} className="text-brand hover:underline text-[12.5px] truncate block">{cli?.email || q.emailFrom}</a>
+            {cli?.email
+              ? <a href={`mailto:${cli.email}`} className="text-brand hover:underline text-[12.5px] truncate block">{cli.email}</a>
               : <span className="text-[12.5px]">—</span>}
           </Field>
         </div>
@@ -1228,7 +1228,10 @@ function QuoteDetail({ code, onClose, canReassign }) {
               </div>
             </div>
             <button className="btn-ghost text-[12px] py-1 px-2.5 shrink-0"
-              onClick={() => openModal('quoteDetail', { code: linked.code })}>
+              onClick={() => openModal(
+                (linked.mailType === 'NOTA_PEDIDO' || linked.mailType === 'OC') ? 'orderDetail' : 'quoteDetail',
+                { code: linked.code }
+              )}>
               Ver <Icon name="arrow-right" size={11}/>
             </button>
           </div>
@@ -1728,9 +1731,11 @@ function OrderDetail({ code, onClose, canReassign }) {
     setUploading(true);
     try {
       const fn = isQuoteSource ? CrmApi.uploadAttachments : CrmApi.uploadOrderAttachments;
-      const created = await fn(o.id, Array.from(files));
-      setAtts(prev => [...prev, ...created]);
-      pushToast(`${created.length} archivo${created.length > 1 ? 's' : ''} subido${created.length > 1 ? 's' : ''}`);
+      const result = await fn(o.id, Array.from(files));
+      // Both endpoints return { attachments: [...], flexxusParsed/npParsed } — unwrap safely
+      const newAtts = Array.isArray(result) ? result : (result.attachments || []);
+      setAtts(prev => [...prev, ...newAtts]);
+      pushToast(`${newAtts.length} archivo${newAtts.length > 1 ? 's' : ''} subido${newAtts.length > 1 ? 's' : ''}`);
     } catch (err) {
       pushToast(err.message || 'Error al subir archivo', 'bad');
     } finally {

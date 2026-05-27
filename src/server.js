@@ -10,11 +10,13 @@ for (const key of REQUIRED_ENV) {
   }
 }
 
-const express = require('express');
-const cors    = require('cors');
-const path    = require('path');
-const multer  = require('multer');
-const prisma  = require('./db');
+const express   = require('express');
+const cors      = require('cors');
+const path      = require('path');
+const multer    = require('multer');
+const helmet    = require('helmet');
+const rateLimit = require('express-rate-limit');
+const prisma    = require('./db');
 const { authMiddleware } = require('./middleware/auth');
 const { runIdleCheck } = require('./services/notifier');
 const { syncMails }    = require('./services/mailReader');
@@ -22,6 +24,35 @@ const { parseFlexxusPDF, isFlexxusPDF } = require('./services/flexxusParser');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
+
+// ── Seguridad HTTP (headers) ──────────────────────────────────────────────────
+// Babel Standalone + Tailwind CDN requieren 'unsafe-eval' y scripts externos.
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+      'script-src': [
+        "'self'",
+        'https://unpkg.com',
+        'https://cdn.tailwindcss.com',
+        'https://fonts.googleapis.com',
+        "'unsafe-eval'",   // necesario para Babel Standalone en browser
+      ],
+      'style-src':  ["'self'", 'https://fonts.googleapis.com', "'unsafe-inline'"],
+      'font-src':   ["'self'", 'https://fonts.gstatic.com'],
+      'img-src':    ["'self'", 'data:', 'blob:'],
+    },
+  },
+}));
+
+// ── Rate limiting en endpoints de autenticación ───────────────────────────────
+const authLimiter = rateLimit({
+  windowMs:        15 * 60 * 1000,  // 15 minutos
+  max:             15,               // máx 15 intentos por IP por ventana
+  standardHeaders: true,
+  legacyHeaders:   false,
+  message:         { error: 'Demasiados intentos. Esperá 15 minutos antes de reintentar.' },
+});
 
 // Middleware
 app.use(cors({
@@ -37,6 +68,8 @@ app.use(express.static(path.join(__dirname, '..', 'public')));
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 
 // API Routes
+app.use('/api/auth/login',          authLimiter);
+app.use('/api/auth/forgot-password', authLimiter);
 app.use('/api/auth',          require('./routes/auth'));
 app.use('/api/users',         require('./routes/users'));
 app.use('/api/quotes',        require('./routes/quotes'));

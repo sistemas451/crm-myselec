@@ -3,6 +3,7 @@ const { simpleParser } = require('mailparser');
 const fs = require('fs');
 const path = require('path');
 const { parseFlexxusPDF, isFlexxusPDF, isNotaPedidoPDF, parseNotaPedidoPDF } = require('./flexxusParser');
+const { sendMail } = require('./mailer');
 
 const prisma = require('../db');
 
@@ -556,12 +557,16 @@ async function processNotaPedido(parsed, mailData, att, imap) {
   const code = await nextCode(prisma.quote, 'COT-2026');
   const npTotal = npData.total || (npData.items.reduce((s, i) => s + (i.total || 0), 0) || null);
 
+  // Etapa de entrada configurable para NP
+  const npStageSetting = await prisma.appSetting.findUnique({ where: { key: 'default_stage_nota_pedido' } });
+  const npEntryStage = npStageSetting?.value || 'np_enviada';
+
   const quote = await prisma.quote.create({
     data: {
       code,
       clientId:       client?.id || presupuesto?.clientId || null,
       sellerId:       presupuesto?.sellerId || client?.defaultSellerId || null,
-      stage:          'np_enviada',
+      stage:          npEntryStage,
       source:         'EMAIL',
       mailType:       'NOTA_PEDIDO',
       flexxusCode:    npData.npCode,
@@ -1236,12 +1241,20 @@ async function processEmail(mailData, imap) {
       : null;
     const flexxusGrandTotal = flexxusData?.total || itemsSubtotal; // total con IVA del PDF
 
+    // Leer etapas de entrada configurables
+    const stageSettings = await prisma.appSetting.findMany({
+      where: { key: { in: ['default_stage_solicitud', 'default_stage_presupuesto'] } },
+    }).then(rows => Object.fromEntries(rows.map(r => [r.key, r.value])));
+    const entryStage = mailType === 'PRESUPUESTO'
+      ? (stageSettings.default_stage_presupuesto || 'enviado')
+      : (stageSettings.default_stage_solicitud   || 'recibida');
+
     const quote = await prisma.quote.create({
       data: {
         code,
         clientId:          client?.id || null,
         sellerId:          sellerId,
-        stage:             mailType === 'PRESUPUESTO' ? 'enviado' : (client ? 'asignada' : 'recibida'),
+        stage:             entryStage,
         source:            'EMAIL',
         mailType,
         flexxusCode:       flexxusData?.npCode || null,
@@ -1375,6 +1388,44 @@ async function processEmail(mailData, imap) {
         quoteId: quote.id,
       },
     });
+
+    // ── FL4: notificar admins cuando no se pudo asignar cliente ─────────────
+    if (!client) {
+      try {
+        const admins = await prisma.user.findMany({
+          where: { role: 'ADMIN', active: true },
+          select: { email: true, name: true },
+        });
+        const baseUrl = process.env.APP_URL || `http://localhost:${process.env.PORT || 3000}`;
+        for (const admin of admins) {
+          await sendMail({
+            to: admin.email,
+            subject: `[CRM] Nueva ${mailType === 'PRESUPUESTO' ? 'presupuesto' : 'solicitud'} sin cliente · ${code}`,
+            html: `
+              <div style="font-family:sans-serif;max-width:520px;margin:0 auto">
+                <h2 style="color:#1B2A4A">Mail recibido sin cliente asignado</h2>
+                <p>Hola ${admin.name}, llegó un nuevo mail al CRM que no pudo ser asignado a ningún cliente registrado.</p>
+                <table style="width:100%;border-collapse:collapse;font-size:13px;margin:12px 0">
+                  <tr><td style="padding:5px 0;color:#64748B;width:120px">Código</td><td style="font-weight:600;font-family:monospace">${code}</td></tr>
+                  <tr><td style="padding:5px 0;color:#64748B">Tipo</td><td>${mailType}</td></tr>
+                  <tr><td style="padding:5px 0;color:#64748B">De</td><td style="font-family:monospace">${originalSender}</td></tr>
+                  <tr><td style="padding:5px 0;color:#64748B">Asunto</td><td>${subject}</td></tr>
+                </table>
+                <p style="color:#64748B;font-size:13px">Ingresá al CRM para asignar el cliente manualmente.</p>
+                <p>
+                  <a href="${baseUrl}" style="display:inline-block;padding:10px 22px;background:#3B82F6;color:white;text-decoration:none;border-radius:8px;font-weight:600">
+                    Ir al CRM
+                  </a>
+                </p>
+              </div>
+            `,
+          });
+        }
+        if (admins.length > 0) console.log(`   📧 Admins notificados (${admins.length}) — sin cliente para ${code}`);
+      } catch (e) {
+        console.error('   ❌ Error notificando admins (sin cliente):', e.message);
+      }
+    }
 
     // ── Marcar como leído en IMAP ─────────────────────────────────────────
     if (mailData.uid) {

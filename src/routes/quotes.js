@@ -198,59 +198,67 @@ router.patch('/:id/stage', authMiddleware, async (req, res) => {
       updateData.rejectReason = rejectReason;
       updateData.rejectNotes = rejectNotes || null;
     }
+    // Limpiar followUpDate cuando la cotización termina (aceptada / rechazada)
+    if (stage === 'aceptada' || stage === 'rechazada') {
+      updateData.followUpDate = null;
+    }
     if (stage === 'enviado') {
+      const fudSetting = await prisma.appSetting.findUnique({ where: { key: 'follow_up_days' } });
+      const fudDays    = Math.max(1, parseInt(fudSetting?.value || '4'));
       const d = new Date();
-      d.setDate(d.getDate() + 4);
+      d.setDate(d.getDate() + fudDays);
       updateData.followUpDate = d;
     }
 
-    const updated = await prisma.quote.update({
-      where: { id: req.params.id },
-      data: updateData,
-    });
-
-    // Disparar notificaciones de cambio de etapa (async, no bloquea respuesta)
-    onStageChange(quote.id, oldStage, stage).catch(() => {});
-
-    // Log activity
-    await prisma.activity.create({
-      data: {
-        action: 'STAGE_CHANGE',
-        detail: `Movió ${quote.code} de ${oldStage} a ${stage}`,
-        userId: req.user.id,
-        quoteId: quote.id,
-      },
-    });
-
-    // If accepted, auto-create an order (solo si no existe ya una)
-    if (stage === 'aceptada') {
-      const existingOrder = await prisma.order.findFirst({ where: { fromQuoteId: quote.id } });
-      if (existingOrder) {
-        console.log(`ℹ️  OC ya existe para ${quote.code}: ${existingOrder.code}`);
-      } else {
-      const ocCode = await nextCode(prisma.order, 'OC-2026');
-
-      await prisma.order.create({
-        data: {
-          code: ocCode,
-          clientId: quote.clientId,
-          sellerId: quote.sellerId,
-          fromQuoteId: quote.id,
-          stage: 'oc',
-          flexxusCode: quote.flexxusCode,
-        },
+    // ── Ejecutar el cambio de etapa (y creación de OC si aplica) en una transacción
+    // para que si falla el order.create la quote no quede en 'aceptada' sin OC.
+    let updated;
+    await prisma.$transaction(async (tx) => {
+      updated = await tx.quote.update({
+        where: { id: req.params.id },
+        data: updateData,
       });
 
-      await prisma.activity.create({
+      await tx.activity.create({
         data: {
-          action: 'CREATED',
-          detail: `OC ${ocCode} creada automáticamente desde ${quote.code}`,
+          action: 'STAGE_CHANGE',
+          detail: `Movió ${quote.code} de ${oldStage} a ${stage}`,
           userId: req.user.id,
           quoteId: quote.id,
         },
       });
-      } // end if !existingOrder
-    }
+
+      // Si se acepta, crear OC dentro de la misma transacción
+      if (stage === 'aceptada') {
+        const existingOrder = await tx.order.findFirst({ where: { fromQuoteId: quote.id } });
+        if (existingOrder) {
+          console.log(`ℹ️  OC ya existe para ${quote.code}: ${existingOrder.code}`);
+        } else {
+          const ocCode = await nextCode(prisma.order, 'OC-2026');
+          await tx.order.create({
+            data: {
+              code:        ocCode,
+              clientId:    quote.clientId,
+              sellerId:    quote.sellerId,
+              fromQuoteId: quote.id,
+              stage:       'oc',
+              flexxusCode: quote.flexxusCode,
+            },
+          });
+          await tx.activity.create({
+            data: {
+              action:  'CREATED',
+              detail:  `OC ${ocCode} creada automáticamente desde ${quote.code}`,
+              userId:  req.user.id,
+              quoteId: quote.id,
+            },
+          });
+        }
+      }
+    });
+
+    // Disparar notificaciones fuera de la transacción (no bloquea ni revierte)
+    onStageChange(quote.id, oldStage, stage).catch(() => {});
 
     res.json(updated);
   } catch (err) {
@@ -324,7 +332,14 @@ router.get('/:id/detail', authMiddleware, async (req, res) => {
     const unifiedHistory = [...ownActivities, ...linkedActivities]
       .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 
-    res.json({ ...quote, unifiedHistory });
+    // ── Orden de Compra vinculada (para mostrar su etapa en el detalle del presupuesto) ─
+    const linkedOrder = await prisma.order.findFirst({
+      where: { fromQuoteId: quote.id },
+      select: { id: true, code: true, stage: true, createdAt: true },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    res.json({ ...quote, unifiedHistory, linkedOrder: linkedOrder || null });
   } catch (err) {
     console.error('Error en detail endpoint:', err);
     res.status(500).json({ error: 'Error' });
@@ -581,11 +596,16 @@ router.patch('/:id/link', authMiddleware, async (req, res) => {
           ...(propagateToTarget ? { flexxusCode: npToPropagate } : {}),
         },
       });
-
       // Si hay una OC en el vínculo y hay un PRESUPUESTO, copiar ítems
       if (oc && presupuesto) {
         await copyPresupuestoItemsToOC(presupuesto.id, oc.id);
       }
+    } else {
+      // Desvincular: también limpiar el linkedQuoteId de cualquier quote que apunte a esta
+      await prisma.quote.updateMany({
+        where: { linkedQuoteId: req.params.id },
+        data: { linkedQuoteId: null },
+      });
     }
 
     // Log actividad en ambas
@@ -764,8 +784,10 @@ router.post('/:id/send-email', authMiddleware, async (req, res) => {
       });
       let stageAdvanced = false;
       if (STAGES_TO_ADVANCE.includes(quote.stage)) {
+        const fudSetting = await prisma.appSetting.findUnique({ where: { key: 'follow_up_days' } });
+        const fudDays    = Math.max(1, parseInt(fudSetting?.value || '4'));
         const followUpDate = new Date();
-        followUpDate.setDate(followUpDate.getDate() + 4);
+        followUpDate.setDate(followUpDate.getDate() + fudDays);
         await prisma.quote.update({ where: { id: req.params.id }, data: { stage: 'enviado', followUpDate } });
         await prisma.activity.create({
           data: {

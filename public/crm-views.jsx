@@ -690,7 +690,7 @@ function Clients({ readonly=false }) {
         cuit: c.cuit || '', city: c.city || '', prov: c.province || '',
         zone: c.zone || '', activity: c.activity || '',
         seller: c.defaultSellerId || '', sellerName: c.defaultSeller?.name || '',
-        email: c.email || '', phone: c.phone || '', address: c.address || '',
+        email: c.emailPrimary || c.email || '', phone: c.phone || '', address: c.address || '',
       }));
       setClients(mapped);
     } catch(e) { /* silencioso */ }
@@ -1241,11 +1241,23 @@ function Team() {
     });
   };
 
-  const handleToggle = async (u) => {
+  const handleToggle = async (u, force = false) => {
     try {
-      const updated = await CrmApi.toggleUser(u.id);
-      setUsers(prev => prev.map(x => x.id === u.id ? {...x, active: updated.active} : x));
-      pushToast(`${u.name} ${updated.active ? 'activado' : 'desactivado'}`);
+      const res = await fetch(`/api/users/${u.id}/toggle`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('crm_token')}` },
+        body: JSON.stringify(force ? { forceDeactivate: true } : {}),
+      });
+      const data = await res.json();
+      if (res.status === 409 && data.requiresConfirmation) {
+        if (window.confirm(`${data.error}\n\n¿Desactivarlo igualmente?`)) {
+          return handleToggle(u, true);
+        }
+        return;
+      }
+      if (!res.ok) { pushToast(data.error || 'Error', 'bad'); return; }
+      setUsers(prev => prev.map(x => x.id === u.id ? {...x, active: data.active} : x));
+      pushToast(`${u.name} ${data.active ? 'activado' : 'desactivado'}`);
     } catch (err) {
       pushToast(err.message || 'Error', 'bad');
     }
@@ -1593,6 +1605,17 @@ function Config() {
   const [editLabel, setEditLabel] = useState('');
   const [editTone, setEditTone] = useState('gray');
   const [newStage, setNewStage] = useState({ label: '', tone: 'gray', phase: null });
+  const [dragOverId, setDragOverId] = useState(null);
+  const dragItem = React.useRef(null);
+
+  // Etapas de entrada por tipo de mail
+  const [incomingStages, setIncomingStages] = useState({
+    default_stage_solicitud:   'recibida',
+    default_stage_presupuesto: 'enviado',
+    default_stage_nota_pedido: 'np_enviada',
+  });
+  const [followUpDays, setFollowUpDays] = useState('4');
+  const [showVars, setShowVars] = useState(false);
 
   // Email templates state
   const [emailTemplates, setEmailTemplates]   = useState([]);
@@ -1622,6 +1645,14 @@ function Config() {
     CrmApi.getStagesFull()
       .then(data => { setStagesData(data.map(s => ({ ...s, _unit: 'días' }))); setStagesLoading(false); })
       .catch(() => setStagesLoading(false));
+    // Cargar settings de etapas de entrada
+    fetch('/api/settings', { headers: { Authorization: `Bearer ${localStorage.getItem('crm_token')}` } })
+      .then(r => r.json())
+      .then(s => {
+        setIncomingStages(prev => ({ ...prev, ...s }));
+        if (s.follow_up_days) setFollowUpDays(s.follow_up_days);
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -1633,39 +1664,29 @@ function Config() {
   }, [tab]);
 
   useEffect(() => {
-    if (tab !== 'email') return;
-    setEmailTplLoading(true);
-    CrmApi.getEmailTemplates()
-      .then(({ templates, ccDefault }) => {
-        setEmailTemplates(templates || []);
-        setEmailCCDefault(ccDefault || '');
-        setEmailTplLoading(false);
-      })
-      .catch(() => setEmailTplLoading(false));
-  }, [tab]);
-
-  useEffect(() => {
-    if (tab !== 'mails') return;
+    if (tab !== 'mail') return;
     setMailLoading(true);
+    setEmailTplLoading(true);
     Promise.all([
       fetch('/api/mail/accounts', { headers: { Authorization: `Bearer ${localStorage.getItem('crm_token')}` } }).then(r => r.json()),
       fetch('/api/settings',      { headers: { Authorization: `Bearer ${localStorage.getItem('crm_token')}` } }).then(r => r.json()),
-    ]).then(([accounts, settings]) => {
+      CrmApi.getEmailTemplates(),
+    ]).then(([accounts, settings, { templates, ccDefault }]) => {
       setMailAccounts(Array.isArray(accounts) ? accounts : []);
       setMailSettings(s => ({ ...s, ...settings }));
+      setEmailTemplates(templates || []);
+      setEmailCCDefault(ccDefault || '');
       setMailLoading(false);
-    }).catch(() => setMailLoading(false));
+      setEmailTplLoading(false);
+    }).catch(() => { setMailLoading(false); setEmailTplLoading(false); });
   }, [tab]);
 
   const handleMailSettingSave = async () => {
-    try {
-      await fetch('/api/settings', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('crm_token')}` },
-        body: JSON.stringify(mailSettings),
-      });
-      pushToast('Configuración guardada');
-    } catch { pushToast('Error al guardar', 'bad'); }
+    await fetch('/api/settings', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('crm_token')}` },
+      body: JSON.stringify(mailSettings),
+    });
   };
 
   const handleSyncAll = async () => {
@@ -1834,21 +1855,98 @@ function Config() {
     </div>
   );
 
-  const StageList = ({ stages, phase, title }) => (
+  const saveEntryStage = async (key, value) => {
+    setIncomingStages(s => ({ ...s, [key]: value }));
+    try {
+      await fetch('/api/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('crm_token')}` },
+        body: JSON.stringify({ [key]: value }),
+      });
+      pushToast('Etapa de entrada guardada');
+    } catch { pushToast('Error al guardar', 'bad'); }
+  };
+
+  const saveFollowUpDays = async (val) => {
+    setFollowUpDays(val);
+    try {
+      await fetch('/api/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('crm_token')}` },
+        body: JSON.stringify({ follow_up_days: val }),
+      });
+      pushToast('Días de seguimiento guardados');
+    } catch { pushToast('Error al guardar', 'bad'); }
+  };
+
+  const StageList = ({ stages, phase, title, entryKeys = [] }) => (
     <div className="bg-white border border-line rounded-xl p-5">
       <div className="flex items-center justify-between mb-3">
-        <div className="text-sm font-semibold">{title}</div>
+        <div>
+          <div className="text-sm font-semibold">{title}</div>
+          {entryKeys.length > 0 && (
+            <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+              {entryKeys.map(({ key, label }) => (
+                <div key={key} className="flex items-center gap-1.5">
+                  <span className="text-[11px] text-ink-500 font-medium">Entrada {label}:</span>
+                  <select
+                    value={incomingStages[key] || ''}
+                    onChange={e => saveEntryStage(key, e.target.value)}
+                    className="border border-line rounded-md px-1.5 py-0.5 text-[11px] bg-white focus:outline-none focus:ring-1 focus:ring-brand/30 text-ink-700"
+                  >
+                    {stages.map(s => (
+                      <option key={s.id} value={s.stageKey}>{s.label}</option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
         <button onClick={() => setNewStage({ label: '', tone: 'gray', phase })}
-          className="btn-ghost text-[12px] flex items-center gap-1 text-brand">
+          className="btn-ghost text-[12px] flex items-center gap-1 text-brand shrink-0">
           <Icon name="plus" size={13}/> Agregar etapa
         </button>
       </div>
       {stagesLoading ? (
         <div className="text-[13px] text-ink-400 py-6 text-center">Cargando etapas…</div>
-      ) : (
+      ) : (<>
+        {/* Header de columnas */}
+        <div className="flex items-center gap-2 px-2.5 mb-1 text-[10px] font-semibold uppercase tracking-wider text-ink-400 select-none">
+          <div className="w-5 shrink-0"/>
+          <div className="w-5 shrink-0"/>
+          <div className="w-2.5 shrink-0"/>
+          <div className="flex-1">Etapa</div>
+          <div className="w-[102px] text-center">Obligatoria</div>
+          <div className="w-[168px] text-center">Tiempo máx.</div>
+          <div className="w-[52px]"/>
+        </div>
         <ul className="space-y-1.5">
           {stages.map((s, i) => (
-            <li key={s.id}>
+            <li key={s.id}
+              draggable={editingId !== s.id}
+              onDragStart={() => { dragItem.current = { id: s.id, phase }; }}
+              onDragEnter={() => setDragOverId(s.id)}
+              onDragOver={e => e.preventDefault()}
+              onDrop={e => {
+                e.preventDefault();
+                const fromId = dragItem.current?.id;
+                if (!fromId || fromId === s.id || dragItem.current?.phase !== phase) return;
+                const list = [...stages];
+                const fromIdx = list.findIndex(x => x.id === fromId);
+                const toIdx   = list.findIndex(x => x.id === s.id);
+                const [moved] = list.splice(fromIdx, 1);
+                list.splice(toIdx, 0, moved);
+                setStagesData(sd => [...sd.filter(x => x.phase !== phase), ...list]);
+                setDragOverId(null);
+                dragItem.current = null;
+                CrmApi.reorderStages(list.map(x => x.id))
+                  .then(() => pushToast('Orden actualizado'))
+                  .catch(err => pushToast(err.message || 'Error al reordenar', 'bad'));
+              }}
+              onDragEnd={() => { dragItem.current = null; setDragOverId(null); }}
+              className={cx('rounded-lg transition-all', dragOverId === s.id && dragItem.current?.id !== s.id && 'ring-2 ring-brand ring-offset-1')}
+            >
               {editingId === s.id ? (
                 <div className="flex items-center gap-2 p-2.5 rounded-lg bg-surface border border-line">
                   <StageDot tone={editTone}/>
@@ -1863,58 +1961,74 @@ function Config() {
                 </div>
               ) : (
                 <div className="group flex items-center gap-2 p-2.5 rounded-lg hover:bg-surface">
-                  <div className="flex flex-col gap-0.5">
-                    <button onClick={() => handleMove(s, -1, stages)}
-                      disabled={i === 0}
-                      className="text-ink-300 hover:text-ink-700 disabled:opacity-20 leading-none">
-                      <Icon name="chevron-up" size={12}/>
-                    </button>
-                    <button onClick={() => handleMove(s, 1, stages)}
-                      disabled={i === stages.length - 1}
-                      className="text-ink-300 hover:text-ink-700 disabled:opacity-20 leading-none">
-                      <Icon name="chevron-down" size={12}/>
-                    </button>
+                  {/* Handle de arrastre */}
+                  <div className="w-5 flex items-center justify-center cursor-grab active:cursor-grabbing text-ink-300 hover:text-ink-500 shrink-0 select-none"
+                    title="Arrastrar para reordenar">
+                    <Icon name="grip-vertical" size={14}/>
                   </div>
                   <span className="w-5 text-right mono text-[11px] text-ink-400 font-semibold">{i+1}.</span>
                   <StageDot tone={s.tone}/>
                   <span className="flex-1 text-[13px] font-medium text-ink-900">{s.label}</span>
-                  {s.mandatory && <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">OBLIG.</span>}
-                  <div className="flex items-center gap-1.5 text-[11px] text-ink-500 shrink-0">
-                    <span>Obligatoria</span>
+                  {/* Columna Obligatoria — solo el toggle, centrado */}
+                  <div className="w-[102px] flex justify-center shrink-0">
                     <button onClick={() => handleToggleMandatory(s)}
-                      className={cx('w-8 h-4 rounded-full relative transition-colors shrink-0',
+                      title={s.mandatory ? 'Quitar obligatoria' : 'Marcar como obligatoria'}
+                      className={cx('w-8 h-4 rounded-full relative transition-colors',
                         s.mandatory ? 'bg-brand' : 'bg-ink-300')}>
                       <div className={cx('absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-all',
                         s.mandatory ? 'left-[18px]' : 'left-0.5')}/>
                     </button>
                   </div>
-                  <input type="number" min="1" placeholder="∞"
-                    value={s.maxHours && s._unit ? Math.round(s.maxHours / UNIT_MULT[s._unit]) : (s.maxHours ? s.maxHours : '')}
-                    onChange={e => {
-                      const mult = UNIT_MULT[s._unit || 'días'];
-                      setStagesData(sd => sd.map(x =>
-                        x.id === s.id ? {...x, maxHours: e.target.value ? parseInt(e.target.value) * mult : null} : x
-                      ));
-                    }}
-                    onBlur={e => {
-                      const mult = UNIT_MULT[s._unit || 'días'];
-                      const hours = e.target.value ? parseInt(e.target.value) * mult : null;
-                      handleUpdateMaxHours(s, hours);
-                    }}
-                    className="inp text-xs py-1 w-14 text-center"
-                  />
-                  <select
-                    value={s._unit || 'días'}
-                    onChange={e => setStagesData(sd => sd.map(x =>
-                      x.id === s.id ? {...x, _unit: e.target.value} : x
-                    ))}
-                    className="inp text-xs py-1 pl-2 pr-6 w-auto"
-                  >
-                    <option value="horas">hs.</option>
-                    <option value="días">días</option>
-                    <option value="semanas">sem.</option>
-                    <option value="meses">meses</option>
-                  </select>
+                  {/* Zona de tiempo máximo — ancho fijo para que nada se mueva */}
+                  <div className="flex items-center gap-1.5 shrink-0 w-[168px]">
+                    <button
+                      title={s.maxHours ? 'Desactivar tiempo máximo' : 'Activar tiempo máximo'}
+                      onClick={() => {
+                        if (s.maxHours) {
+                          setStagesData(sd => sd.map(x => x.id === s.id ? {...x, maxHours: null} : x));
+                          handleUpdateMaxHours(s, null);
+                        } else {
+                          const defaultHours = UNIT_MULT[s._unit || 'días'];
+                          setStagesData(sd => sd.map(x => x.id === s.id ? {...x, maxHours: defaultHours} : x));
+                          handleUpdateMaxHours({...s, maxHours: null}, defaultHours);
+                        }
+                      }}
+                      className={cx('w-7 h-3.5 rounded-full relative transition-colors shrink-0',
+                        s.maxHours ? 'bg-brand' : 'bg-ink-300')}>
+                      <div className={cx('absolute top-0.5 w-2.5 h-2.5 rounded-full bg-white shadow transition-all',
+                        s.maxHours ? 'left-[14px]' : 'left-0.5')}/>
+                    </button>
+                    <input type="number" min="1"
+                      disabled={!s.maxHours}
+                      value={s.maxHours && s._unit ? Math.round(s.maxHours / UNIT_MULT[s._unit]) : (s.maxHours || '')}
+                      placeholder="∞"
+                      onChange={e => {
+                        const mult = UNIT_MULT[s._unit || 'días'];
+                        setStagesData(sd => sd.map(x =>
+                          x.id === s.id ? {...x, maxHours: e.target.value ? parseInt(e.target.value) * mult : null} : x
+                        ));
+                      }}
+                      onBlur={e => {
+                        const mult = UNIT_MULT[s._unit || 'días'];
+                        const hours = e.target.value ? parseInt(e.target.value) * mult : null;
+                        handleUpdateMaxHours(s, hours);
+                      }}
+                      className={cx('inp text-xs py-1 w-12 text-center transition-opacity', !s.maxHours && 'opacity-30 pointer-events-none')}
+                    />
+                    <select
+                      disabled={!s.maxHours}
+                      value={s._unit || 'días'}
+                      onChange={e => setStagesData(sd => sd.map(x =>
+                        x.id === s.id ? {...x, _unit: e.target.value} : x
+                      ))}
+                      className={cx('inp text-xs py-1 pl-2 pr-6 w-auto transition-opacity', !s.maxHours && 'opacity-30 pointer-events-none')}
+                    >
+                      <option value="horas">hs.</option>
+                      <option value="días">días</option>
+                      <option value="semanas">sem.</option>
+                      <option value="meses">meses</option>
+                    </select>
+                  </div>
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button onClick={() => startEdit(s)} className="btn-ghost p-1" title="Editar">
                       <Icon name="pencil" size={13} className="text-ink-500"/>
@@ -1941,7 +2055,7 @@ function Config() {
             </li>
           )}
         </ul>
-      )}
+      </>)}
     </div>
   );
 
@@ -1954,26 +2068,60 @@ function Config() {
       />
 
       <TabBar active={tab} onChange={setTab} tabs={[
-        { id:'stages',    label:'Etapas' },
-        { id:'mails',     label:'Cuentas de mail' },
-        { id:'email',     label:'Plantillas email' },
-        { id:'notifs',    label:'Notificaciones' },
+        { id:'stages',   label:'Etapas' },
+        { id:'mail',     label:'Mail' },
+        { id:'notifs',   label:'Notificaciones' },
+        { id:'articles', label:'Artículos' },
       ]}/>
 
       {tab==='stages' && (
-        <div className="p-6 grid grid-cols-2 gap-5">
-          <StageList stages={f1} phase="COTIZACION"   title="Fase 1 · Cotizaciones"/>
-          <StageList stages={f2} phase="ORDEN_COMPRA" title="Fase 2 · Órdenes de Compra"/>
+        <div className="p-6">
+          <div className="grid grid-cols-2 gap-5">
+            <StageList stages={f1} phase="COTIZACION"   title="Fase 1 · Cotizaciones"
+              entryKeys={[
+                { key: 'default_stage_solicitud',   label: 'Solicitud' },
+                { key: 'default_stage_presupuesto', label: 'Presupuesto' },
+              ]}
+            />
+            <StageList stages={f2} phase="ORDEN_COMPRA" title="Fase 2 · Órdenes de Compra"
+              entryKeys={[
+                { key: 'default_stage_nota_pedido', label: 'Nota de Pedido' },
+              ]}
+            />
+          </div>
+
+          {/* ── Seguimiento ─────────────────────────────────────────────────── */}
+          <div className="mt-5 bg-white border border-line rounded-xl p-4 flex items-center gap-4">
+            <div className="w-8 h-8 rounded-lg bg-orange-50 flex items-center justify-center shrink-0">
+              <Icon name="clock" size={15} className="text-orange-500"/>
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-[13px] font-semibold text-ink-800">Alerta de seguimiento</div>
+              <div className="text-[11.5px] text-ink-400 mt-0.5">
+                Días después de enviar un presupuesto hasta que aparece el banner naranja de seguimiento pendiente.
+                Se limpia automáticamente cuando la cotización se acepta o rechaza.
+              </div>
+            </div>
+            <select
+              className="inp text-[13px] w-36 shrink-0"
+              value={followUpDays}
+              onChange={e => saveFollowUpDays(e.target.value)}
+            >
+              {[1,2,3,4,5,7,10,14,21,30].map(d => (
+                <option key={d} value={String(d)}>{d} {d === 1 ? 'día' : 'días'}</option>
+              ))}
+            </select>
+          </div>
         </div>
       )}
 
-      {tab==='mails' && (
-        <div className="p-6 space-y-5">
+      {tab==='mail' && (
+        <div className="p-6 space-y-5 max-w-3xl">
 
-          {/* ── Configuración de sync ─────────────────────────── */}
+          {/* ── Sincronización ───────────────────────────────── */}
           <div className="bg-white border border-line rounded-xl p-5">
             <div className="flex items-center justify-between mb-4">
-              <div className="text-sm font-semibold">Configuración de sincronización</div>
+              <div className="text-sm font-semibold">Sincronización</div>
               <button
                 onClick={() => setMailSettings(s => ({ ...s, mail_sync_enabled: s.mail_sync_enabled === 'false' ? 'true' : 'false' }))}
                 className="flex items-center gap-2 text-[12px] text-ink-600 select-none"
@@ -1986,10 +2134,10 @@ function Config() {
                 </div>
               </button>
             </div>
-            <div className={cx('grid grid-cols-2 gap-4 mb-4 transition-opacity', mailSettings.mail_sync_enabled === 'false' ? 'opacity-40 pointer-events-none' : '')}>
+            <div className={cx('grid grid-cols-2 gap-4 transition-opacity', mailSettings.mail_sync_enabled === 'false' ? 'opacity-40 pointer-events-none' : '')}>
               <div>
                 <label className="block text-[12px] text-ink-500 mb-1">Frecuencia automática</label>
-                <select className="inp text-[13px]" value={mailSettings.mail_sync_interval_hours}
+                <select className="inp text-[13px] w-full" value={mailSettings.mail_sync_interval_hours}
                   onChange={e => setMailSettings(s => ({ ...s, mail_sync_interval_hours: e.target.value }))}>
                   <option value="1">Cada 1 hora</option>
                   <option value="2">Cada 2 horas</option>
@@ -2000,7 +2148,7 @@ function Config() {
               </div>
               <div>
                 <label className="block text-[12px] text-ink-500 mb-1">Buscar mails de los últimos</label>
-                <select className="inp text-[13px]" value={mailSettings.mail_lookback_days}
+                <select className="inp text-[13px] w-full" value={mailSettings.mail_lookback_days}
                   onChange={e => setMailSettings(s => ({ ...s, mail_lookback_days: e.target.value }))}>
                   <option value="1">1 día</option>
                   <option value="2">2 días</option>
@@ -2009,9 +2157,30 @@ function Config() {
                 </select>
               </div>
             </div>
-            <div className="flex items-center gap-3">
-              <button onClick={handleMailSettingSave} className="btn-primary text-[12px]">
-                Guardar configuración
+            <div className="mt-4 pt-4 border-t border-line">
+              <label className="block text-[12px] text-ink-500 mb-1">CC por defecto al enviar presupuesto</label>
+              <input className="inp text-sm w-full" type="text"
+                placeholder="ventas@myselec.com.ar, gerencia@myselec.com.ar"
+                value={emailCCDefault}
+                onChange={e => setEmailCCDefault(e.target.value)}/>
+              <div className="text-[11px] text-ink-400 mt-1">Separar múltiples direcciones con comas.</div>
+            </div>
+            <div className="flex items-center gap-2 mt-4">
+              <button onClick={async () => {
+                try {
+                  await Promise.all([
+                    handleMailSettingSave(),
+                    CrmApi.saveEmailTemplates({ ccDefault: emailCCDefault }),
+                  ]);
+                  pushToast('Configuración guardada');
+                } catch { pushToast('Error al guardar', 'bad'); }
+              }} className="btn-primary text-[12px]">
+                Guardar
+              </button>
+              <button onClick={handleSyncAll} disabled={mailSyncingAll}
+                className="btn-ghost text-[12px] flex items-center gap-1.5 disabled:opacity-60">
+                <Icon name="refresh-cw" size={13} className={mailSyncingAll ? 'animate-spin' : ''}/>
+                {mailSyncingAll ? 'Sincronizando…' : 'Sincronizar ahora'}
               </button>
             </div>
           </div>
@@ -2020,25 +2189,16 @@ function Config() {
           <div className="bg-white border border-line rounded-xl overflow-hidden">
             <div className="px-5 py-3.5 border-b border-line flex items-center justify-between">
               <div className="font-semibold text-[13px]">Cuentas configuradas</div>
-              <div className="flex items-center gap-2">
-                <button onClick={() => { setAddAccountOpen(o => !o); setAddAccountError(''); }}
-                  className="btn-ghost text-[12px] flex items-center gap-1.5">
-                  <Icon name="plus" size={13}/>Agregar cuenta
-                </button>
-                <button onClick={handleSyncAll} disabled={mailSyncingAll}
-                  className="btn-primary text-[12px] flex items-center gap-1.5 disabled:opacity-60">
-                  <Icon name="refresh-cw" size={13} className={mailSyncingAll ? 'animate-spin' : ''}/>
-                  {mailSyncingAll ? 'Sincronizando…' : 'Sincronizar todas'}
-                </button>
-              </div>
+              <button onClick={() => { setAddAccountOpen(o => !o); setAddAccountError(''); }}
+                className="btn-ghost text-[12px] flex items-center gap-1.5">
+                <Icon name="plus" size={13}/>Agregar cuenta
+              </button>
             </div>
 
-            {/* Formulario agregar cuenta */}
             {addAccountOpen && (
               <form onSubmit={handleAddAccount} className="px-5 py-4 border-b border-line bg-surface space-y-3">
                 <div className="flex items-center justify-between mb-1">
-                  <div className="text-[12px] font-semibold text-ink-700">Nueva cuenta de mail</div>
-                  {/* Toggle selector / manual */}
+                  <div className="text-[12px] font-semibold text-ink-700">Nueva cuenta</div>
                   <div className="flex items-center gap-1 bg-line rounded-lg p-0.5">
                     <button type="button"
                       onClick={() => { setAddAccountMode('selector'); setAddAccountForm(f => ({...f, user: ''})); }}
@@ -2048,7 +2208,7 @@ function Config() {
                     <button type="button"
                       onClick={() => { setAddAccountMode('manual'); setAddAccountForm(f => ({...f, user: ''})); }}
                       className={`text-[11px] px-2.5 py-1 rounded-md transition-colors ${addAccountMode === 'manual' ? 'bg-white text-ink-800 shadow-sm font-medium' : 'text-ink-500 hover:text-ink-700'}`}>
-                      Ingresar manual
+                      Manual
                     </button>
                   </div>
                 </div>
@@ -2080,10 +2240,15 @@ function Config() {
                 </div>
                 <div className="flex items-center gap-2">
                   <button type="submit" className="btn-primary text-[12px]" disabled={addAccountLoading}>
-                    {addAccountLoading ? 'Guardando…' : 'Guardar cuenta'}
+                    {addAccountLoading ? 'Guardando…' : 'Guardar'}
                   </button>
-                  <button type="button" className="btn-ghost text-[12px]" onClick={() => { setAddAccountOpen(false); setAddAccountMode('selector'); setAddAccountForm({ user: '', password: '' }); }}>Cancelar</button>
-                  <span className="text-[11px] text-ink-400 ml-1">Usá una <a href="https://myaccount.google.com/apppasswords" target="_blank" className="text-brand underline">contraseña de aplicación</a> de Google, no tu contraseña normal.</span>
+                  <button type="button" className="btn-ghost text-[12px]"
+                    onClick={() => { setAddAccountOpen(false); setAddAccountMode('selector'); setAddAccountForm({ user: '', password: '' }); }}>
+                    Cancelar
+                  </button>
+                  <span className="text-[11px] text-ink-400 ml-1">
+                    Usá una <a href="https://myaccount.google.com/apppasswords" target="_blank" className="text-brand underline">contraseña de aplicación</a> de Google.
+                  </span>
                 </div>
               </form>
             )}
@@ -2098,42 +2263,28 @@ function Config() {
             ) : (
               <table className="tbl w-full">
                 <thead><tr>
-                  <th>Cuenta</th>
-                  <th>Origen</th>
-                  <th>Último sync</th>
-                  <th>Estado</th>
-                  <th></th>
+                  <th>Cuenta</th><th>Origen</th><th>Último sync</th><th>Estado</th><th></th>
                 </tr></thead>
                 <tbody>
                   {mailAccounts.map(acc => (
                     <tr key={acc.user}>
                       <td className="mono text-[12px]">{acc.user}</td>
-                      <td>
-                        <Badge tone={acc.origin === 'db' ? 'blue' : 'slate'}>
-                          {acc.origin === 'db' ? 'Manual' : 'Sistema'}
-                        </Badge>
-                      </td>
+                      <td><Badge tone={acc.origin === 'db' ? 'blue' : 'slate'}>{acc.origin === 'db' ? 'Manual' : 'Sistema'}</Badge></td>
                       <td className="text-[12px] text-ink-500">
                         {acc.lastSyncAt
                           ? new Date(acc.lastSyncAt).toLocaleString('es-AR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })
                           : <span className="text-ink-400">Nunca</span>}
                       </td>
-                      <td>
-                        <Badge tone={acc.isActive ? 'green' : 'gray'} dot>
-                          {acc.isActive ? 'Activa' : 'Inactiva'}
-                        </Badge>
-                      </td>
+                      <td><Badge tone={acc.isActive ? 'green' : 'gray'} dot>{acc.isActive ? 'Activa' : 'Inactiva'}</Badge></td>
                       <td className="text-right">
                         <div className="flex items-center justify-end gap-1">
-                          <button onClick={() => handleSyncOne(acc.user)}
-                            disabled={mailSyncing[acc.user]}
+                          <button onClick={() => handleSyncOne(acc.user)} disabled={mailSyncing[acc.user]}
                             className="btn-ghost text-[12px] flex items-center gap-1.5 disabled:opacity-60">
                             <Icon name="refresh-cw" size={12} className={mailSyncing[acc.user] ? 'animate-spin' : ''}/>
                             {mailSyncing[acc.user] ? 'Sync…' : 'Sincronizar'}
                           </button>
                           {acc.origin === 'db' && (
-                            <button onClick={() => handleDeleteAccount(acc.user)}
-                              className="btn-ghost p-1.5" title="Eliminar cuenta">
+                            <button onClick={() => handleDeleteAccount(acc.user)} className="btn-ghost p-1.5" title="Eliminar">
                               <Icon name="trash-2" size={13} className="text-red-400"/>
                             </button>
                           )}
@@ -2145,47 +2296,30 @@ function Config() {
               </table>
             )}
           </div>
-        </div>
-      )}
 
-      {tab==='email' && (
-        <div className="p-6 space-y-6 max-w-3xl">
-          {/* ── CC por defecto ──────────────────────────── */}
-          <div className="bg-white border border-line rounded-xl p-5">
-            <div className="text-sm font-semibold mb-1">CC por defecto</div>
-            <div className="text-[12px] text-ink-500 mb-3">Dirección(es) que se agregan automáticamente al CC al enviar un presupuesto. Separar múltiples con comas.</div>
-            <div className="flex gap-2">
-              <input className="inp flex-1 text-sm" type="text"
-                placeholder="ventas@myselec.com.ar, gerencia@myselec.com.ar"
-                value={emailCCDefault}
-                onChange={e => setEmailCCDefault(e.target.value)}/>
-              <button className="btn-primary"
-                onClick={async () => {
-                  try {
-                    await CrmApi.saveEmailTemplates({ ccDefault: emailCCDefault });
-                    pushToast('CC guardado');
-                  } catch (err) { pushToast(err.message || 'Error', 'bad'); }
-                }}>
-                Guardar
-              </button>
-            </div>
-          </div>
-
-          {/* ── Plantillas ──────────────────────────────── */}
+          {/* ── Plantillas de email ───────────────────────────── */}
           <div className="bg-white border border-line rounded-xl p-5">
             <div className="flex items-center justify-between mb-3">
               <div>
                 <div className="text-sm font-semibold">Plantillas de email</div>
-                <div className="text-[12px] text-ink-500 mt-0.5">
-                  Variables disponibles: <code className="bg-surface px-1 rounded text-[11px]">{'{cliente}'}</code> <code className="bg-surface px-1 rounded text-[11px]">{'{codigo}'}</code> <code className="bg-surface px-1 rounded text-[11px]">{'{np_flexxus}'}</code> <code className="bg-surface px-1 rounded text-[11px]">{'{vendedor}'}</code> <code className="bg-surface px-1 rounded text-[11px]">{'{asunto_original}'}</code> <code className="bg-surface px-1 rounded text-[11px]">{'{fecha}'}</code>
-                </div>
+                <button onClick={() => setShowVars(v => !v)}
+                  className="text-[11px] text-brand hover:underline mt-0.5 flex items-center gap-1">
+                  <Icon name={showVars ? 'chevron-up' : 'chevron-down'} size={11}/>
+                  {showVars ? 'Ocultar variables' : 'Ver variables disponibles'}
+                </button>
+                {showVars && (
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {['{cliente}','{codigo}','{np_flexxus}','{vendedor}','{asunto_original}','{fecha}'].map(v => (
+                      <code key={v} className="bg-surface border border-line px-1.5 py-0.5 rounded text-[11px] text-ink-700">{v}</code>
+                    ))}
+                  </div>
+                )}
               </div>
-              <button className="btn-primary text-xs py-1.5 px-3"
+              <button className="btn-primary text-xs py-1.5 px-3 shrink-0 self-start"
                 onClick={() => setEditingTpl({ id: `tpl-${Date.now()}`, name: '', subject: '', body: '', _isNew: true })}>
                 <Icon name="plus" size={13}/>Nueva plantilla
               </button>
             </div>
-
             {emailTplLoading ? (
               <div className="py-6 text-center text-ink-400 text-sm">Cargando…</div>
             ) : (
@@ -2215,7 +2349,7 @@ function Config() {
                   </div>
                 ))}
                 {emailTemplates.length === 0 && (
-                  <div className="py-6 text-center text-ink-400 text-sm">No hay plantillas. Creá una o recargá la página para cargar las de defecto.</div>
+                  <div className="py-6 text-center text-ink-400 text-sm">No hay plantillas. Creá una para empezar.</div>
                 )}
               </div>
             )}
@@ -2257,12 +2391,7 @@ function Config() {
                       setTplSaving(true);
                       try {
                         const { _isNew, ...tplData } = editingTpl;
-                        let updated;
-                        if (_isNew) {
-                          updated = [...emailTemplates, tplData];
-                        } else {
-                          updated = emailTemplates.map(t => t.id === tplData.id ? tplData : t);
-                        }
+                        const updated = _isNew ? [...emailTemplates, tplData] : emailTemplates.map(t => t.id === tplData.id ? tplData : t);
                         await CrmApi.saveEmailTemplates({ templates: updated });
                         setEmailTemplates(updated);
                         setEditingTpl(null);
@@ -2387,6 +2516,8 @@ function Config() {
           </div>
         </div>
       )}
+
+      {tab==='articles' && <Articles/>}
 
     </div>
   );

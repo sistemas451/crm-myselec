@@ -84,10 +84,18 @@ router.get('/', authMiddleware, async (req, res) => {
   try {
     const clients = await prisma.client.findMany({
       where: { active: true },
-      include: { defaultSeller: { select: { id: true, name: true } } },
+      include: {
+        defaultSeller: { select: { id: true, name: true } },
+        emails:        { select: { email: true, isPrimary: true }, orderBy: { isPrimary: 'desc' }, take: 3 },
+      },
       orderBy: { name: 'asc' },
     });
-    res.json(clients);
+    // Agregar campo emailPrimary: email directo o primer ClientEmail
+    const enriched = clients.map(c => ({
+      ...c,
+      emailPrimary: c.email || c.emails?.[0]?.email || null,
+    }));
+    res.json(enriched);
   } catch (err) {
     res.status(500).json({ error: 'Error' });
   }

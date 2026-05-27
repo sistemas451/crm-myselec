@@ -5,9 +5,12 @@ const prisma = require('../db');
 const router = express.Router();
 
 const DEFAULTS = {
-  mail_sync_interval_hours: '2',
-  mail_lookback_days:       '2',
-  mail_sync_enabled:        'true',
+  mail_sync_interval_hours:    '2',
+  mail_lookback_days:          '2',
+  mail_sync_enabled:           'true',
+  default_stage_solicitud:     'recibida',
+  default_stage_presupuesto:   'enviado',
+  default_stage_nota_pedido:   'np_enviada',
 };
 
 // GET /api/settings — devuelve todos los settings con defaults

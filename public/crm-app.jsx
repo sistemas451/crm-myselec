@@ -808,7 +808,6 @@ function Sidebar({ role, screen, setScreen, user, onProfileOpen, collapsed, onTo
     { id:'quotes',    label:'Cotizaciones',          icon:'clipboard-list', sub:'Fase 1' },
     { id:'orders',    label:'Órdenes de Compra',     icon:'package',        sub:'Fase 2' },
     { id:'clients',   label:'Clientes',              icon:'building-2' },
-    { id:'articles',    label:'Artículos',             icon:'box',        sub:'Catálogo' },
     { id:'comparativa', label:'Comparativa',           icon:'git-compare', sub:'Pres. vs NP' },
     { id:'team',        label:'Equipo',                icon:'users' },
     { id:'config',      label:'Configuración',         icon:'settings' },
@@ -819,7 +818,6 @@ function Sidebar({ role, screen, setScreen, user, onProfileOpen, collapsed, onTo
     { id:'quotes',      label:'Pipeline Cotizaciones', icon:'layout',     sub:'Kanban Fase 1' },
     { id:'orders',      label:'Pipeline OCs',          icon:'columns',    sub:'Kanban Fase 2' },
     { id:'clients',     label:'Clientes',              icon:'building-2', sub:'solo lectura' },
-    { id:'articles',    label:'Artículos',             icon:'box',        sub:'Catálogo' },
     { id:'comparativa', label:'Comparativa',           icon:'git-compare', sub:'Pres. vs NP' },
   ];
   const navLog = [
@@ -1397,7 +1395,7 @@ function Dashboard() {
             <div className="flex items-center justify-between px-5 py-3.5 border-b border-line">
               <div>
                 <div className="text-sm font-semibold text-ink-900">Cotizaciones próximas a vencer</div>
-                <div className="text-xs text-ink-500">Pasaron el tiempo límite de armado (1 día hábil)</div>
+                <div className="text-xs text-ink-500">Pasaron más de 5 días sin resolución</div>
               </div>
               {overdueQuotes.length > 0 && <Badge tone="red" dot>{overdueQuotes.length} vencidas</Badge>}
             </div>
