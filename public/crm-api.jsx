@@ -234,6 +234,7 @@ const CrmApi = {
   createNotificationRule: (data) => apiFetch('/notifications/rules', { method: 'POST', body: JSON.stringify(data) }),
   updateNotificationRule: (id, data) => apiFetch(`/notifications/rules/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteNotificationRule: (id) => apiFetch(`/notifications/rules/${id}`, { method: 'DELETE' }),
+  getNotificationsInbox:  ()    => apiFetch('/notifications/inbox'),
 
   // Articles
   getArticles:       (p) => apiFetch(`/articles${toQS(p)}`),

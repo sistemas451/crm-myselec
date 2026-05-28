@@ -337,7 +337,7 @@ router.patch('/:id/stage', authMiddleware, async (req, res) => {
     const oldStage = order.stage;
     const updated = await prisma.order.update({
       where: { id: req.params.id },
-      data: { stage },
+      data: { stage, stageChangedAt: new Date() },
     });
 
     await prisma.activity.create({

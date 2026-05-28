@@ -25,8 +25,9 @@ router.get('/stages', authMiddleware, async (req, res) => {
     where: { active: true },
     orderBy: [{ phase: 'asc' }, { order: 'asc' }],
   });
-  const f1 = stages.filter(s => s.phase === 'COTIZACION').map(s => ({ id: s.stageKey, label: s.label, tone: s.tone, mandatory: s.mandatory, maxHours: s.maxHours }));
-  const f2 = stages.filter(s => s.phase === 'ORDEN_COMPRA').map(s => ({ id: s.stageKey, label: s.label, tone: s.tone, mandatory: s.mandatory, maxHours: s.maxHours }));
+  const mapStage = s => ({ id: s.stageKey, dbId: s.id, label: s.label, tone: s.tone, mandatory: s.mandatory, maxHours: s.maxHours, emailAlert: s.emailAlert });
+  const f1 = stages.filter(s => s.phase === 'COTIZACION').map(mapStage);
+  const f2 = stages.filter(s => s.phase === 'ORDEN_COMPRA').map(mapStage);
   res.json({ f1, f2 });
 });
 
@@ -192,12 +193,13 @@ router.patch('/stages/:id', authMiddleware, async (req, res) => {
     if (req.user.role !== 'ADMIN') {
       return res.status(403).json({ error: 'Solo administradores' });
     }
-    const { mandatory, maxHours, label, tone } = req.body;
+    const { mandatory, maxHours, label, tone, emailAlert } = req.body;
     const data = {};
-    if (mandatory !== undefined) data.mandatory = mandatory;
-    if (maxHours  !== undefined) data.maxHours  = maxHours || null;
-    if (label     !== undefined) data.label     = label;
-    if (tone      !== undefined) data.tone      = tone;
+    if (mandatory   !== undefined) data.mandatory  = mandatory;
+    if (maxHours    !== undefined) data.maxHours   = maxHours || null;
+    if (label       !== undefined) data.label      = label;
+    if (tone        !== undefined) data.tone       = tone;
+    if (emailAlert  !== undefined) data.emailAlert = emailAlert;
     const updated = await prisma.stageDefinition.update({
       where: { id: req.params.id },
       data,

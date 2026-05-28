@@ -193,7 +193,7 @@ router.patch('/:id/stage', authMiddleware, async (req, res) => {
       }
     }
 
-    const updateData = { stage };
+    const updateData = { stage, stageChangedAt: new Date() };
     if (stage === 'rechazada' && rejectReason) {
       updateData.rejectReason = rejectReason;
       updateData.rejectNotes = rejectNotes || null;

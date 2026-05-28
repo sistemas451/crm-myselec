@@ -26,7 +26,9 @@ function AppProvider({ children }) {
   const [activity, setActivity] = useS(() => [...ACTIVITY]);
   const [comments, setComments] = useS(() => ({...COMMENTS}));
   const [notifications, setNotifications] = useS([]);
+  const [inboxAlerts, setInboxAlerts]     = useS([]);
 
+  // ── Lectura de actividades (feed histórico) ──────────────────────────────────
   const NOTIF_STORAGE_KEY = 'crm_notif_read_ids';
   const getReadIds = () => {
     try { return new Set(JSON.parse(localStorage.getItem(NOTIF_STORAGE_KEY) || '[]')); }
@@ -34,7 +36,6 @@ function AppProvider({ children }) {
   };
   const saveReadId = (id) => {
     const ids = getReadIds(); ids.add(id);
-    // Guardar solo los últimos 500 para no inflar localStorage
     localStorage.setItem(NOTIF_STORAGE_KEY, JSON.stringify([...ids].slice(-500)));
   };
   const saveAllReadIds = (ids) => {
@@ -43,6 +44,24 @@ function AppProvider({ children }) {
     localStorage.setItem(NOTIF_STORAGE_KEY, JSON.stringify([...existing].slice(-500)));
   };
 
+  // ── Snooze de inbox alerts (24 h en localStorage) ────────────────────────────
+  const SNOOZE_KEY = 'crm_inbox_snooze';
+  const getSnoozed = () => {
+    try { return JSON.parse(localStorage.getItem(SNOOZE_KEY) || '{}'); }
+    catch { return {}; }
+  };
+  const snoozeAlert = (id) => {
+    const s = getSnoozed();
+    s[id] = Date.now() + 24 * 3600 * 1000;
+    localStorage.setItem(SNOOZE_KEY, JSON.stringify(s));
+    setInboxAlerts(prev => prev.filter(a => a.id !== id));
+  };
+  const isSnoozed = (id) => {
+    const s = getSnoozed();
+    return s[id] && s[id] > Date.now();
+  };
+
+  // ── Carga de actividades ─────────────────────────────────────────────────────
   useEff(() => {
     CrmApi.getActivity(50).then(activities => {
       const readIds = getReadIds();
@@ -64,11 +83,23 @@ function AppProvider({ children }) {
           : a.orderCode
             ? { kind: 'order', code: a.orderCode }
             : null;
-        // Marcar como leída si el ID ya estaba en localStorage
         return { id: a.id, kind, text: a.detail, at: a.createdAt, read: readIds.has(a.id), ref, userName: a.userName };
       });
       setNotifications(notifs);
     }).catch(() => setNotifications([]));
+  }, []);
+
+  // ── Carga y polling de inbox alerts (cada 10 min) ────────────────────────────
+  const loadInboxAlerts = useRef(null);
+  loadInboxAlerts.current = () => {
+    CrmApi.getNotificationsInbox().then(alerts => {
+      setInboxAlerts((alerts || []).filter(a => !isSnoozed(a.id)));
+    }).catch(() => {});
+  };
+  useEff(() => {
+    loadInboxAlerts.current();
+    const t = setInterval(() => loadInboxAlerts.current(), 10 * 60 * 1000);
+    return () => clearInterval(t);
   }, []);
 
   // Quote-level filters (shared by board)
@@ -234,6 +265,7 @@ function AppProvider({ children }) {
 
   const value = {
     quotes, setQuotes, orders, setOrders, clients, setClients, users, activity, comments, notifications,
+    inboxAlerts, snoozeAlert,
     quoteFilters, setQuoteFilters, orderFilters, setOrderFilters,
     currentUserId, setCurrentUserId, roleKey, setRoleKey,
     addQuote, addOrder, addClient, updateQuote, updateOrder,
@@ -1137,38 +1169,138 @@ const MODAL_REGISTRY = {
 
 // ---------- Notifications Popover ----------
 function NotificationsPopover({ onClose }) {
-  const { notifications, markNotificationRead, markAllNotificationsRead, openModal } = useApp();
-  const toneClass = { ok:'bg-emerald-500', bad:'bg-red-500', warn:'bg-orange-500', info:'bg-brand' };
+  const { notifications, markNotificationRead, markAllNotificationsRead, openModal,
+          inboxAlerts, snoozeAlert } = useApp();
+  const [tab, setTab] = useS(inboxAlerts.length > 0 ? 'inbox' : 'activity');
+
+  const toneClass  = { ok:'bg-emerald-500', bad:'bg-red-500', warn:'bg-orange-500', info:'bg-brand' };
+  const sevColor   = { high:'text-red-500 bg-red-50 border-red-100',
+                       medium:'text-orange-500 bg-orange-50 border-orange-100',
+                       low:'text-brand bg-brandSoft border-brandSoft' };
+  const sevDot     = { high:'bg-red-400', medium:'bg-orange-400', low:'bg-brand' };
+
+  // Mapa de iconos por tipo de alerta
+  const alertIcon = {
+    UNASSIGNED_QUOTES:     '👤',
+    UNLINKED_PRESUPUESTOS: '🔗',
+    PENDING_USERS:         '✅',
+    OVERDUE_STAGES:        '⏰',
+    FOLLOW_UP_DUE:         '📅',
+  };
+
+  const handleAlertAction = (alert) => {
+    onClose();
+    if (alert.action?.view === 'quotes') openModal('search');
+    else if (alert.action?.view === 'team') openModal('search');
+  };
+
   return (
     <>
       <div className="fixed inset-0 z-30" onClick={onClose}/>
-      <div className="absolute right-0 top-full mt-2 w-[360px] bg-white rounded-xl shadow-pop border border-line modal-enter z-40 overflow-hidden">
-        <div className="px-4 py-3 border-b border-line flex items-center justify-between">
-          <div className="text-sm font-semibold text-ink-900">Notificaciones</div>
-          <button onClick={markAllNotificationsRead} className="text-[11px] text-brand hover:underline">Marcar todas como leídas</button>
-        </div>
-        <div className="max-h-[400px] overflow-y-auto scroll-thin">
-          {notifications.length === 0 && (
-            <div className="py-10 text-center text-ink-500 text-[12px]">Sin notificaciones</div>
-          )}
-          {notifications.map(n => (
-            <button key={n.id}
-              onClick={()=>{
-                markNotificationRead(n.id);
-                onClose();
-                if (n.ref?.kind==='quote') openModal('quoteDetail', { code: n.ref.code });
-                if (n.ref?.kind==='order') openModal('orderDetail', { code: n.ref.code });
-              }}
-              className={cx('w-full text-left px-4 py-3 border-b border-line flex gap-3 items-start hover:bg-surface transition-colors',
-                !n.read && 'bg-brandSoft/30')}>
-              <span className={cx('w-2 h-2 rounded-full mt-1.5 shrink-0', toneClass[n.kind])}/>
-              <div className="flex-1 min-w-0">
-                <div className="text-[13px] leading-snug text-ink-900">{n.text}</div>
-                <div className="text-[11px] text-ink-500 mt-0.5 mono">{fmtDateTime(n.at)}</div>
-              </div>
-              {!n.read && <span className="w-1.5 h-1.5 rounded-full bg-brand mt-2"/>}
+      <div className="absolute right-0 top-full mt-2 w-[380px] bg-white rounded-xl shadow-pop border border-line modal-enter z-40 overflow-hidden">
+        {/* Header con tabs */}
+        <div className="px-4 pt-3 pb-0 border-b border-line">
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-sm font-semibold text-ink-900">Notificaciones</div>
+            {tab === 'activity' && (
+              <button onClick={markAllNotificationsRead} className="text-[11px] text-brand hover:underline">
+                Marcar todas como leídas
+              </button>
+            )}
+          </div>
+          <div className="flex gap-1">
+            <button onClick={() => setTab('inbox')}
+              className={cx('px-3 py-1.5 text-[12px] font-medium rounded-t-md border-b-2 transition-colors',
+                tab === 'inbox' ? 'border-brand text-brand' : 'border-transparent text-ink-400 hover:text-ink-700')}>
+              Pendiente
+              {inboxAlerts.length > 0 && (
+                <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-bad text-white text-[10px] font-bold">
+                  {inboxAlerts.length}
+                </span>
+              )}
             </button>
-          ))}
+            <button onClick={() => setTab('activity')}
+              className={cx('px-3 py-1.5 text-[12px] font-medium rounded-t-md border-b-2 transition-colors',
+                tab === 'activity' ? 'border-brand text-brand' : 'border-transparent text-ink-400 hover:text-ink-700')}>
+              Actividad
+              {notifications.filter(n => !n.read).length > 0 && (
+                <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-brand text-white text-[10px] font-bold">
+                  {notifications.filter(n => !n.read).length}
+                </span>
+              )}
+            </button>
+          </div>
+        </div>
+
+        <div className="max-h-[440px] overflow-y-auto scroll-thin">
+          {/* Tab: Pendiente (inbox alerts) */}
+          {tab === 'inbox' && (
+            <>
+              {inboxAlerts.length === 0 ? (
+                <div className="py-10 text-center">
+                  <div className="text-2xl mb-2">✨</div>
+                  <div className="text-ink-500 text-[12px]">Todo al día, sin pendientes</div>
+                </div>
+              ) : (
+                <div className="p-3 space-y-2">
+                  {inboxAlerts.map(alert => (
+                    <div key={alert.id}
+                      className={cx('rounded-lg border p-3', sevColor[alert.severity] || sevColor.low)}>
+                      <div className="flex items-start gap-2">
+                        <span className="text-base leading-none mt-0.5">{alertIcon[alert.type] || '📌'}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[13px] font-semibold leading-snug">{alert.title}</div>
+                          {alert.description && (
+                            <div className="text-[11px] mt-0.5 opacity-80 leading-snug">{alert.description}</div>
+                          )}
+                        </div>
+                        <span className={cx('w-2 h-2 rounded-full mt-1 shrink-0', sevDot[alert.severity])}/>
+                      </div>
+                      <div className="flex gap-2 mt-2.5">
+                        {alert.action && (
+                          <button onClick={() => handleAlertAction(alert)}
+                            className="px-2.5 py-1 rounded-md bg-white/70 hover:bg-white text-[11px] font-medium border border-current/20 transition-colors">
+                            {alert.action.label}
+                          </button>
+                        )}
+                        <button onClick={() => snoozeAlert(alert.id)}
+                          className="px-2.5 py-1 rounded-md text-[11px] font-medium opacity-60 hover:opacity-100 transition-opacity">
+                          Recordar en 24 h
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Tab: Actividad (feed histórico) */}
+          {tab === 'activity' && (
+            <>
+              {notifications.length === 0 && (
+                <div className="py-10 text-center text-ink-500 text-[12px]">Sin actividad reciente</div>
+              )}
+              {notifications.map(n => (
+                <button key={n.id}
+                  onClick={()=>{
+                    markNotificationRead(n.id);
+                    onClose();
+                    if (n.ref?.kind==='quote') openModal('quoteDetail', { code: n.ref.code });
+                    if (n.ref?.kind==='order') openModal('orderDetail', { code: n.ref.code });
+                  }}
+                  className={cx('w-full text-left px-4 py-3 border-b border-line flex gap-3 items-start hover:bg-surface transition-colors',
+                    !n.read && 'bg-brandSoft/30')}>
+                  <span className={cx('w-2 h-2 rounded-full mt-1.5 shrink-0', toneClass[n.kind])}/>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[13px] leading-snug text-ink-900">{n.text}</div>
+                    <div className="text-[11px] text-ink-500 mt-0.5 mono">{fmtDateTime(n.at)}</div>
+                  </div>
+                  {!n.read && <span className="w-1.5 h-1.5 rounded-full bg-brand mt-2"/>}
+                </button>
+              ))}
+            </>
+          )}
         </div>
       </div>
     </>

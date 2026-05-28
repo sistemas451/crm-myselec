@@ -23,7 +23,7 @@ const helmet    = require('helmet');
 const rateLimit = require('express-rate-limit');
 const prisma    = require('./db');
 const { authMiddleware } = require('./middleware/auth');
-const { runIdleCheck } = require('./services/notifier');
+const { runIdleCheck, runStageAlerts } = require('./services/notifier');
 const { syncMails }    = require('./services/mailReader');
 const { parseFlexxusPDF, isFlexxusPDF } = require('./services/flexxusParser');
 
@@ -326,6 +326,15 @@ app.listen(PORT, () => {
   setInterval(() => {
     runIdleCheck().catch(e => console.error('idle check error:', e.message));
   }, 60 * 60 * 1000);
+
+  // Alertas por tiempo de etapa — corre una vez al día
+  setInterval(() => {
+    runStageAlerts().catch(e => console.error('stage alerts error:', e.message));
+  }, 24 * 60 * 60 * 1000);
+  // Primera ejecución 1 minuto después del arranque (deja tiempo para conectar DB)
+  setTimeout(() => {
+    runStageAlerts().catch(e => console.error('stage alerts initial error:', e.message));
+  }, 60 * 1000);
 
   // Sync automático de mails — intervalo configurable desde AppSetting
   async function scheduleMailSync() {

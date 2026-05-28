@@ -1781,6 +1781,18 @@ function Config() {
     }
   };
 
+  const handleToggleEmailAlert = async (stage) => {
+    if (!stage.maxHours) return; // solo cuando hay tiempo máximo configurado
+    const next = !stage.emailAlert;
+    setStagesData(sd => sd.map(s => s.id === stage.id ? {...s, emailAlert: next} : s));
+    try {
+      await CrmApi.updateStage(stage.id, { emailAlert: next });
+      pushToast(`${stage.label} — alerta por mail ${next ? 'activada' : 'desactivada'}`);
+    } catch (err) {
+      pushToast(err.message || 'Error al actualizar', 'bad');
+    }
+  };
+
   const startEdit = (s) => {
     setEditingId(s.id);
     setEditLabel(s.label);
@@ -2031,6 +2043,18 @@ function Config() {
                       <option value="semanas">sem.</option>
                       <option value="meses">meses</option>
                     </select>
+                  </div>
+                  {/* Toggle alerta por mail — solo visible cuando hay tiempo máximo */}
+                  <div className={cx('flex items-center gap-1.5 shrink-0 transition-opacity', !s.maxHours && 'opacity-30 pointer-events-none')}
+                    title={s.maxHours ? (s.emailAlert ? 'Desactivar alerta por mail al vendedor' : 'Activar alerta por mail al vendedor cuando se supera el tiempo') : 'Configurá un tiempo máximo primero'}>
+                    <Icon name="mail" size={12} className="text-ink-400"/>
+                    <button
+                      onClick={() => handleToggleEmailAlert(s)}
+                      className={cx('w-7 h-3.5 rounded-full relative transition-colors shrink-0',
+                        s.emailAlert && s.maxHours ? 'bg-brand' : 'bg-ink-300')}>
+                      <div className={cx('absolute top-0.5 w-2.5 h-2.5 rounded-full bg-white shadow transition-all',
+                        s.emailAlert && s.maxHours ? 'left-[14px]' : 'left-0.5')}/>
+                    </button>
                   </div>
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button onClick={() => startEdit(s)} className="btn-ghost p-1" title="Editar">

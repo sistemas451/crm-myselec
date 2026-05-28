@@ -1007,13 +1007,13 @@ function SyncResultModal({ result, onClose }) {
 
 // ---------- Topbar ----------
 function Topbar({ user, roleKey, setRoleKey }) {
-  const { notifications, openModal, pushToast } = useApp();
+  const { notifications, inboxAlerts, openModal, pushToast } = useApp();
   const [notifOpen, setNotifOpen] = useState(false);
   const _authUser = CrmAuth.getUser();
   const _jwt = decodeJwtPayload(CrmAuth.getToken());
   const loggedUser = _authUser || _jwt; // JWT como fallback si crm_user no está guardado
   const isAdmin = loggedUser?.role === 'ADMIN';
-  const unreadCount = notifications.filter(n => !n.read).length;
+  const unreadCount = notifications.filter(n => !n.read).length + (inboxAlerts?.length || 0);
 
   const handleLogout = () => {
     CrmAuth.clearToken();

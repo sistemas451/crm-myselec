@@ -112,6 +112,7 @@ model StageDefinition {
   order       Int                          // Orden de aparición
   mandatory   Boolean @default(false)      // ¿Obligatoria? (pedido de Hollman)
   maxHours    Int?                         // Tiempo máximo en esta etapa (alertas)
+  emailAlert  Boolean @default(false)      // Enviar mail al vendedor cuando se supera maxHours
   active      Boolean @default(true)
 
   @@unique([phase, stageKey])
@@ -148,6 +149,7 @@ model Quote {
   mailType       String?                    // SOLICITUD | PRESUPUESTO | OC
   inReplyTo      String?                    // Header In-Reply-To del mail (threading)
   followUpDate   DateTime?                  // Alerta a los 4 días del paso 2
+  stageChangedAt DateTime?                  // Cuándo cambió de etapa por última vez
   linkedQuoteId  String?                    // Vinculación SOLICITUD ↔ PRESUPUESTO
   linkedQuote    Quote?    @relation("QuoteLink", fields: [linkedQuoteId], references: [id])
   linkedBy       Quote[]   @relation("QuoteLink")
@@ -201,6 +203,7 @@ model Order {
   stage           String    @default("oc")
   clientOCCode    String?                   // Código OC que envía el cliente
   flexxusCode     String?                   // Código NP de Flexxus
+  stageChangedAt  DateTime?                 // Cuándo cambió de etapa por última vez
   deliveryType    String?                   // AMBA | Interior
   carrier         String?                   // Nombre del transportista
   trackingNumber  String?                   // Número de guía
