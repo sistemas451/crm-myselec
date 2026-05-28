@@ -1,20 +1,47 @@
-const { Resend } = require('resend');
+const { google } = require('googleapis');
 
-// Dirección remitente: configurá MAIL_FROM en Railway para usar tu propio dominio.
-// Sin dominio verificado en Resend, solo podés enviar a tu propia cuenta de Resend.
-// Ejemplo: MAIL_FROM=MySelec CRM <noreply@myselec.com>
-const FROM_ADDRESS = process.env.MAIL_FROM || 'MySelec CRM <onboarding@resend.dev>';
+const GMAIL_USER = process.env.MAIL_USER || 'iamyselec@gmail.com';
 
-let _resend = null;
-function getResend() {
-  if (!_resend) _resend = new Resend(process.env.RESEND_API_KEY);
-  return _resend;
+function getGmailClient() {
+  const oauth2Client = new google.auth.OAuth2(
+    process.env.GMAIL_CLIENT_ID,
+    process.env.GMAIL_CLIENT_SECRET,
+    'https://developers.google.com/oauthplayground'
+  );
+  oauth2Client.setCredentials({
+    refresh_token: process.env.GMAIL_REFRESH_TOKEN,
+  });
+  return google.gmail({ version: 'v1', auth: oauth2Client });
 }
 
-// Convierte "a@x.com, b@x.com" o un array en array limpio
-function toArray(to) {
-  if (Array.isArray(to)) return to.map(s => s.trim()).filter(Boolean);
-  return String(to).split(',').map(s => s.trim()).filter(Boolean);
+// Construye un mensaje MIME multipart (plain + html)
+function buildMime({ from, to, subject, html, text }) {
+  const toStr = Array.isArray(to) ? to.join(', ') : to;
+  const boundary = 'myseleccrm' + Date.now();
+  // Codificar el asunto en Base64 para soportar caracteres especiales (tildes, ñ)
+  const subjectEncoded = `=?UTF-8?B?${Buffer.from(subject).toString('base64')}?=`;
+  const lines = [
+    `From: ${from}`,
+    `To: ${toStr}`,
+    `Subject: ${subjectEncoded}`,
+    'MIME-Version: 1.0',
+    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+    '',
+    `--${boundary}`,
+    'Content-Type: text/plain; charset=UTF-8',
+    'Content-Transfer-Encoding: base64',
+    '',
+    Buffer.from(text || '').toString('base64'),
+    '',
+    `--${boundary}`,
+    'Content-Type: text/html; charset=UTF-8',
+    'Content-Transfer-Encoding: base64',
+    '',
+    Buffer.from(html || `<pre>${text || ''}</pre>`).toString('base64'),
+    '',
+    `--${boundary}--`,
+  ];
+  return lines.join('\r\n');
 }
 
 // Reemplaza {{key}} en template con valores del objeto ctx
@@ -27,24 +54,25 @@ function renderTemplate(text, ctx) {
   });
 }
 
+// Convierte string o array en array limpio de emails
+function toArray(to) {
+  if (Array.isArray(to)) return to.map(s => s.trim()).filter(Boolean);
+  return String(to).split(',').map(s => s.trim()).filter(Boolean);
+}
+
 async function sendMail({ to, subject, html, text }) {
-  if (!process.env.RESEND_API_KEY) {
-    console.warn('⚠️  Mailer: RESEND_API_KEY no configurado, mail omitido.');
+  if (!process.env.GMAIL_CLIENT_ID || !process.env.GMAIL_REFRESH_TOKEN) {
+    console.warn('⚠️  Mailer: GMAIL_CLIENT_ID/GMAIL_REFRESH_TOKEN no configurados, mail omitido.');
     return;
   }
-  const resend = getResend();
-  const { error } = await resend.emails.send({
-    from: FROM_ADDRESS,
-    to: toArray(to),
-    subject,
-    html: html || `<pre>${text || ''}</pre>`,
-    text: text || '',
+  const gmail = getGmailClient();
+  const from  = `MySelec CRM <${GMAIL_USER}>`;
+  const mime  = buildMime({ from, to: toArray(to), subject, html, text });
+  const raw   = Buffer.from(mime).toString('base64url');
+  await gmail.users.messages.send({
+    userId: 'me',
+    requestBody: { raw },
   });
-  if (error) {
-    const err = new Error(error.message || 'Resend error');
-    err.code = error.name;
-    throw err;
-  }
 }
 
 async function sendPasswordReset(toEmail, resetUrl) {
@@ -78,21 +106,15 @@ async function sendNotification({ toEmails, subject, body, ctx }) {
   });
 }
 
-// Verifica la configuración de Resend — útil para diagnóstico desde el admin panel
+// Verifica la configuración — útil para diagnóstico desde el admin panel
 async function verifySmtp() {
-  if (!process.env.RESEND_API_KEY) {
-    throw new Error('RESEND_API_KEY no configurado');
+  if (!process.env.GMAIL_CLIENT_ID || !process.env.GMAIL_REFRESH_TOKEN) {
+    throw new Error('GMAIL_CLIENT_ID/GMAIL_REFRESH_TOKEN no configurados');
   }
-  const resend = getResend();
-  // Llama a la API de Resend para verificar que la API key sea válida
-  const { data, error } = await resend.domains.list();
-  if (error) {
-    const err = new Error(error.message || 'Resend API error');
-    err.code = error.name;
-    throw err;
-  }
-  const domains = (data?.data || []).map(d => d.name);
-  return { provider: 'resend', from: FROM_ADDRESS, domains };
+  const gmail = getGmailClient();
+  // Obtiene el perfil del usuario para verificar que el token funcione
+  const { data } = await gmail.users.getProfile({ userId: 'me' });
+  return { provider: 'gmail-api', user: data.emailAddress, messagesTotal: data.messagesTotal };
 }
 
 module.exports = { sendMail, sendPasswordReset, sendNotification, renderTemplate, verifySmtp };
