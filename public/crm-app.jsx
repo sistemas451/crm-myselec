@@ -681,8 +681,19 @@ function Login({ onLogin }) {
     <div className="min-h-screen flex items-center justify-center relative overflow-hidden" style={bgStyle}>
       <div className="relative flex items-center justify-center p-8 w-full">
         <div className="w-full max-w-sm bg-white rounded-2xl shadow-[0_25px_60px_rgba(0,0,0,0.4)] p-8 border border-line">
-          <div className="flex items-center mb-6">
-            <Logo size={52} tone="dark"/>
+          <div className="flex flex-col items-center mb-8">
+            <div style={{
+              background: 'linear-gradient(135deg, #1B2A4A 0%, #2D4A6F 100%)',
+              borderRadius: 20,
+              padding: '18px 28px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 8px 24px rgba(27,42,74,0.35)',
+              marginBottom: 0,
+            }}>
+              <img src="/Logo.png" alt="MySelec" style={{ height: 48, width: 'auto', objectFit: 'contain', display: 'block' }}/>
+            </div>
           </div>
 
           {screen === 'login' && (
