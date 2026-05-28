@@ -860,9 +860,19 @@ function Sidebar({ role, screen, setScreen, user, onProfileOpen, collapsed, onTo
       style={{ width: collapsed ? 60 : 244, transition: 'width 0.2s ease' }}
     >
       {/* Logo */}
-      <div className="flex items-center justify-center border-b border-white/5 pt-5 pb-4">
-        <Logo size={collapsed ? 28 : 56}/>
-      </div>
+      {collapsed ? (
+        <div className="flex items-center justify-center border-b border-white/5 py-4" style={{height:64}}>
+          <Logo size={32}/>
+        </div>
+      ) : (
+        <div className="flex items-center justify-center border-b border-white/5 px-5" style={{height:72}}>
+          <img
+            src="/Logo.png"
+            alt="MySelec"
+            style={{ maxWidth: 160, maxHeight: 48, width: 'auto', height: 'auto', objectFit: 'contain', display: 'block' }}
+          />
+        </div>
+      )}
 
       {/* Nav */}
       <nav className="flex-1 py-4 space-y-0.5 overflow-hidden" style={{ padding: collapsed ? '16px 8px' : '16px 10px' }}>
@@ -1024,7 +1034,7 @@ function Topbar({ user, roleKey, setRoleKey }) {
   return (
     <header className="h-[62px] bg-white border-b border-line flex items-center gap-4 px-6 shrink-0 relative">
       <div className="flex items-center gap-2 text-sm flex-1 min-w-0">
-        <Logo size={20}/>
+        <img src="/Logo.png" alt="MySelec" style={{height:22, width:'auto', objectFit:'contain', flexShrink:0}}/>
         <span className="text-ink-300">/</span>
         <span className="font-semibold text-ink-900 truncate">
           {(user?.name || loggedUser?.name)?.split(' ')?.[0] || 'MySelec CRM'}
