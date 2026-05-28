@@ -16,6 +16,7 @@ function getTransporter() {
     host: smtpHost(),
     port: 465,
     secure: true,             // SSL desde el inicio (puerto 465)
+    family: 4,                // forzar IPv4 — Railway no tiene salida IPv6
     connectionTimeout: 15000, // 15s
     greetingTimeout: 15000,
     socketTimeout: 20000,
