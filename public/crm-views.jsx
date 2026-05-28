@@ -1643,8 +1643,10 @@ function Config() {
   const [mailAccounts,  setMailAccounts]  = useState([]);
   const [mailSettings,  setMailSettings]  = useState({ mail_sync_interval_hours: '2', mail_lookback_days: '2', mail_sync_enabled: 'true' });
   const [mailLoading,   setMailLoading]   = useState(false);
-  const [mailSyncing,   setMailSyncing]   = useState({}); // { [email]: true/false }
+  const [mailSyncing,    setMailSyncing]    = useState({}); // { [email]: true/false }
   const [mailSyncingAll, setMailSyncingAll] = useState(false);
+  const [mailTesting,    setMailTesting]    = useState({}); // { [email]: true/false }
+  const [mailTestResult, setMailTestResult] = useState({}); // { [email]: { ok, error, labels } }
   const [addAccountOpen, setAddAccountOpen] = useState(false);
   const [addAccountForm, setAddAccountForm] = useState({ user: '', password: '' });
   const [addAccountMode, setAddAccountMode] = useState('selector'); // 'selector' | 'manual'
@@ -1730,11 +1732,31 @@ function Config() {
         headers: { Authorization: `Bearer ${localStorage.getItem('crm_token')}` },
       });
       const data = await res.json();
-      pushToast(`${email} · ${data.synced} nuevo(s)`);
+      if (data.errors?.length) {
+        pushToast(`Error: ${data.errors[0]}`, 'bad');
+      } else {
+        pushToast(`${email} · ${data.synced} nuevo(s)`);
+      }
       const accounts = await fetch('/api/mail/accounts', { headers: { Authorization: `Bearer ${localStorage.getItem('crm_token')}` } }).then(r => r.json());
       setMailAccounts(Array.isArray(accounts) ? accounts : []);
     } catch { pushToast('Error al sincronizar', 'bad'); }
     setMailSyncing(s => ({ ...s, [email]: false }));
+  };
+
+  const handleTestAccount = async (email) => {
+    setMailTesting(s => ({ ...s, [email]: true }));
+    setMailTestResult(s => ({ ...s, [email]: null }));
+    try {
+      const res = await fetch(`/api/mail/test/${encodeURIComponent(email)}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${localStorage.getItem('crm_token')}` },
+      });
+      const data = await res.json();
+      setMailTestResult(s => ({ ...s, [email]: data }));
+    } catch (e) {
+      setMailTestResult(s => ({ ...s, [email]: { ok: false, error: e.message } }));
+    }
+    setMailTesting(s => ({ ...s, [email]: false }));
   };
 
   const reloadMailAccounts = async () => {
@@ -2315,39 +2337,68 @@ function Config() {
                 <span className="text-[12px]">Hacé clic en "Agregar cuenta" para configurar la primera.</span>
               </div>
             ) : (
-              <table className="tbl w-full">
-                <thead><tr>
-                  <th>Cuenta</th><th>Origen</th><th>Último sync</th><th>Estado</th><th></th>
-                </tr></thead>
-                <tbody>
-                  {mailAccounts.map(acc => (
-                    <tr key={acc.user}>
-                      <td className="mono text-[12px]">{acc.user}</td>
-                      <td><Badge tone={acc.origin === 'db' ? 'blue' : 'slate'}>{acc.origin === 'db' ? 'Manual' : 'Sistema'}</Badge></td>
-                      <td className="text-[12px] text-ink-500">
-                        {acc.lastSyncAt
-                          ? new Date(acc.lastSyncAt).toLocaleString('es-AR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })
-                          : <span className="text-ink-400">Nunca</span>}
-                      </td>
-                      <td><Badge tone={acc.isActive ? 'green' : 'gray'} dot>{acc.isActive ? 'Activa' : 'Inactiva'}</Badge></td>
-                      <td className="text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          <button onClick={() => handleSyncOne(acc.user)} disabled={mailSyncing[acc.user]}
-                            className="btn-ghost text-[12px] flex items-center gap-1.5 disabled:opacity-60">
-                            <Icon name="refresh-cw" size={12} className={mailSyncing[acc.user] ? 'animate-spin' : ''}/>
-                            {mailSyncing[acc.user] ? 'Sync…' : 'Sincronizar'}
-                          </button>
-                          {acc.origin === 'db' && (
-                            <button onClick={() => handleDeleteAccount(acc.user)} className="btn-ghost p-1.5" title="Eliminar">
-                              <Icon name="trash-2" size={13} className="text-red-400"/>
-                            </button>
-                          )}
+              <div className="divide-y divide-line">
+                {mailAccounts.map(acc => (
+                  <div key={acc.user}>
+                    <div className="px-5 py-3 flex items-center gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[13px] font-mono font-medium text-ink-800">{acc.user}</div>
+                        <div className="text-[11px] text-ink-400 mt-0.5">
+                          {acc.origin === 'db' ? 'Agregada manualmente' : 'Configurada en sistema'} ·{' '}
+                          {acc.lastSyncAt
+                            ? 'Último sync: ' + new Date(acc.lastSyncAt).toLocaleString('es-AR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })
+                            : 'Sin sync'}
                         </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                      </div>
+                      <Badge tone={acc.isActive ? 'green' : 'gray'} dot>{acc.isActive ? 'Activa' : 'Inactiva'}</Badge>
+                      <button onClick={() => handleTestAccount(acc.user)} disabled={mailTesting[acc.user]}
+                        className="btn-ghost text-[12px] flex items-center gap-1.5 disabled:opacity-60">
+                        <Icon name="plug" size={12} className={mailTesting[acc.user] ? 'animate-pulse' : ''}/>
+                        {mailTesting[acc.user] ? 'Probando…' : 'Test'}
+                      </button>
+                      <button onClick={() => handleSyncOne(acc.user)} disabled={mailSyncing[acc.user]}
+                        className="btn-ghost text-[12px] flex items-center gap-1.5 disabled:opacity-60">
+                        <Icon name="refresh-cw" size={12} className={mailSyncing[acc.user] ? 'animate-spin' : ''}/>
+                        {mailSyncing[acc.user] ? 'Sync…' : 'Sincronizar'}
+                      </button>
+                      {acc.origin === 'db' && (
+                        <button onClick={() => handleDeleteAccount(acc.user)} className="btn-ghost p-1.5" title="Eliminar">
+                          <Icon name="trash-2" size={13} className="text-red-400"/>
+                        </button>
+                      )}
+                    </div>
+                    {/* Resultado del test de conexión */}
+                    {mailTestResult[acc.user] && (
+                      <div className={`mx-5 mb-3 rounded-lg px-3 py-2.5 text-[12px] ${mailTestResult[acc.user].ok ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
+                        {mailTestResult[acc.user].ok ? (
+                          <>
+                            <div className="font-semibold text-green-700 mb-1.5">✅ Conexión OK</div>
+                            <div className="text-green-700 mb-1">Etiquetas/carpetas disponibles vía IMAP:</div>
+                            <div className="flex flex-wrap gap-1">
+                              {(mailTestResult[acc.user].labels || []).map(l => (
+                                <span key={l} className={`px-1.5 py-0.5 rounded text-[11px] font-mono ${l.toLowerCase() === 'crm' ? 'bg-green-200 text-green-800 font-bold' : 'bg-white border border-green-200 text-green-700'}`}>
+                                  {l}
+                                </span>
+                              ))}
+                            </div>
+                            {!(mailTestResult[acc.user].labels || []).some(l => l.toLowerCase() === 'crm') && (
+                              <div className="mt-2 text-amber-700 font-medium">⚠️ No se encontró la etiqueta "crm" — creala en Gmail y habilitala en IMAP</div>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            <div className="font-semibold text-red-700 mb-1">❌ Error de conexión</div>
+                            <div className="text-red-600 font-mono">{mailTestResult[acc.user].error}</div>
+                            {mailTestResult[acc.user].error?.includes('Invalid credentials') && (
+                              <div className="mt-1.5 text-red-500">→ La contraseña de aplicación es incorrecta o IMAP no está habilitado en Gmail.</div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
             )}
           </div>
 

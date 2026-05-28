@@ -144,6 +144,62 @@ router.delete('/accounts/:email', authMiddleware, requireRole('ADMIN'), async (r
   }
 });
 
+// ── POST /api/mail/test/:email — diagnóstico de conexión IMAP ────────────────
+router.post('/test/:email', authMiddleware, requireRole('ADMIN'), async (req, res) => {
+  try {
+    const targetEmail = decodeURIComponent(req.params.email).toLowerCase();
+    const accounts    = await getMailAccounts();
+    const account     = accounts.find(a => a.user.toLowerCase() === targetEmail);
+    if (!account) return res.status(404).json({ ok: false, error: `Cuenta no encontrada: ${targetEmail}` });
+
+    const Imap = require('imap');
+    const diag = await new Promise((resolve) => {
+      const imap = new Imap({
+        user:        account.user,
+        password:    account.password,
+        host:        process.env.MAIL_HOST || 'imap.gmail.com',
+        port:        parseInt(process.env.MAIL_PORT || '993'),
+        tls:         true,
+        tlsOptions:  { rejectUnauthorized: true },
+        authTimeout: 12000,
+        connTimeout: 20000,
+      });
+
+      imap.once('ready', () => {
+        // Listar todas las carpetas/etiquetas disponibles
+        imap.getBoxes((err, boxes) => {
+          if (err) {
+            imap.end();
+            return resolve({ ok: false, error: `getBoxes: ${err.message}`, boxes: [] });
+          }
+          // Aplanar el árbol de carpetas (un nivel, más Gmail subcarpetas)
+          const labels = [];
+          const walk = (tree, prefix) => {
+            for (const [name, info] of Object.entries(tree || {})) {
+              const full = prefix ? `${prefix}${info.delimiter || '/'}${name}` : name;
+              labels.push(full);
+              if (info.children) walk(info.children, full);
+            }
+          };
+          walk(boxes, '');
+          imap.end();
+          resolve({ ok: true, labels });
+        });
+      });
+
+      imap.once('error', (err) => {
+        resolve({ ok: false, error: err.message, code: err.source || err.code || null });
+      });
+
+      imap.connect();
+    });
+
+    res.json(diag);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ── GET /api/mail/inbox — bandeja reciente ────────────────────────────────────
 router.get('/inbox', authMiddleware, async (req, res) => {
   try {
