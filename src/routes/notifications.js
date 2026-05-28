@@ -216,31 +216,100 @@ async function _getOverdueItems(prisma, now, sellerId) {
 
 // POST /api/notifications/cron/weekly-report — fuerza el envío del resumen semanal
 // Solo admin autenticado puede dispararlo manualmente; ignora restricción de día/hora.
+// Ejecuta paso a paso y devuelve diagnóstico exacto si algo falla.
 router.post('/cron/weekly-report', authMiddleware, adminOnly, async (req, res) => {
+  const diag = {};
   try {
-    // Limpiar last_sent para que runWeeklyReport no lo bloquee
+    const { sendMail } = require('../services/mailer');
+
+    // Paso 1: obtener admins
+    const admins = await prisma.user.findMany({
+      where: { role: 'ADMIN', active: true },
+      select: { email: true, name: true },
+    });
+    diag.step = 'admins'; diag.adminEmails = admins.map(a => a.email);
+    if (!admins.length) return res.json({ ok: false, error: 'No hay admins activos', diag });
+
+    // Paso 2: construir stats básicos
+    const now = new Date();
+    const argTime = new Date(now.getTime() - 3 * 3600 * 1000);
+    const reportDate = argTime.toLocaleDateString('es-AR', { day: '2-digit', month: 'long', year: 'numeric' });
+    const weekStart = new Date(now.getTime() - 7 * 86400000);
+
+    const [quotesThisWeek, wonThisWeek] = await Promise.all([
+      prisma.quote.count({ where: { createdAt: { gte: weekStart } } }),
+      prisma.quote.count({ where: { stage: 'aceptada', updatedAt: { gte: weekStart } } }),
+    ]);
+    diag.step = 'stats'; diag.quotesThisWeek = quotesThisWeek; diag.wonThisWeek = wonThisWeek;
+
+    const allQuotes = await prisma.quote.findMany({
+      where: { isDraft: false },
+      select: { stage: true, amount: true, sellerId: true },
+    });
+    diag.step = 'allQuotes'; diag.total = allQuotes.length;
+
+    const totalActive = allQuotes.filter(q => !['aceptada','rechazada'].includes(q.stage)).length;
+    const totalMonto  = allQuotes.reduce((s, q) => s + (q.amount || 0), 0);
+    const APP_URL = process.env.APP_URL || 'https://crm-gerenciando-canales-production-c7d6.up.railway.app';
+
+    // Paso 3: enviar mail de prueba con HTML simplificado
+    diag.step = 'sendMail';
+    const subject = `📊 Resumen semanal MySelec CRM — ${reportDate}`;
+    const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background:#F1F5F9;font-family:sans-serif">
+<div style="max-width:620px;margin:32px auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.08)">
+  <div style="background:#1B2A4A;padding:32px 36px 28px">
+    <div style="color:#fff;font-size:20px;font-weight:700">📊 Resumen Semanal</div>
+    <div style="color:#94A3B8;font-size:13px;margin-top:4px">MySelec CRM · ${reportDate}</div>
+  </div>
+  <div style="padding:28px 36px">
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px">
+      <div style="background:#F8FAFC;border-radius:10px;padding:16px">
+        <div style="font-size:11px;color:#64748B;margin-bottom:4px">Nuevas cotizaciones</div>
+        <div style="font-size:28px;font-weight:700;color:#1B2A4A">${quotesThisWeek}</div>
+        <div style="font-size:11px;color:#94A3B8">últimos 7 días</div>
+      </div>
+      <div style="background:#F8FAFC;border-radius:10px;padding:16px">
+        <div style="font-size:11px;color:#64748B;margin-bottom:4px">Ganadas esta semana</div>
+        <div style="font-size:28px;font-weight:700;color:#22C55E">${wonThisWeek}</div>
+        <div style="font-size:11px;color:#94A3B8">${totalActive} activas en total</div>
+      </div>
+      <div style="background:#F8FAFC;border-radius:10px;padding:16px">
+        <div style="font-size:11px;color:#64748B;margin-bottom:4px">Monto total pipeline</div>
+        <div style="font-size:22px;font-weight:700;color:#1B2A4A">U$S ${Math.round(totalMonto).toLocaleString('es-AR')}</div>
+        <div style="font-size:11px;color:#94A3B8">cotizaciones activas</div>
+      </div>
+      <div style="background:#F8FAFC;border-radius:10px;padding:16px">
+        <div style="font-size:11px;color:#64748B;margin-bottom:4px">Cotizaciones activas</div>
+        <div style="font-size:28px;font-weight:700;color:#1B2A4A">${totalActive}</div>
+        <div style="font-size:11px;color:#94A3B8">en pipeline</div>
+      </div>
+    </div>
+    <div style="text-align:center;margin-top:28px">
+      <a href="${APP_URL}" style="display:inline-block;padding:12px 28px;background:#3B82F6;color:#fff;text-decoration:none;border-radius:8px;font-size:14px;font-weight:600">
+        Abrir el CRM →
+      </a>
+    </div>
+    <div style="font-size:11px;color:#CBD5E1;margin-top:20px;text-align:center">
+      Generado automáticamente por MySelec CRM
+    </div>
+  </div>
+</div>
+</body></html>`;
+
+    await sendMail({ to: admins.map(a => a.email), subject, html });
+    diag.step = 'done';
+
+    // Registrar envío
     await prisma.appSetting.upsert({
       where:  { key: 'weekly_report_last_sent' },
-      update: { value: '' },
-      create: { key: 'weekly_report_last_sent', value: '' },
+      update: { value: now.toISOString() },
+      create: { key: 'weekly_report_last_sent', value: now.toISOString() },
     });
 
-    // Sobrescribir temporalmente día/hora al momento actual (Argentina UTC-3)
-    const now     = new Date();
-    const argTime = new Date(now.getTime() - 3 * 3600 * 1000);
-    const curDay  = argTime.getUTCDay();
-    const curHour = argTime.getUTCHours();
-
-    await Promise.all([
-      prisma.appSetting.upsert({ where: { key: 'weekly_report_day'  }, update: { value: String(curDay)  }, create: { key: 'weekly_report_day',  value: String(curDay)  } }),
-      prisma.appSetting.upsert({ where: { key: 'weekly_report_hour' }, update: { value: String(curHour) }, create: { key: 'weekly_report_hour', value: String(curHour) } }),
-      prisma.appSetting.upsert({ where: { key: 'weekly_report_enabled' }, update: { value: 'true' }, create: { key: 'weekly_report_enabled', value: 'true' } }),
-    ]);
-
-    await runWeeklyReport();
-    res.json({ ok: true, ran: now.toISOString(), argDay: curDay, argHour: curHour });
+    res.json({ ok: true, ran: now.toISOString(), sentTo: admins.map(a => a.email), diag });
   } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
+    res.status(500).json({ ok: false, error: err.message, stack: err.stack?.split('\n').slice(0,5), diag });
   }
 });
 
