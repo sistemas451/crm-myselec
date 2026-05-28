@@ -1034,7 +1034,7 @@ function Topbar({ user, roleKey, setRoleKey }) {
   return (
     <header className="h-[62px] bg-white border-b border-line flex items-center gap-4 px-6 shrink-0 relative">
       <div className="flex items-center gap-2 text-sm flex-1 min-w-0">
-        <img src="/Logo.png" alt="MySelec" style={{height:22, width:'auto', objectFit:'contain', flexShrink:0}}/>
+        <img src="/Logo-M.png" alt="MySelec" style={{height:26, width:'auto', objectFit:'contain', flexShrink:0}}/>
         <span className="text-ink-300">/</span>
         <span className="font-semibold text-ink-900 truncate">
           {(user?.name || loggedUser?.name)?.split(' ')?.[0] || 'MySelec CRM'}
