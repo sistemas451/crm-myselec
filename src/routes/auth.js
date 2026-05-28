@@ -7,7 +7,7 @@ const prisma = require('../db');
 
 const router = express.Router();
 
-// ─── Helper: dominios permitidos ────────────────────────────────────────────
+// ─── Helpers: dominios y correos permitidos ──────────────────────────────────
 const DEFAULT_ALLOWED_DOMAINS = 'myselec.com,myselec.com.ar,gmail.com';
 
 async function getAllowedDomains() {
@@ -20,9 +20,24 @@ async function getAllowedDomains() {
   }
 }
 
-function emailDomainAllowed(email, domains) {
-  const domain = email.split('@')[1]?.toLowerCase();
-  return domain && domains.includes(domain);
+async function getAllowedEmails() {
+  try {
+    const row = await prisma.appSetting.findUnique({ where: { key: 'allowed_emails' } });
+    if (!row?.value) return [];
+    return row.value.split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+// Devuelve true si el email está permitido: su dominio está en la lista
+// de dominios O su dirección completa está en la lista de correos.
+async function emailAllowed(email) {
+  const normalized = email.toLowerCase().trim();
+  const [allowedDomains, allowedEmails] = await Promise.all([getAllowedDomains(), getAllowedEmails()]);
+  if (allowedEmails.includes(normalized)) return true;
+  const domain = normalized.split('@')[1];
+  return domain && allowedDomains.includes(domain);
 }
 
 // GET /api/auth/config — configuración pública (sin auth) para el frontend
@@ -99,10 +114,10 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ error: 'Nombre, apellido, email, contraseña, teléfono y DNI son requeridos' });
     }
 
-    // Validación de dominio de email
-    const domains = await getAllowedDomains();
-    if (!emailDomainAllowed(email, domains)) {
-      return res.status(400).json({ error: `Solo se permiten emails corporativos (${domains.filter(d => d !== 'gmail.com').join(', ')}) o Gmail.` });
+    // Validación de dominio/correo permitido
+    if (!await emailAllowed(email)) {
+      const domains = await getAllowedDomains();
+      return res.status(400).json({ error: `Solo se permiten emails corporativos (${domains.join(', ')}) o correos autorizados individualmente.` });
     }
 
     // Validación de contraseña
@@ -166,10 +181,10 @@ router.post('/forgot-password', async (req, res) => {
     const { email } = req.body;
     if (!email) return res.status(400).json({ error: 'Email requerido' });
 
-    // Validar dominio antes de procesar
-    const domains = await getAllowedDomains();
-    if (!emailDomainAllowed(email, domains)) {
-      return res.status(400).json({ error: `Solo se permiten emails corporativos (${domains.filter(d => d !== 'gmail.com').join(', ')}) o Gmail.` });
+    // Validar dominio/correo antes de procesar
+    if (!await emailAllowed(email)) {
+      const domains = await getAllowedDomains();
+      return res.status(400).json({ error: `Solo se permiten emails corporativos (${domains.join(', ')}) o correos autorizados individualmente.` });
     }
 
     const user = await prisma.user.findUnique({ where: { email } });

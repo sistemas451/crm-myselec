@@ -17,6 +17,9 @@ const DEFAULTS = {
 
   // ── Acceso ───────────────────────────────────────────────────────────────
   allowed_email_domains:       'myselec.com,myselec.com.ar,gmail.com',
+  // Correos individuales autorizados aunque su dominio no esté en la lista anterior.
+  // Útil para admins/devs con Gmail u otros dominios externos.
+  allowed_emails:              '',
 
   // ── Tiempos de seguimiento ───────────────────────────────────────────────
   // Días tras enviar un presupuesto para marcar seguimiento pendiente (banner naranja)
