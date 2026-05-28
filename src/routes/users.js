@@ -111,7 +111,7 @@ router.get('/', authMiddleware, async (req, res) => {
     const users = await prisma.user.findMany({
       where: { pendingApproval: false },
       orderBy: [{ role: 'asc' }, { name: 'asc' }],
-      select: { id: true, name: true, email: true, role: true, zone: true, active: true, avatar: true, phone: true, passwordChangedAt: true, createdAt: true },
+      select: { id: true, name: true, email: true, role: true, zone: true, active: true, avatar: true, phone: true, passwordChangedAt: true, notifyUnassigned: true, createdAt: true },
     });
 
     // Enriquecer con stats solo para admin

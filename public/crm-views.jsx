@@ -1335,7 +1335,8 @@ function Team() {
                       method: 'PATCH',
                       headers: { Authorization: `Bearer ${localStorage.getItem('crm_token')}` },
                     });
-                    if (res.ok) reload();
+                    if (res.ok) { reload(); pushToast(u.notifyUnassigned !== false ? 'Alertas desactivadas' : 'Alertas activadas', 'ok'); }
+                    else { const d = await res.json().catch(()=>({})); pushToast(d.error || 'Error al actualizar', 'bad'); }
                   } catch { pushToast('Error al actualizar', 'bad'); }
                 }}
                 title={u.notifyUnassigned !== false ? 'Desactivar alertas de mails sin cliente' : 'Activar alertas de mails sin cliente'}
