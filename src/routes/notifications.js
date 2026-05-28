@@ -17,6 +17,11 @@ router.get('/inbox', authMiddleware, async (req, res) => {
     const now = new Date();
     const alerts = [];
 
+    // Leer umbral de inactividad configurable
+    const idleInboxSetting = await prisma.appSetting.findUnique({ where: { key: 'idle_inbox_days' } });
+    const idleInboxDays    = parseInt(idleInboxSetting?.value ?? '5', 10);
+    const idleCutoff       = new Date(now.getTime() - idleInboxDays * 86400 * 1000);
+
     if (role === 'ADMIN') {
       // 1. Solicitudes sin vendedor asignado
       const unassigned = await prisma.quote.count({
@@ -85,6 +90,27 @@ router.get('/inbox', authMiddleware, async (req, res) => {
         });
       }
 
+      // 5. Cotizaciones activas sin actividad en X días (configurable)
+      const idleQuotesAdmin = await prisma.quote.count({
+        where: {
+          isDraft: false,
+          stage: { notIn: ['aceptada', 'rechazada'] },
+          updatedAt: { lte: idleCutoff },
+        },
+      });
+      if (idleQuotesAdmin > 0) {
+        alerts.push({
+          id: 'idle-quotes',
+          type: 'IDLE_QUOTES',
+          severity: 'low',
+          icon: 'clock',
+          title: `${idleQuotesAdmin} cotización${idleQuotesAdmin > 1 ? 'es' : ''} sin actividad (>${idleInboxDays} días)`,
+          description: `Cotizaciones activas que no tuvieron movimiento en más de ${idleInboxDays} días.`,
+          action: { label: 'Ver cotizaciones', view: 'quotes' },
+          count: idleQuotesAdmin,
+        });
+      }
+
     } else if (role === 'VENDEDOR') {
       // 1. Cotizaciones del vendedor con followUpDate vencido
       const followUps = await prisma.quote.count({
@@ -120,6 +146,28 @@ router.get('/inbox', authMiddleware, async (req, res) => {
           action: { label: 'Ver cotizaciones', view: 'quotes' },
           count: overdueQuotes.total,
           items: overdueQuotes.items,
+        });
+      }
+
+      // 3. Cotizaciones del vendedor sin actividad en X días (configurable)
+      const idleQuotesVend = await prisma.quote.count({
+        where: {
+          sellerId: userId,
+          isDraft: false,
+          stage: { notIn: ['aceptada', 'rechazada'] },
+          updatedAt: { lte: idleCutoff },
+        },
+      });
+      if (idleQuotesVend > 0) {
+        alerts.push({
+          id: 'idle-quotes',
+          type: 'IDLE_QUOTES',
+          severity: 'low',
+          icon: 'clock',
+          title: `${idleQuotesVend} cotización${idleQuotesVend > 1 ? 'es' : ''} sin actividad (>${idleInboxDays} días)`,
+          description: `Tus cotizaciones activas que no tuvieron movimiento en más de ${idleInboxDays} días.`,
+          action: { label: 'Ver mis cotizaciones', view: 'quotes' },
+          count: idleQuotesVend,
         });
       }
     }

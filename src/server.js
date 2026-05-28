@@ -23,7 +23,7 @@ const helmet    = require('helmet');
 const rateLimit = require('express-rate-limit');
 const prisma    = require('./db');
 const { authMiddleware } = require('./middleware/auth');
-const { runIdleCheck, runStageAlerts } = require('./services/notifier');
+const { runIdleCheck, runStageAlerts, runWeeklyReport } = require('./services/notifier');
 const { syncMails }    = require('./services/mailReader');
 const { parseFlexxusPDF, isFlexxusPDF } = require('./services/flexxusParser');
 
@@ -335,6 +335,11 @@ app.listen(PORT, () => {
   setTimeout(() => {
     runStageAlerts().catch(e => console.error('stage alerts initial error:', e.message));
   }, 60 * 1000);
+
+  // Resumen semanal — corre cada hora y actúa solo el día/hora configurados
+  setInterval(() => {
+    runWeeklyReport().catch(e => console.error('weekly report error:', e.message));
+  }, 60 * 60 * 1000);
 
   // Sync automático de mails — intervalo configurable desde AppSetting
   async function scheduleMailSync() {

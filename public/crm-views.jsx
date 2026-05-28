@@ -1617,6 +1617,12 @@ function Config() {
   const [followUpDays, setFollowUpDays] = useState('4');
   const [allowedEmailDomains, setAllowedEmailDomains] = useState('myselec.com,myselec.com.ar,gmail.com');
   const [savingDomains, setSavingDomains] = useState(false);
+  // Alertas automáticas
+  const [idleInboxDays,        setIdleInboxDays]        = useState('5');
+  const [idleEmailDays,        setIdleEmailDays]        = useState('7');
+  const [weeklyReportEnabled,  setWeeklyReportEnabled]  = useState('true');
+  const [weeklyReportDay,      setWeeklyReportDay]      = useState('1');
+  const [weeklyReportHour,     setWeeklyReportHour]     = useState('9');
   const [showVars, setShowVars] = useState(false);
 
   // Email templates state
@@ -1652,8 +1658,13 @@ function Config() {
       .then(r => r.json())
       .then(s => {
         setIncomingStages(prev => ({ ...prev, ...s }));
-        if (s.follow_up_days) setFollowUpDays(s.follow_up_days);
-        if (s.allowed_email_domains) setAllowedEmailDomains(s.allowed_email_domains);
+        if (s.follow_up_days)           setFollowUpDays(s.follow_up_days);
+        if (s.allowed_email_domains)    setAllowedEmailDomains(s.allowed_email_domains);
+        if (s.idle_inbox_days)          setIdleInboxDays(s.idle_inbox_days);
+        if (s.idle_email_days)          setIdleEmailDays(s.idle_email_days);
+        if (s.weekly_report_enabled !== undefined) setWeeklyReportEnabled(s.weekly_report_enabled);
+        if (s.weekly_report_day     !== undefined) setWeeklyReportDay(s.weekly_report_day);
+        if (s.weekly_report_hour    !== undefined) setWeeklyReportHour(s.weekly_report_hour);
       })
       .catch(() => {});
   }, []);
@@ -1891,6 +1902,18 @@ function Config() {
         body: JSON.stringify({ follow_up_days: val }),
       });
       pushToast('Días de seguimiento guardados');
+    } catch { pushToast('Error al guardar', 'bad'); }
+  };
+
+  const saveAutoAlertSetting = async (key, val, setter) => {
+    setter(val);
+    try {
+      await fetch('/api/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('crm_token')}` },
+        body: JSON.stringify({ [key]: val }),
+      });
+      pushToast('Configuración guardada');
     } catch { pushToast('Error al guardar', 'bad'); }
   };
 
@@ -2437,7 +2460,112 @@ function Config() {
       )}
 
       {tab==='notifs' && (
-        <div className="p-6">
+        <div className="p-6 space-y-5">
+          {/* ── Alertas automáticas ─────────────────────────────────────────────── */}
+          <div className="bg-white border border-line rounded-xl overflow-hidden">
+            <div className="px-5 py-3.5 border-b border-line">
+              <div className="font-semibold text-[13px]">Alertas automáticas</div>
+              <div className="text-[11.5px] text-ink-400 mt-0.5">
+                Configurá cuándo el CRM genera alertas en el panel y envía recordatorios por mail.
+                Los tiempos de etapa se configuran en la pestaña <strong>Etapas</strong>.
+              </div>
+            </div>
+            <div className="divide-y divide-line">
+
+              {/* ── Alerta en panel del CRM ──────────────────────────────────────── */}
+              <div className="px-5 py-4 flex items-center gap-4">
+                <div className="w-9 h-9 rounded-lg bg-blue-50 flex items-center justify-center shrink-0">
+                  <Icon name="bell" size={15} className="text-blue-500"/>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[13px] font-semibold text-ink-800">Alerta en panel del CRM</div>
+                  <div className="text-[11.5px] text-ink-400 mt-0.5">
+                    Días sin actividad para que una cotización aparezca como alerta de seguimiento en tu panel de notificaciones (ícono de campana).
+                    El sistema lo chequea automáticamente cada vez que abrís el inbox.
+                  </div>
+                </div>
+                <select
+                  className="inp text-[13px] w-36 shrink-0"
+                  value={idleInboxDays}
+                  onChange={e => saveAutoAlertSetting('idle_inbox_days', e.target.value, setIdleInboxDays)}
+                >
+                  {[2,3,4,5,7,10,14,21].map(d => (
+                    <option key={d} value={String(d)}>{d} {d === 1 ? 'día' : 'días'}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* ── Recordatorio por mail al vendedor ────────────────────────────── */}
+              <div className="px-5 py-4 flex items-center gap-4">
+                <div className="w-9 h-9 rounded-lg bg-orange-50 flex items-center justify-center shrink-0">
+                  <Icon name="mail" size={15} className="text-orange-500"/>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[13px] font-semibold text-ink-800">Recordatorio por mail al vendedor</div>
+                  <div className="text-[11.5px] text-ink-400 mt-0.5">
+                    Días sin actividad para enviar un mail recordatorio al vendedor. Se envía como máximo una vez por día.
+                    Recomendamos un valor mayor al del panel para no generar ruido innecesario.
+                    Se usa además de las reglas de notificación personalizadas de abajo.
+                  </div>
+                </div>
+                <select
+                  className="inp text-[13px] w-36 shrink-0"
+                  value={idleEmailDays}
+                  onChange={e => saveAutoAlertSetting('idle_email_days', e.target.value, setIdleEmailDays)}
+                >
+                  {[3,4,5,7,10,14,21,30].map(d => (
+                    <option key={d} value={String(d)}>{d} {d === 1 ? 'día' : 'días'}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* ── Resumen semanal ───────────────────────────────────────────────── */}
+              <div className="px-5 py-4 flex items-start gap-4">
+                <div className="w-9 h-9 rounded-lg bg-purple-50 flex items-center justify-center shrink-0 mt-0.5">
+                  <Icon name="bar-chart-2" size={15} className="text-purple-500"/>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[13px] font-semibold text-ink-800">Resumen semanal por mail</div>
+                  <div className="text-[11.5px] text-ink-400 mt-0.5">
+                    Envía automáticamente un resumen con estadísticas de la semana a todos los administradores.
+                    Incluye KPIs, comparativa semana anterior, ranking de vendedores y estado del pipeline.
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0 pt-0.5">
+                  <select
+                    className={cx('inp text-[13px] w-32 transition-opacity', weeklyReportEnabled !== 'true' ? 'opacity-40 pointer-events-none' : '')}
+                    value={weeklyReportDay}
+                    onChange={e => saveAutoAlertSetting('weekly_report_day', e.target.value, setWeeklyReportDay)}
+                  >
+                    {[['0','Domingo'],['1','Lunes'],['2','Martes'],['3','Miércoles'],['4','Jueves'],['5','Viernes'],['6','Sábado']].map(([v,l]) => (
+                      <option key={v} value={v}>{l}</option>
+                    ))}
+                  </select>
+                  <select
+                    className={cx('inp text-[13px] w-24 transition-opacity', weeklyReportEnabled !== 'true' ? 'opacity-40 pointer-events-none' : '')}
+                    value={weeklyReportHour}
+                    onChange={e => saveAutoAlertSetting('weekly_report_hour', e.target.value, setWeeklyReportHour)}
+                  >
+                    {Array.from({ length: 24 }, (_, i) => (
+                      <option key={i} value={String(i)}>{String(i).padStart(2,'0')}:00 hs</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => {
+                      const next = weeklyReportEnabled === 'true' ? 'false' : 'true';
+                      saveAutoAlertSetting('weekly_report_enabled', next, setWeeklyReportEnabled);
+                    }}
+                    className={cx('w-10 h-5 rounded-full relative transition-colors shrink-0', weeklyReportEnabled === 'true' ? 'bg-brand' : 'bg-ink-300')}
+                  >
+                    <div className={cx('absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all', weeklyReportEnabled === 'true' ? 'left-[22px]' : 'left-0.5')}/>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* ── Reglas de notificación ──────────────────────────────────────────── */}
+          <div>
           {notifModal !== null && (
             <NotifModal
               rule={notifModal === 'new' ? null : notifModal}
@@ -2542,6 +2670,7 @@ function Config() {
               </table>
             )}
           </div>
+          </div>{/* end reglas wrapper */}
         </div>
       )}
 
