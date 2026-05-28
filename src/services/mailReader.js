@@ -265,8 +265,15 @@ async function syncAccount(account) {
         }
 
         // ── Mejora 6: aplicar etiqueta 'crm-procesado' a mails procesados ────
+        // Envuelto en try/catch propio: si falla (etiqueta no existe en Gmail,
+        // conexión cerrada, etc.) NO debe contaminar results.errors ni
+        // impedir que los mails ya procesados sean contabilizados.
         if (successfulMails.length > 0) {
-          await applyGmailLabel(imap, successfulMails, 'crm-procesado');
+          try {
+            await applyGmailLabel(imap, successfulMails, 'crm-procesado');
+          } catch (e) {
+            console.warn(`   ⚠️  [${tag}] applyGmailLabel falló (no crítico): ${e.message}`);
+          }
         }
 
         // ── Mejora 3: actualizar lastSyncAt para esta cuenta ─────────────────

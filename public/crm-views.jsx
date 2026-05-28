@@ -1716,8 +1716,14 @@ function Config() {
         headers: { Authorization: `Bearer ${localStorage.getItem('crm_token')}` },
       });
       const data = await res.json();
-      pushToast(`Sync completo · ${data.synced} nuevo(s)`);
-      // Refrescar estados
+      if (data.synced > 0) {
+        pushToast(`✅ ${data.synced} mail(s) procesado(s)`);
+      } else {
+        pushToast(`Sync completo · sin novedades`);
+      }
+      if (data.errors?.length) {
+        setTimeout(() => pushToast(`⚠️ ${data.errors[0]}`, 'bad'), 600);
+      }
       const accounts = await fetch('/api/mail/accounts', { headers: { Authorization: `Bearer ${localStorage.getItem('crm_token')}` } }).then(r => r.json());
       setMailAccounts(Array.isArray(accounts) ? accounts : []);
     } catch { pushToast('Error al sincronizar', 'bad'); }
@@ -1732,10 +1738,14 @@ function Config() {
         headers: { Authorization: `Bearer ${localStorage.getItem('crm_token')}` },
       });
       const data = await res.json();
-      if (data.errors?.length) {
-        pushToast(`Error: ${data.errors[0]}`, 'bad');
+      // Mostrar éxito aunque haya errores menores (etiqueta, etc.)
+      if (data.synced > 0) {
+        pushToast(`✅ ${data.synced} mail(s) procesado(s)`);
       } else {
-        pushToast(`${email} · ${data.synced} nuevo(s)`);
+        pushToast(`Sync completo · sin novedades`);
+      }
+      if (data.errors?.length) {
+        setTimeout(() => pushToast(`⚠️ ${data.errors[0]}`, 'bad'), 600);
       }
       const accounts = await fetch('/api/mail/accounts', { headers: { Authorization: `Bearer ${localStorage.getItem('crm_token')}` } }).then(r => r.json());
       setMailAccounts(Array.isArray(accounts) ? accounts : []);
