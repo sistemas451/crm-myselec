@@ -1326,6 +1326,31 @@ function Team() {
         <td className="text-right">
           <div className="flex items-center justify-end gap-1">
             {!u.active && <Badge tone="gray" dot>Inactivo</Badge>}
+            {/* Toggle notificación mails sin cliente — solo admins */}
+            {u.role === 'ADMIN' && (
+              <button
+                onClick={async () => {
+                  try {
+                    const res = await fetch(`/api/users/${u.id}/notify-unassigned`, {
+                      method: 'PATCH',
+                      headers: { Authorization: `Bearer ${localStorage.getItem('crm_token')}` },
+                    });
+                    if (res.ok) reload();
+                  } catch { pushToast('Error al actualizar', 'bad'); }
+                }}
+                title={u.notifyUnassigned !== false ? 'Desactivar alertas de mails sin cliente' : 'Activar alertas de mails sin cliente'}
+                className="btn-ghost p-1.5 relative group"
+              >
+                <Icon
+                  name={u.notifyUnassigned !== false ? 'bell' : 'bell-off'}
+                  size={13}
+                  className={u.notifyUnassigned !== false ? 'text-brand' : 'text-ink-300'}
+                />
+                <span className="absolute bottom-full right-0 mb-1.5 hidden group-hover:block bg-ink-900 text-white text-[10px] rounded px-2 py-1 whitespace-nowrap z-10">
+                  {u.notifyUnassigned !== false ? 'Recibe alertas sin cliente' : 'Sin alertas sin cliente'}
+                </span>
+              </button>
+            )}
             <button onClick={() => setModal({ mode:'edit', user: u })}
               className="btn-ghost p-1.5" title="Editar">
               <Icon name="pencil" size={13} className="text-ink-500"/>

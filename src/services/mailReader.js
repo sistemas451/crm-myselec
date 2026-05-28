@@ -1400,7 +1400,7 @@ async function processEmail(mailData, imap) {
     if (!client) {
       try {
         const admins = await prisma.user.findMany({
-          where: { role: 'ADMIN', active: true },
+          where: { role: 'ADMIN', active: true, notifyUnassigned: true },
           select: { email: true, name: true },
         });
         const baseUrl = process.env.APP_URL || `http://localhost:${process.env.PORT || 3000}`;

@@ -21,8 +21,9 @@ model User {
   avatar             String?
   passwordChangedAt  DateTime?
   active             Boolean  @default(true)
-  pendingApproval Boolean  @default(false)
-  createdAt       DateTime @default(now())
+  pendingApproval    Boolean  @default(false)
+  notifyUnassigned   Boolean  @default(true)   // Recibe mail cuando llega cotización sin cliente asignado
+  createdAt          DateTime @default(now())
 
   quotesAssigned    Quote[]              @relation("QuoteSeller")
   ordersAssigned    Order[]              @relation("OrderSeller")

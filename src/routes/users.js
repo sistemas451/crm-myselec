@@ -234,6 +234,22 @@ router.patch('/:id/toggle', authMiddleware, adminOnly, async (req, res) => {
   }
 });
 
+// PATCH /api/users/:id/notify-unassigned — toggle notificación de mails sin cliente
+router.patch('/:id/notify-unassigned', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.params.id } });
+    if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
+    const updated = await prisma.user.update({
+      where: { id: req.params.id },
+      data:  { notifyUnassigned: !user.notifyUnassigned },
+      select: { id: true, notifyUnassigned: true },
+    });
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // PATCH /api/users/:id/password — cambiar contraseña (admin o el propio usuario)
 router.patch('/:id/password', authMiddleware, async (req, res) => {
   try {
