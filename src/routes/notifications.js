@@ -1,6 +1,6 @@
 const express = require('express');
 const { authMiddleware } = require('../middleware/auth');
-const { runStageAlerts } = require('../services/notifier');
+const { runStageAlerts, runWeeklyReport } = require('../services/notifier');
 const prisma = require('../db');
 
 const router = express.Router();
@@ -213,6 +213,36 @@ async function _getOverdueItems(prisma, now, sellerId) {
   const detail = `${example.code}${items.length > 1 ? ` y ${items.length - 1} más` : ''} superaron el tiempo en su etapa.`;
   return { total: items.length, detail, items };
 }
+
+// POST /api/notifications/cron/weekly-report — fuerza el envío del resumen semanal
+// Solo admin autenticado puede dispararlo manualmente; ignora restricción de día/hora.
+router.post('/cron/weekly-report', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    // Limpiar last_sent para que runWeeklyReport no lo bloquee
+    await prisma.appSetting.upsert({
+      where:  { key: 'weekly_report_last_sent' },
+      update: { value: '' },
+      create: { key: 'weekly_report_last_sent', value: '' },
+    });
+
+    // Sobrescribir temporalmente día/hora al momento actual (Argentina UTC-3)
+    const now     = new Date();
+    const argTime = new Date(now.getTime() - 3 * 3600 * 1000);
+    const curDay  = argTime.getUTCDay();
+    const curHour = argTime.getUTCHours();
+
+    await Promise.all([
+      prisma.appSetting.upsert({ where: { key: 'weekly_report_day'  }, update: { value: String(curDay)  }, create: { key: 'weekly_report_day',  value: String(curDay)  } }),
+      prisma.appSetting.upsert({ where: { key: 'weekly_report_hour' }, update: { value: String(curHour) }, create: { key: 'weekly_report_hour', value: String(curHour) } }),
+      prisma.appSetting.upsert({ where: { key: 'weekly_report_enabled' }, update: { value: 'true' }, create: { key: 'weekly_report_enabled', value: 'true' } }),
+    ]);
+
+    await runWeeklyReport();
+    res.json({ ok: true, ran: now.toISOString(), argDay: curDay, argHour: curHour });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
 
 // POST /api/notifications/cron/stage-alerts — ejecuta el check de alertas por etapa
 // Protegido por CRON_SECRET en headers (Railway lo puede llamar por cron schedule)
