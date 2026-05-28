@@ -51,7 +51,7 @@ function AppRoot() {
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-navy-950">
       <div className="flex flex-col items-center gap-6">
-        <img src="/Logo.png" alt="MySelec" style={{ width: 'auto', height: 90, objectFit: 'contain' }}/>
+        <img src="/Logo.png" alt="MySelec" style={{ width: 'auto', height: 60, objectFit: 'contain', imageRendering: 'auto' }}/>
         <div className="flex flex-col items-center gap-1">
           <div className="text-white/60 text-sm">Cargando sistema…</div>
           <div className="text-white/30 text-xs">Conectando con la base de datos</div>
