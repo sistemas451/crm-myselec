@@ -1,4 +1,5 @@
 const nodemailer = require('nodemailer');
+const dns        = require('dns');
 
 // Deriva host SMTP del host IMAP (imap.X → smtp.X, mail.X → mail.X)
 function smtpHost() {
@@ -16,7 +17,8 @@ function getTransporter() {
     host: smtpHost(),
     port: 465,
     secure: true,             // SSL desde el inicio (puerto 465)
-    family: 4,                // forzar IPv4 — Railway no tiene salida IPv6
+    // Railway no tiene salida IPv6 — forzar resolución DNS a IPv4
+    dnsLookup: (hostname, options, cb) => dns.lookup(hostname, { family: 4 }, cb),
     connectionTimeout: 15000, // 15s
     greetingTimeout: 15000,
     socketTimeout: 20000,
