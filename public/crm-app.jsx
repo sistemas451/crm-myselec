@@ -168,7 +168,7 @@ function App() {
         />
       )}
       <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-        <Topbar user={displayUser} roleKey={roleKey} setRoleKey={setRoleKey}/>
+        <Topbar user={displayUser} roleKey={roleKey} setRoleKey={setRoleKey} setScreen={setScreen}/>
         <main className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden">
           {screen === 'dashboard'  && <Dashboard/>}
           {screen === 'quotes'     && <KanbanQuotes onOpen={(c)=>openDetail(c,'quote')}/>}
@@ -872,13 +872,15 @@ function Sidebar({ role, screen, setScreen, user, onProfileOpen, collapsed, onTo
       className="shrink-0 bg-navy-900 text-white flex flex-col h-screen overflow-hidden"
       style={{ width: collapsed ? 60 : 244, transition: 'width 0.2s ease' }}
     >
-      {/* Logo */}
+      {/* Logo — click vuelve al inicio */}
       {collapsed ? (
-        <div className="flex items-center justify-center border-b border-white/5 py-4" style={{height:64}}>
+        <div className="flex items-center justify-center border-b border-white/5 py-4 cursor-pointer" style={{height:64}}
+          onClick={() => setScreen(nav[0]?.id || 'dashboard')} title="Ir al inicio">
           <Logo size={32}/>
         </div>
       ) : (
-        <div className="flex items-center justify-center border-b border-white/5 px-5" style={{height:72}}>
+        <div className="flex items-center justify-center border-b border-white/5 px-5 cursor-pointer" style={{height:72}}
+          onClick={() => setScreen(nav[0]?.id || 'dashboard')} title="Ir al inicio">
           <img
             src="/Logo.png"
             alt="MySelec"
@@ -1029,7 +1031,7 @@ function SyncResultModal({ result, onClose }) {
 }
 
 // ---------- Topbar ----------
-function Topbar({ user, roleKey, setRoleKey }) {
+function Topbar({ user, roleKey, setRoleKey, setScreen }) {
   const { notifications, inboxAlerts, openModal, pushToast } = useApp();
   const [notifOpen, setNotifOpen] = useState(false);
   const _authUser = CrmAuth.getUser();
@@ -1047,7 +1049,9 @@ function Topbar({ user, roleKey, setRoleKey }) {
   return (
     <header className="h-[62px] bg-white border-b border-line flex items-center gap-4 px-6 shrink-0 relative">
       <div className="flex items-center gap-2 text-sm flex-1 min-w-0">
-        <img src="/Logo-M.png" alt="MySelec" style={{height:26, width:'auto', objectFit:'contain', flexShrink:0}}/>
+        <img src="/Logo-M.png" alt="MySelec" style={{height:26, width:'auto', objectFit:'contain', flexShrink:0, cursor: setScreen ? 'pointer' : 'default'}}
+          onClick={() => setScreen && setScreen(roleKey==='admin' ? 'dashboard' : roleKey==='seller' ? 'my-quotes' : 'ops')}
+          title="Ir al inicio"/>
         <span className="text-ink-300">/</span>
         <span className="font-semibold text-ink-900 truncate">
           {(user?.name || loggedUser?.name)?.split(' ')?.[0] || 'MySelec CRM'}
