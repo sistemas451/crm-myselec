@@ -1235,8 +1235,7 @@ function UserModal({ user, onClose, onSave }) {
                 )}
               </div>
             );
-          })()
-          )}
+          })()}
           <div className="flex gap-2 pt-2">
             <button type="submit" className="btn-primary flex-1 justify-center"
               disabled={loading || (!user && !!emailError) || (user && form.password && (form.password.length < 8 || !/[A-Z]/.test(form.password) || !/[0-9]/.test(form.password)))}>
