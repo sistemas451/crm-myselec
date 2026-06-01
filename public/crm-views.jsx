@@ -1091,24 +1091,49 @@ function UserModal({ user, onClose, onSave }) {
     zone:     user?.zone     || '',
     password: '',
   });
-  const [error,   setError]   = useState('');
-  const [loading, setLoading] = useState(false);
+  const [error,      setError]      = useState('');
+  const [loading,    setLoading]    = useState(false);
+  const [emailError, setEmailError] = useState('');
+  const [allowedDomains, setAllowedDomains] = useState([]);
   const { pushToast } = useApp();
+
+  // Cargar dominios permitidos al montar
+  useEffect(() => {
+    fetch('/api/auth/config').then(r => r.json())
+      .then(d => setAllowedDomains(d.allowedDomains || []))
+      .catch(() => {});
+  }, []);
+
+  // Validar dominio del email en tiempo real
+  useEffect(() => {
+    if (!form.email || user || allowedDomains.length === 0) { setEmailError(''); return; }
+    const domain = form.email.split('@')[1]?.toLowerCase();
+    if (!domain) { setEmailError(''); return; }
+    // Verificar dominio (la whitelist de emails individuales se valida server-side)
+    if (!allowedDomains.includes(domain)) {
+      setEmailError(`Dominio @${domain} no permitido. Válidos: ${allowedDomains.join(', ')}`);
+    } else {
+      setEmailError('');
+    }
+  }, [form.email, allowedDomains, user]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     if (!form.name || !form.email) { setError('Nombre y email son requeridos'); return; }
-    if (!user && !form.password)   { setError('Contraseña requerida al crear usuario'); return; }
     setLoading(true);
     try {
       const data = { name: form.name, email: form.email, role: form.role, zone: form.zone };
-      if (form.password) data.password = form.password;
+      if (user && form.password) data.password = form.password; // Solo al editar se puede cambiar password
       const saved = user
         ? await CrmApi.updateUser(user.id, data)
         : await CrmApi.createUser(data);
       onSave(saved);
-      pushToast(user ? 'Usuario actualizado' : 'Usuario creado');
+      pushToast(
+        user ? 'Usuario actualizado'
+             : `Usuario creado — mail de bienvenida enviado a ${form.email}`,
+        'ok'
+      );
       onClose();
     } catch (err) {
       setError(err.message || 'Error al guardar');
@@ -1134,7 +1159,14 @@ function UserModal({ user, onClose, onSave }) {
           </div>
           <div>
             <label className="block text-xs font-medium text-ink-700 mb-1">Email</label>
-            <input className="inp w-full" type="email" placeholder="juan@myselec.com.ar" {...f('email')}/>
+            <input className={cx('inp w-full', emailError && 'border-red-400 focus:ring-red-300')}
+              type="email" placeholder="juan@myselec.com.ar" {...f('email')}
+              readOnly={!!user}/>
+            {emailError && (
+              <div className="flex items-center gap-1.5 mt-1.5 text-[11px] text-red-600">
+                <Icon name="alert-circle" size={12}/>{emailError}
+              </div>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -1150,14 +1182,32 @@ function UserModal({ user, onClose, onSave }) {
               <input className="inp w-full" placeholder="AMBA Norte…" {...f('zone')}/>
             </div>
           </div>
-          <div>
-            <label className="block text-xs font-medium text-ink-700 mb-1">
-              {user ? 'Nueva contraseña (dejar vacío para no cambiar)' : 'Contraseña'}
-            </label>
-            <input className="inp w-full" type="password" placeholder="••••••••" {...f('password')}/>
-          </div>
+          {/* Al crear: sin campo de contraseña (se genera automáticamente + link de reset) */}
+          {!user && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+              <div className="flex items-start gap-2">
+                <Icon name="mail" size={14} className="text-blue-500 mt-0.5 shrink-0"/>
+                <div>
+                  <div className="text-[12px] font-medium text-blue-800">Contraseña por mail</div>
+                  <div className="text-[11px] text-blue-600 mt-0.5 leading-relaxed">
+                    Se enviará un mail de bienvenida con un link para que el usuario configure su propia contraseña. El link expira en 48 horas.
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+          {/* Al editar: campo opcional para cambiar contraseña */}
+          {user && (
+            <div>
+              <label className="block text-xs font-medium text-ink-700 mb-1">
+                Nueva contraseña (dejar vacío para no cambiar)
+              </label>
+              <input className="inp w-full" type="password" placeholder="••••••••" {...f('password')}/>
+            </div>
+          )}
           <div className="flex gap-2 pt-2">
-            <button type="submit" className="btn-primary flex-1 justify-center" disabled={loading}>
+            <button type="submit" className="btn-primary flex-1 justify-center"
+              disabled={loading || (!user && !!emailError)}>
               {loading ? 'Guardando...' : (user ? 'Guardar cambios' : 'Crear usuario')}
             </button>
             <button type="button" className="btn-ghost" onClick={onClose}>Cancelar</button>

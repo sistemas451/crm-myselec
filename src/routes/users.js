@@ -3,8 +3,10 @@ const bcrypt  = require('bcryptjs');
 const path    = require('path');
 const fs      = require('fs');
 const multer  = require('multer');
+const crypto  = require('crypto');
 const { authMiddleware } = require('../middleware/auth');
 const { sendMail } = require('../services/mailer');
+const { emailAllowed, getAllowedDomains } = require('./auth');
 const prisma = require('../db');
 
 // Multer para avatares — memoria (base64 → DB, sin depender del disco de Railway)
@@ -137,20 +139,124 @@ router.get('/', authMiddleware, async (req, res) => {
 });
 
 // POST /api/users — crear usuario (admin only)
+// No requiere contraseña: genera una temporal y envía link de "Configurar mi contraseña"
 router.post('/', authMiddleware, adminOnly, async (req, res) => {
   try {
-    const { name, email, password, role = 'VENDEDOR', zone } = req.body;
-    if (!name || !email || !password) return res.status(400).json({ error: 'name, email y password son requeridos' });
+    const { name, email, role = 'VENDEDOR', zone } = req.body;
+    if (!name || !email) return res.status(400).json({ error: 'Nombre y email son requeridos' });
 
-    const exists = await prisma.user.findUnique({ where: { email } });
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // Validar dominio/whitelist
+    if (!await emailAllowed(normalizedEmail)) {
+      const domains = await getAllowedDomains();
+      return res.status(400).json({
+        error: `Email no permitido. Dominios válidos: ${domains.join(', ')}. Podés agregar excepciones en Configuración → Acceso.`,
+      });
+    }
+
+    const exists = await prisma.user.findUnique({ where: { email: normalizedEmail } });
     if (exists) return res.status(400).json({ error: 'Ya existe un usuario con ese email' });
 
-    const hashed = await bcrypt.hash(password, 10);
+    // Generar contraseña temporal (nunca se muestra, solo se hashea)
+    const tempPassword = crypto.randomBytes(16).toString('base64url');
+    const hashed = await bcrypt.hash(tempPassword, 10);
+
     const user = await prisma.user.create({
-      data: { name, email, password: hashed, role, zone: zone || null, notifyUnassigned: role === 'ADMIN' },
+      data: {
+        name: name.trim(),
+        email: normalizedEmail,
+        password: hashed,
+        role,
+        zone: zone || null,
+        notifyUnassigned: role === 'ADMIN',
+      },
       select: { id: true, name: true, email: true, role: true, zone: true, active: true, createdAt: true },
     });
-    res.json(user);
+
+    // Generar token de reset para el link "Configurar mi contraseña"
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 48 * 3600 * 1000); // 48 horas
+    await prisma.passwordResetToken.create({
+      data: { token: resetToken, userId: user.id, expiresAt },
+    });
+
+    // Enviar mails (no bloquean la respuesta al admin)
+    const APP_URL = process.env.APP_URL || `http://localhost:${process.env.PORT || 3000}`;
+    const resetLink = `${APP_URL}?reset=${resetToken}`;
+    const roleLabel = role === 'ADMIN' ? 'Administrador' : role === 'VENDEDOR' ? 'Vendedor' : 'Logística';
+    const adminName = req.user.name || 'Un administrador';
+
+    // 1. Mail al nuevo usuario
+    const welcomeHtml = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background:#F1F5F9;font-family:sans-serif">
+<div style="max-width:520px;margin:32px auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.08)">
+  <div style="background:#1B2A4A;padding:28px 32px 24px">
+    <div style="color:#fff;font-size:20px;font-weight:700">🎉 Bienvenido a MySelec CRM</div>
+  </div>
+  <div style="padding:28px 32px">
+    <p style="color:#334155;font-size:14px;line-height:1.6;margin:0 0 16px">
+      Hola <strong>${user.name}</strong>,
+    </p>
+    <p style="color:#334155;font-size:14px;line-height:1.6;margin:0 0 16px">
+      ${adminName} te creó una cuenta en el CRM de MySelec.
+    </p>
+    <div style="background:#F8FAFC;border-radius:10px;padding:16px;margin:0 0 20px">
+      <div style="font-size:12px;color:#64748B;margin-bottom:4px">Tu cuenta</div>
+      <div style="font-size:14px;color:#1B2A4A"><strong>Email:</strong> ${user.email}</div>
+      <div style="font-size:14px;color:#1B2A4A;margin-top:2px"><strong>Rol:</strong> ${roleLabel}</div>
+    </div>
+    <p style="color:#334155;font-size:14px;line-height:1.6;margin:0 0 20px">
+      Para empezar, configurá tu contraseña haciendo click en el botón:
+    </p>
+    <div style="text-align:center;margin:24px 0">
+      <a href="${resetLink}" style="display:inline-block;padding:14px 32px;background:#3B82F6;color:#fff;text-decoration:none;border-radius:10px;font-size:15px;font-weight:700">
+        Configurar mi contraseña →
+      </a>
+    </div>
+    <div style="background:#FFF7ED;border:1px solid #FED7AA;border-radius:8px;padding:12px 16px;margin:20px 0 0">
+      <div style="font-size:12px;color:#9A3412;font-weight:600">⚠️ Este enlace expira en 48 horas</div>
+      <div style="font-size:12px;color:#9A3412;margin-top:4px">
+        Si ya expiró, usá <strong>"Olvidé mi contraseña"</strong> en la pantalla de login para generar uno nuevo.
+      </div>
+    </div>
+  </div>
+  <div style="padding:16px 32px;background:#F8FAFC;text-align:center">
+    <div style="font-size:11px;color:#94A3B8">MySelec CRM · ${APP_URL}</div>
+  </div>
+</div>
+</body></html>`;
+
+    // 2. Mail al admin que lo creó
+    const adminHtml = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background:#F1F5F9;font-family:sans-serif">
+<div style="max-width:520px;margin:32px auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.08)">
+  <div style="background:#1B2A4A;padding:24px 32px 20px">
+    <div style="color:#fff;font-size:16px;font-weight:700">✅ Usuario creado</div>
+  </div>
+  <div style="padding:24px 32px">
+    <p style="color:#334155;font-size:14px;line-height:1.6;margin:0 0 12px">
+      Creaste un nuevo usuario en MySelec CRM:
+    </p>
+    <div style="background:#F8FAFC;border-radius:10px;padding:16px;margin:0 0 16px">
+      <div style="font-size:14px;color:#1B2A4A"><strong>Nombre:</strong> ${user.name}</div>
+      <div style="font-size:14px;color:#1B2A4A;margin-top:2px"><strong>Email:</strong> ${user.email}</div>
+      <div style="font-size:14px;color:#1B2A4A;margin-top:2px"><strong>Rol:</strong> ${roleLabel}</div>
+    </div>
+    <p style="color:#64748B;font-size:13px;margin:0">
+      Se envió un mail de bienvenida con el link para configurar la contraseña.
+    </p>
+  </div>
+</div>
+</body></html>`;
+
+    // Enviar ambos en paralelo (no bloquean la respuesta)
+    Promise.all([
+      sendMail({ to: user.email, subject: '🎉 Bienvenido a MySelec CRM — Configurá tu contraseña', html: welcomeHtml }),
+      sendMail({ to: req.user.email, subject: `✅ Usuario creado: ${user.name}`, html: adminHtml }),
+    ]).catch(err => console.error('Error enviando mails de bienvenida:', err.message));
+
+    res.json({ ...user, welcomeEmailSent: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

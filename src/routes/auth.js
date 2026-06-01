@@ -263,3 +263,5 @@ router.get('/smtp-test', authMiddleware, async (req, res) => {
 });
 
 module.exports = router;
+module.exports.emailAllowed = emailAllowed;
+module.exports.getAllowedDomains = getAllowedDomains;
