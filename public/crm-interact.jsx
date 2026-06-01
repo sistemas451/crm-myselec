@@ -1183,7 +1183,7 @@ const MODAL_REGISTRY = {
 };
 
 // ---------- Notifications Popover ----------
-function NotificationsPopover({ onClose }) {
+function NotificationsPopover({ onClose, setScreen }) {
   const { notifications, markNotificationRead, markAllNotificationsRead, openModal,
           inboxAlerts, snoozeAlert, markInboxSeen } = useApp();
   const [tab, setTab] = useS(inboxAlerts.length > 0 ? 'inbox' : 'activity');
@@ -1217,8 +1217,11 @@ function NotificationsPopover({ onClose }) {
 
   const handleAlertAction = (alert) => {
     onClose();
-    if (alert.action?.view === 'quotes') openModal('search');
-    else if (alert.action?.view === 'team') openModal('search');
+    const view = alert.action?.view;
+    if (view === 'quotes' && setScreen) setScreen('quotes');
+    else if (view === 'team' && setScreen) setScreen('team');
+    else if (view === 'orders' && setScreen) setScreen('orders');
+    else openModal('search'); // fallback
   };
 
   return (

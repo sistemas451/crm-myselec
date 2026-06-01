@@ -1198,7 +1198,7 @@ function Topbar({ user, roleKey, setRoleKey, setScreen }) {
             <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-bad text-white text-[10px] font-bold flex items-center justify-center">{unreadCount}</span>
           )}
         </button>
-        {notifOpen && <NotificationsPopover onClose={()=>setNotifOpen(false)}/>}
+        {notifOpen && <NotificationsPopover onClose={()=>setNotifOpen(false)} setScreen={setScreen}/>}
       </div>
 
       <button onClick={handleLogout} title="Cerrar sesión"
