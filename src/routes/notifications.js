@@ -320,7 +320,7 @@ router.post('/dismiss', authMiddleware, async (req, res) => {
     const { id: userId } = req.user;
     const { key, days } = req.body;
     if (!key || !days) return res.status(400).json({ error: 'key y days son requeridos' });
-    const allowedKeys = ['overdue_stages', 'idle_quotes'];
+    const allowedKeys = ['overdue_stages', 'idle_quotes', 'unlinked_solicitudes'];
     if (!allowedKeys.includes(key)) return res.status(400).json({ error: 'key inválida' });
     const allowedDays = [3, 7, 30];
     const d = parseInt(days, 10);
