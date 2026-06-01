@@ -11,103 +11,155 @@ npm run dev          # node src/server.js
 # Database
 npx prisma db push   # Apply schema changes to Neon (no migrations generated)
 npx prisma generate  # Regenerate Prisma client after schema changes
-npm run seed         # Load initial users, stages, and clients from XLSX
 
 # Health check (server must be running)
 curl http://localhost:3000/api/health
 ```
 
-There are no tests, linter, or build steps. The frontend requires no compilation — JSX files are loaded via Babel Standalone in the browser.
+No tests, linter, or build step. Frontend JSX is compiled in-browser via Babel Standalone.
 
 ## Architecture
 
 ### Backend — Node.js + Express + Prisma
 
-`src/server.js` is the entry point. Routes are mounted under `/api/*`:
+`src/server.js` is the entry point. Routes mounted under `/api/*`:
 
 | Route file | Prefix | Notes |
 |---|---|---|
-| `routes/auth.js` | `/api/auth` | Login, JWT issue, password reset |
-| `routes/quotes.js` | `/api/quotes` | Full CRUD for F1 (cotizaciones) |
-| `routes/orders.js` | `/api/orders` | Full CRUD for F2 (órdenes de compra) |
-| `routes/clients.js` | `/api/clients` | Client CRUD + XLSX import |
-| `routes/data.js` | `/api/data` | Users, stages, activity feed, dashboard KPIs, comparativa |
-| `routes/mail.js` | `/api/mail` | Trigger IMAP sync manually |
-| `routes/users.js` | `/api/users` | User management (admin only) |
-| `routes/notifications.js` | `/api/notifications` | Notification rules CRUD |
+| `routes/auth.js` | `/api/auth` | Login, register, JWT, password reset, email domain validation |
+| `routes/quotes.js` | `/api/quotes` | Cotizaciones CRUD, send-email, send-reminder, items, attachments |
+| `routes/orders.js` | `/api/orders` | Órdenes de compra CRUD |
+| `routes/clients.js` | `/api/clients` | Client CRUD, XLSX import, email matcheo, timeline |
+| `routes/data.js` | `/api/data` | Dashboard KPIs, charts, activity feed, comparativa |
+| `routes/mail.js` | `/api/mail` | IMAP accounts, manual sync trigger |
+| `routes/users.js` | `/api/users` | User management, approve/reject, resend welcome, avatar |
+| `routes/notifications.js` | `/api/notifications` | Inbox alerts, mark-seen, dismiss, counts, cron triggers |
+| `routes/settings.js` | `/api/settings` | AppSetting key-value store (ADMIN only) |
+| `routes/articles.js` | `/api/articles` | Product catalog, XLSX import |
+| `routes/logs.js` | `/api/logs` | Login logs (ADMIN only) |
 
-File upload endpoints for quote and order attachments live directly in `server.js` (not in route files) because they use `multer`. When a Flexxus PDF is uploaded, `flexxusParser.js` auto-parses it and patches the quote/order with extracted data (client by CUIT, items, flexxusCode, amount).
+File upload endpoints for attachments live in `server.js` (multer). Flexxus PDF uploads auto-parse via `flexxusParser.js`.
 
 ### Two-table "F2" pattern
 
-The order board (Fase 2) merges two data sources:
+The order board merges:
 - **`Order` model** — manually created OCs (`_source: 'ORDER'`)
-- **`Quote` model with `mailType: 'NOTA_PEDIDO'`** — email-ingested orders (`_source: 'QUOTE'`)
+- **`Quote` with `mailType: 'NOTA_PEDIDO'`** — email-ingested orders (`_source: 'QUOTE'`)
 
-Frontend `GET /api/orders` returns both merged with a `_source` discriminator. `OrderDetail` uses `isQuoteSource = o._source === 'QUOTE'` to route API calls to `/api/quotes/:id` or `/api/orders/:id` accordingly.
+`GET /api/orders` returns both merged with a `_source` discriminator. `OrderDetail` routes API calls to `/quotes/:id` or `/orders/:id` via `isQuoteSource`.
 
-### F1 (Cotizaciones) mailType values
+### F1 mailType values
 
-Quotes in the F1 board (`GET /api/quotes`) exclude `mailType IN ('OC', 'NOTA_PEDIDO')` — those belong to F2. The `mailType` values are:
-- `null` — manually created
-- `SOLICITUD` — email request from client
-- `PRESUPUESTO` — Flexxus presupuesto PDF received by email
-- `OC` — order confirmation from client (legacy, superseded by NOTA_PEDIDO)
-- `NOTA_PEDIDO` — Flexxus nota de pedido PDF received by email (goes to F2)
+`SOLICITUD` · `PRESUPUESTO` · `OC` (legacy) · `NOTA_PEDIDO` (→ F2) · `null` (manual)
 
-### Gmail-only email flow
-
-`POST /api/quotes/:id/send-email` with `_gmailOnly: true` skips SMTP, logs an `EMAIL_SENT` activity, and advances the quote stage to `'enviado'` if current stage is in `STAGES_TO_ADVANCE`. The frontend opens a Gmail compose tab. This endpoint requires ownership: VENDEDORs can only act on their own quotes.
+F1 board excludes `mailType IN ('OC', 'NOTA_PEDIDO')`.
 
 ### Auth + RBAC
 
-`src/middleware/auth.js` decodes JWT and validates the token is not pre-password-change. Three roles:
-- **ADMIN** — full access to all quotes, orders, clients, users
-- **VENDEDOR** — sees own quotes + unassigned `recibida` quotes; own orders only
-- **LOGISTICA** — read-only order board view
+JWT issued at login, validated in `src/middleware/auth.js`. Checks `passwordChangedAt` to reject tokens issued before a password reset.
 
-Ownership checks on mutating endpoints: always fetch the record first, return 404 if missing, 403 if `sellerId !== req.user.id` for VENDEDORs.
+- **ADMIN** — full access
+- **VENDEDOR** — own quotes + unassigned `recibida`; own orders only
+- **LOGISTICA** — read-only order board
 
-### Frontend — no-build React
+Ownership pattern on mutating endpoints: fetch record first → 404 if missing → 403 if `sellerId !== req.user.id` for VENDEDORs.
 
-`public/index.html` loads scripts in dependency order:
-1. `crm-api.jsx` — `CrmAuth` (localStorage JWT) + `CrmApi` (all fetch calls) + `apiFetch`
-2. `crm-data.jsx` — shared helpers (`cx`, `fmtMoney`, `fmtDate`), `Icon` (Lucide), static fallback arrays (`QUOTES`, `ORDERS`, etc. as empty arrays until API loads)
-3. `crm-interact.jsx` — `AppProvider` + `useApp()` hook — global React state for quotes/orders/clients/users/filters
-4. `crm-kanban.jsx` — `KanbanQuotes`, `KanbanOrders` board components
-5. `crm-details.jsx` — `QuoteDetail`, `OrderDetail`, `SendEmailModal` drawer components
-6. `crm-views.jsx` — `LogisticsView`, `MySalesView`, `Clients`, `Team`, `Config`, `Comparativa`
-7. `crm-app.jsx` — `AppRoot` (login + routing + sidebar), mounted via `ReactDOM.render`
+**Important**: GET detail endpoints (`/quotes/:id/detail`, `/orders/:id/detail`) currently don't enforce ownership — known issue (A-1 in audit backlog).
 
-**Window globals**: `AppRoot` on login populates `window.QUOTES`, `window.ORDERS`, `window.CLIENTS`, etc. from the API. `AppProvider` (`crm-interact.jsx`) initialises its state from these globals and owns all mutations.
+### User registration flows
 
-**No ES modules**: files communicate via `window.*` assignments (e.g. `Object.assign(window, { QuoteDetail, OrderDetail, ... })`). Import/export syntax will break the app.
+1. **Public register** → `pendingApproval: true` → admin approves (sends styled welcome email) or rejects
+2. **Admin creates manually** → random temp password (never shown) → `PasswordResetToken` (48h) → welcome email with "Configure my password" link
+3. **Resend welcome** → `POST /users/:id/resend-welcome` → invalidates old tokens, sends new link
 
-### Database
-
-PostgreSQL on Neon (serverless). Schema is pushed directly with `prisma db push` — no migration files. Key relationships:
-
-- `Quote` ↔ `Quote` via `linkedQuoteId` (SOLICITUD linked to its PRESUPUESTO)
-- `Order.fromQuoteId` → `Quote` (OC originated from a quote)
-- `Client.emailDomain` — used by `mailReader.js` to auto-match incoming emails to clients
-- `StageDefinition` — configurable stages per phase (COTIZACION / ORDEN_COMPRA), loaded at startup
-
-### Mail ingestion
-
-`src/services/mailReader.js` connects via IMAP to Gmail. On sync it:
-1. Fetches unseen messages from inbox (filtered by `[crm]` subject prefix or CRM label)
-2. Also scans Sent folder for outbound presupuestos/NPs
-3. Detects mail type by PDF attachment filenames (`isFlexxusPDF`, `isNotaPedidoPDF`)
-4. Matches sender/recipient to a `Client` by `emailDomain` or `ClientEmail` records
-5. Creates a `Quote` record with the appropriate `mailType`
-6. Deduplicates via `emailMessageId` (`@@index([emailMessageId])` on Quote)
-
-Auto-sync runs on a configurable interval stored in `AppSetting` key `mail_sync_interval_hours` (default 2h).
+When admin changes a user's password via `PUT /users/:id`, `passwordChangedAt` is set (invalidates prior JWTs) and a notification email is sent to the user.
 
 ### Notification system
 
-`src/services/notifier.js` sends emails via `mailer.js` based on `NotificationRule` records. Triggers: `STAGE_CHANGE` (on every `PATCH /stage`), `IDLE_HOURS` (hourly cron), `FOLLOW_UP` (quotes with `followUpDate <= now`). Templates support `{{quote.code}}`, `{{client.name}}`, `{{seller.email}}` placeholders.
+**In-app alerts** (`GET /api/notifications/inbox`): 9 types returned per role:
+- ADMIN: unassigned quotes, pending users, overdue stages (grouped by stage), idle quotes, unlinked solicitudes
+- VENDEDOR: follow-up due, follow-up upcoming, overdue stages, idle quotes, unlinked solicitudes, no-response presupuestos
 
-### Code generation
+Alerts support: `newCount` (new since last bell open), `dismissable` (server-side snooze 3/7/30 days), `items[]` (mini-list of top items).
 
-Quote codes: `COT-2026-NNN`. Order codes: `OC-2026-NNN`. Generated by `nextCode()` helper using `findFirst + orderBy: code desc` — not a DB sequence. The `@unique` constraint on `code` catches collisions.
+`POST /notifications/mark-seen` — updates `notificationPrefs.lastInboxCheck`.
+`POST /notifications/dismiss { key, days }` — stores expiry in `notificationPrefs.dismissed`.
+
+**Email notifications** (`src/services/notifier.js`):
+- `runStageAlerts()` — digest per vendor with cooldown (`stage_alert_cooldown_days`)
+- `runWeeklyReport()` — Monday 9am to admins
+- Unassigned mail digest — configurable frequency (`unassigned_mail_frequency`: immediate/daily/2days/weekly)
+
+**Cron endpoint** `POST /notifications/cron/stage-alerts` requires `x-cron-secret` header matching `CRON_SECRET` env var. Fails closed if `CRON_SECRET` is not set.
+
+### Quote reminder flow
+
+`POST /api/quotes/:id/send-reminder { subject, body }` — sends follow-up email to client, records `REMINDER_SENT` activity, pushes `followUpDate` by `reminder_followup_push_days`. Available as:
+- Button in quote detail header (PRESUPUESTO in `enviado` stage with client email)
+- "Recordar" button in NO_RESPONSE bell alert mini-list
+
+### Mail ingestion
+
+`src/services/mailReader.js` connects via IMAP. On sync:
+1. Fetches from CRM label + All Mail (by subject prefix) + Sent folder
+2. Detects type by PDF: `isFlexxusPDF` → PRESUPUESTO, `isNotaPedidoPDF` → NOTA_PEDIDO
+3. Matches client by CUIT (from PDF) → email → domain
+4. Creates Quote, auto-links SOLICITUD↔PRESUPUESTO by thread (In-Reply-To) or client match
+5. Dedup via `emailMessageId` (index, not unique — known issue M-9)
+6. Unassigned digest: accumulates `unassigned: true` results, sends grouped mail per frequency setting
+
+Multi-account: `MAIL_ACCOUNTS` env var (JSON array) or `AppSetting key='mail_accounts'`.
+
+### Settings (AppSetting key-value store)
+
+Key settings used across the app:
+- `mail_sync_interval_hours`, `mail_lookback_days`, `mail_sync_enabled`
+- `follow_up_days`, `idle_inbox_days`, `idle_email_days`
+- `stage_alert_cooldown_days`, `unassigned_mail_frequency`
+- `solicitud_sin_pres_days`, `no_response_days`, `follow_up_upcoming_days`
+- `reminder_followup_push_days`, `reminder_subject`, `reminder_body`
+- `allowed_email_domains`, `allowed_emails`
+- `inapp_*` toggles (one per alert type), `notify_*` toggles (mail)
+- `weekly_report_enabled/day/hour`
+
+`emailAllowed()` and `getAllowedDomains()` are exported from `routes/auth.js` for reuse in `routes/users.js`.
+
+### Login logs
+
+`LoginLog` model records every login attempt (success + failure) with email, userId, IP, user-agent. Auto-cleanup: deletes records older than 90 days on each login. Visible in Config → Registros (ADMIN only). Export via `GET /api/logs/logins/export` (CSV with BOM).
+
+### Frontend — no-build React
+
+`public/index.html` loads in order:
+1. `crm-api.jsx` — `CrmAuth` + `CrmApi` (all fetch wrappers)
+2. `crm-data.jsx` — shared helpers (`cx`, `fmtMoney`, `fmtDate`), `Icon`, static arrays
+3. `crm-interact.jsx` — `AppProvider` + `useApp()` — global state, modals registry, NotificationsPopover, ReminderModal, ClientDetailModal
+4. `crm-kanban.jsx` — `KanbanQuotes`, `KanbanOrders`
+5. `crm-details.jsx` — `QuoteDetail`, `OrderDetail`, `SendEmailModal`
+6. `crm-views.jsx` — `Clients`, `Team`, `Config` (tabs: Etapas/Mail/Notificaciones/Artículos/Acceso/Registros), `MySalesView`, `Comparativa`, `LoginLogs`
+7. `crm-app.jsx` — `AppRoot`, login/register, sidebar, topbar, dashboard, user profile modal
+
+**No ES modules** — files communicate via `Object.assign(window, {...})`. Import/export syntax breaks the app.
+
+**Modal registry** in `crm-interact.jsx`: `newQuote`, `newOrder`, `newClient`, `editClient`, `clientDetail`, `inviteUser`, `permissions`, `search`, `quoteDetail`, `orderDetail`.
+
+### Database (Neon PostgreSQL)
+
+Schema pushed with `prisma db push` — no migration files. Key models:
+- `Quote` ↔ `Quote` via `linkedQuoteId` (SOLICITUD↔PRESUPUESTO)
+- `Order.fromQuoteId` → `Quote`
+- `StageDefinition` — configurable stages per phase with `maxHours`
+- `AppSetting` — key-value config store
+- `LoginLog` — login audit trail
+- `PasswordResetToken` — used for both forgot-password and welcome-email flows
+- `notificationPrefs Json?` on User — stores `lastInboxCheck`, `dismissed{}`, `inapp{}`, `email{}` per-user prefs
+
+### Known issues / audit backlog
+
+- **A-1** (ALTO): GET detail endpoints don't enforce ownership for VENDEDORs
+- **A-2** (ALTO): `nextCode()` has race condition under concurrency — needs retry on P2002
+- **M-1** (MEDIO): `POST /clients` uses `...req.body` (mass assignment)
+- **M-2** (MEDIO): TLS uses `rejectUnauthorized: false` everywhere
+- **M-3** (MEDIO): Mail account passwords stored in plaintext in AppSetting
+- **M-6** (MEDIO): Missing ownership checks on some order endpoints (notes, stage OC path)
+- **M-9** (MEDIO): `emailMessageId` has index but not unique constraint
