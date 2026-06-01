@@ -1,5 +1,7 @@
 node_modules/
 uploads/
 *.log
+*.err
 .env
+.env.*
 .claude/worktrees/

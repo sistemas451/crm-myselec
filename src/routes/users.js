@@ -367,7 +367,10 @@ router.put('/:id', authMiddleware, adminOnly, async (req, res) => {
     if (email) data.email = email;
     if (role)  data.role  = role;
     if (zone !== undefined) data.zone = zone || null;
-    if (password) data.password = await bcrypt.hash(password, 10);
+    if (password) {
+      data.password = await bcrypt.hash(password, 10);
+      data.passwordChangedAt = new Date(); // invalida JWTs previos
+    }
 
     const user = await prisma.user.update({
       where: { id: req.params.id },

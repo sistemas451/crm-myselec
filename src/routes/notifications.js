@@ -574,7 +574,7 @@ router.post('/cron/weekly-report', authMiddleware, adminOnly, async (req, res) =
 router.post('/cron/stage-alerts', async (req, res) => {
   const secret = req.headers['x-cron-secret'];
   const CRON_SECRET = process.env.CRON_SECRET;
-  if (CRON_SECRET && secret !== CRON_SECRET) {
+  if (!CRON_SECRET || secret !== CRON_SECRET) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
   try {
