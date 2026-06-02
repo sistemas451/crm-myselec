@@ -837,9 +837,12 @@ router.post('/:id/send-email', authMiddleware, async (req, res) => {
       if (att) {
         attachmentPath = att.path;
         attachmentName = att.filename;
+        console.log(`📎 Adjunto: ${attachmentName} en ${attachmentPath}`);
       }
     }
 
+    console.log(`📧 send-email → to:${to} from:${fromEmail || 'fallback'} adjunto:${attachmentPath ? 'sí' : 'no'}`);
+    const start = Date.now();
     const result = await sendQuoteEmail(req.params.id, {
       to, cc, subject, body,
       attachmentPath, attachmentName,
@@ -848,9 +851,11 @@ router.post('/:id/send-email', authMiddleware, async (req, res) => {
       fromName: req.user.name || 'MySelec',
     });
 
+    console.log(`✅ send-email OK en ${Date.now() - start}ms — sentFrom:${result.sentFrom}`);
     res.json(result);
   } catch (err) {
-    console.error('Error sending email:', err);
+    console.error('❌ send-email ERROR:', err.message);
+    console.error('   código:', err.code, '| responseCode:', err.responseCode);
     res.status(500).json({ error: err.message || 'Error al enviar el email' });
   }
 });

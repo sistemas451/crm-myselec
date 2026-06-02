@@ -272,7 +272,11 @@ async function getTransportForEmail(email, fromName) {
     const allAccounts = [...envAccounts, ...dbAccounts];
 
     const account = allAccounts.find(a => a.user.toLowerCase() === normalized);
-    if (!account?.password) return null;
+    if (!account?.password) {
+      console.warn(`⚠️  getTransportForEmail: no se encontró cuenta con password para ${email}. Cuentas disponibles: ${allAccounts.map(a=>a.user).join(', ')}`);
+      return null;
+    }
+    console.log(`📬 getTransportForEmail: usando ${account.user}`);
 
     const smtp = smtpConfigForEmail(account.user);
     const transport = nodemailer.createTransport({
