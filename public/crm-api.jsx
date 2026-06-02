@@ -264,6 +264,13 @@ const CrmApi = {
   // Email sending accounts
   getSendAccounts:  ()  => apiFetch('/quotes/send-accounts'),
 
+  // ── Feedback / Foro ────────────────────────────────────────────────────────
+  getFeedbackMeta:    ()           => apiFetch('/feedback/meta'),
+  getFeedbackPosts:   ()           => apiFetch('/feedback'),
+  createFeedbackPost: (data)       => apiFetch('/feedback', { method: 'POST', body: JSON.stringify(data) }),
+  respondFeedback:    (id, body)   => apiFetch(`/feedback/${id}/respond`, { method: 'POST', body: JSON.stringify({ body }) }),
+  setFeedbackStatus:  (id, status) => apiFetch(`/feedback/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
+
   // Email templates
   getEmailTemplates: () => apiFetch('/quotes/email-templates'),
   saveEmailTemplates: (data) => apiFetch('/quotes/email-templates', { method: 'PUT', body: JSON.stringify(data) }),

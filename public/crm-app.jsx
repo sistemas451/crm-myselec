@@ -196,6 +196,7 @@ function App() {
           {screen === 'comparativa' && <Comparativa/>}
           {screen === 'team'        && <Team/>}
           {screen === 'config'      && <Config/>}
+          {screen === 'feedback'    && <FeedbackView/>}
         </main>
       </div>
     </div>
@@ -957,6 +958,7 @@ function Sidebar({ role, screen, setScreen, user, onProfileOpen, collapsed, onTo
     { id:'comparativa', label:'Comparativa',           icon:'git-compare', sub:'Pres. vs NP' },
     { id:'team',        label:'Equipo',                icon:'users' },
     { id:'config',      label:'Configuración',         icon:'settings' },
+    { id:'feedback',    label:'Foro',                  icon:'message-circle', sub:'Soporte interno' },
   ];
   const navSeller = [
     { id:'my-quotes',   label:'Mis Cotizaciones',      icon:'clipboard-list' },
@@ -965,9 +967,11 @@ function Sidebar({ role, screen, setScreen, user, onProfileOpen, collapsed, onTo
     { id:'orders',      label:'Pipeline OCs',          icon:'columns',    sub:'Kanban Fase 2' },
     { id:'clients',     label:'Clientes',              icon:'building-2', sub:'solo lectura' },
     { id:'comparativa', label:'Comparativa',           icon:'git-compare', sub:'Pres. vs NP' },
+    { id:'feedback',    label:'Foro',                  icon:'message-circle', sub:'Soporte interno' },
   ];
   const navLog = [
-    { id:'ops', label:'Operaciones', icon:'truck', sub:'Fase 2' },
+    { id:'ops',      label:'Operaciones', icon:'truck', sub:'Fase 2' },
+    { id:'feedback', label:'Foro',        icon:'message-circle', sub:'Soporte interno' },
   ];
   const nav = role === 'admin' ? navAdmin : role === 'seller' ? navSeller : navLog;
   const roleLabel = { ADMIN:'Administrador', VENDEDOR:'Vendedor', LOGISTICA:'Logística' };

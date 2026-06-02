@@ -33,6 +33,8 @@ model User {
   clientsDefault    Client[]             @relation("DefaultSeller")
   passwordResetTokens PasswordResetToken[]
   loginLogs           LoginLog[]
+  feedbackPosts     FeedbackPost[]       @relation("FeedbackAuthor")
+  feedbackResponses FeedbackResponse[]   @relation("FeedbackResponder")
 }
 
 // ─── Tokens de recuperación de contraseña ───
@@ -312,6 +314,36 @@ model Article {
   updatedAt   DateTime @updatedAt
 }
 
+
+// ─── Foro de feedback / soporte interno ─────────────────────────────────────
+model FeedbackPost {
+  id        String             @id @default(uuid())
+  type      String             // "BUG" | "QUESTION" | "MEETING"
+  title     String
+  body      String             @db.Text
+  status    String             @default("OPEN") // "OPEN" | "IN_PROGRESS" | "RESOLVED"
+  userId    String
+  user      User               @relation("FeedbackAuthor", fields: [userId], references: [id])
+  responses FeedbackResponse[]
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model FeedbackResponse {
+  id        String       @id @default(uuid())
+  body      String       @db.Text
+  userId    String
+  user      User         @relation("FeedbackResponder", fields: [userId], references: [id])
+  postId    String
+  post      FeedbackPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  createdAt DateTime     @default(now())
+
+  @@index([postId])
+}
 
 // ─── Logs de ingreso ────────────────────────────────────────────────────────
 model LoginLog {

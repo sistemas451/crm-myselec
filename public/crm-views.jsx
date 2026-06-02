@@ -4200,4 +4200,406 @@ function Comparativa() {
   );
 }
 
-Object.assign(window, { MySalesView, LogisticsView, Clients, Articles, Team, Config, PageHead, Comparativa, ArticleFormModal, ClientImportModal });
+// ─── FeedbackView — Foro de soporte interno ────────────────────────────────
+function FeedbackView() {
+  const { user } = useApp();
+  const isAdmin = user?.role === 'ADMIN';
+
+  const [posts,       setPosts]       = useState([]);
+  const [meta,        setMeta]        = useState({ meetingLink: '', templates: {} });
+  const [loading,     setLoading]     = useState(true);
+  const [submitting,  setSubmitting]  = useState(false);
+  const [expandedId,  setExpandedId]  = useState(null);
+
+  // Form nuevo reporte
+  const [type,  setType]  = useState('BUG');
+  const [title, setTitle] = useState('');
+  const [body,  setBody]  = useState('');
+  const [formErr, setFormErr] = useState('');
+
+  // Responder (admin)
+  const [replyText,    setReplyText]    = useState({});   // { postId: text }
+  const [replyLoading, setReplyLoading] = useState(null); // postId en curso
+
+  // Filtro admin
+  const [filter, setFilter] = useState('OPEN'); // 'ALL' | 'OPEN' | 'IN_PROGRESS' | 'RESOLVED'
+
+  // meeting_link editable
+  const [editLink,     setEditLink]     = useState(false);
+  const [linkVal,      setLinkVal]      = useState('');
+  const [savingLink,   setSavingLink]   = useState(false);
+
+  async function load() {
+    setLoading(true);
+    try {
+      const [p, m] = await Promise.all([CrmApi.getFeedbackPosts(), CrmApi.getFeedbackMeta()]);
+      setPosts(p);
+      setMeta(m);
+      setLinkVal(m.meetingLink || '');
+    } catch (_) {}
+    setLoading(false);
+  }
+
+  useEffect(() => { load(); }, []);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!title.trim() || !body.trim()) { setFormErr('Completá el título y la descripción.'); return; }
+    setFormErr('');
+    setSubmitting(true);
+    try {
+      const post = await CrmApi.createFeedbackPost({ type, title, body });
+      setPosts(prev => [post, ...prev]);
+      setTitle(''); setBody(''); setType('BUG');
+      setExpandedId(post.id); // abrir el recién creado
+    } catch (err) {
+      setFormErr(err.message || 'Error al enviar. Intentá de nuevo.');
+    }
+    setSubmitting(false);
+  }
+
+  async function handleRespond(postId) {
+    const text = replyText[postId]?.trim();
+    if (!text) return;
+    setReplyLoading(postId);
+    try {
+      const resp = await CrmApi.respondFeedback(postId, text);
+      setPosts(prev => prev.map(p => {
+        if (p.id !== postId) return p;
+        return { ...p, status: p.status === 'OPEN' ? 'IN_PROGRESS' : p.status, responses: [...p.responses, resp] };
+      }));
+      setReplyText(prev => ({ ...prev, [postId]: '' }));
+    } catch (err) {
+      alert(err.message || 'Error al responder.');
+    }
+    setReplyLoading(null);
+  }
+
+  async function handleStatus(postId, status) {
+    try {
+      await CrmApi.setFeedbackStatus(postId, status);
+      setPosts(prev => prev.map(p => p.id === postId ? { ...p, status } : p));
+    } catch (_) {}
+  }
+
+  async function handleSaveLink() {
+    setSavingLink(true);
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('crm_token')}` },
+        body: JSON.stringify({ meeting_link: linkVal.trim() }),
+      });
+      if (!res.ok) throw new Error('Error al guardar');
+      setMeta(prev => ({ ...prev, meetingLink: linkVal.trim() }));
+      setEditLink(false);
+    } catch (err) {
+      alert('Error al guardar: ' + err.message);
+    }
+    setSavingLink(false);
+  }
+
+  function loadTemplate(postType) {
+    const tpl = meta.templates?.[postType] || '';
+    setReplyText(prev => ({ ...prev, [expandedId]: tpl }));
+  }
+
+  const TYPE_COLORS = {
+    BUG:      'bg-red-100 text-red-700 border-red-200',
+    QUESTION: 'bg-blue-100 text-blue-700 border-blue-200',
+    MEETING:  'bg-violet-100 text-violet-700 border-violet-200',
+  };
+  const TYPE_LABELS = { BUG: '🐛 Error', QUESTION: '❓ Pregunta', MEETING: '📅 Reunión' };
+  const STATUS_COLORS = {
+    OPEN:        'bg-yellow-100 text-yellow-700',
+    IN_PROGRESS: 'bg-blue-100 text-blue-700',
+    RESOLVED:    'bg-green-100 text-green-700',
+  };
+  const STATUS_LABELS = { OPEN: 'Abierto', IN_PROGRESS: 'En progreso', RESOLVED: 'Resuelto' };
+
+  const myPosts    = posts.filter(p => p.userId === user?.id);
+  const otherPosts = isAdmin ? posts.filter(p => p.userId !== user?.id) : [];
+
+  const filteredAdmin = isAdmin
+    ? (filter === 'ALL' ? posts : posts.filter(p => p.status === filter))
+    : [];
+
+  return (
+    <div className="p-6 max-w-3xl mx-auto space-y-8">
+      <PageHead
+        title="Foro de soporte"
+        subtitle="Reportá errores, hacé preguntas o pedí una reunión de 10 minutos."
+        icon="message-circle"
+      />
+
+      {/* ── Nuevo reporte ── */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
+          <Icon name="plus-circle" size={16} className="text-brand"/>
+          <span className="font-semibold text-sm text-slate-700">Nuevo reporte</span>
+        </div>
+        <form onSubmit={handleSubmit} className="p-5 space-y-4">
+          {/* Tipo */}
+          <div className="flex gap-2 flex-wrap">
+            {['BUG','QUESTION','MEETING'].map(t => (
+              <button key={t} type="button"
+                onClick={() => setType(t)}
+                className={cx(
+                  'px-3 py-1.5 rounded-lg text-[13px] font-medium border transition-all',
+                  type === t
+                    ? TYPE_COLORS[t] + ' ring-2 ring-offset-1 ring-current'
+                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                )}
+              >
+                {TYPE_LABELS[t]}
+              </button>
+            ))}
+          </div>
+
+          {/* Título */}
+          <input
+            type="text"
+            placeholder="Título breve..."
+            value={title}
+            onChange={e => setTitle(e.target.value)}
+            maxLength={120}
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand/30"
+          />
+
+          {/* Descripción */}
+          <textarea
+            placeholder={
+              type === 'BUG'      ? 'Describí el error: ¿qué hiciste? ¿qué esperabas? ¿qué pasó?' :
+              type === 'QUESTION' ? 'Escribí tu pregunta con el mayor detalle posible...' :
+                                    'Describí brevemente de qué querés hablar en la reunión...'
+            }
+            value={body}
+            onChange={e => setBody(e.target.value)}
+            rows={4}
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand/30 resize-none"
+          />
+
+          {formErr && <p className="text-xs text-red-600">{formErr}</p>}
+
+          <div className="flex justify-end">
+            <button type="submit" disabled={submitting}
+              className="px-4 py-2 bg-brand text-white rounded-lg text-sm font-medium hover:bg-brand/90 disabled:opacity-50 flex items-center gap-2">
+              {submitting
+                ? <><Icon name="loader" size={13} className="animate-spin"/>Enviando...</>
+                : <><Icon name="send" size={13}/>Enviar reporte</>
+              }
+            </button>
+          </div>
+        </form>
+      </div>
+
+      {/* ── Panel admin: link de reunión ── */}
+      {isAdmin && (
+        <div className="bg-violet-50 border border-violet-200 rounded-xl p-4 flex items-center gap-3">
+          <Icon name="link" size={15} className="text-violet-500 shrink-0"/>
+          <div className="flex-1 min-w-0">
+            {editLink ? (
+              <div className="flex gap-2 items-center">
+                <input
+                  type="url"
+                  value={linkVal}
+                  onChange={e => setLinkVal(e.target.value)}
+                  placeholder="https://calendly.com/..."
+                  className="flex-1 border border-violet-300 rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+                />
+                <button onClick={handleSaveLink} disabled={savingLink}
+                  className="px-3 py-1 bg-violet-600 text-white text-xs rounded-lg hover:bg-violet-700 disabled:opacity-50">
+                  {savingLink ? 'Guardando…' : 'Guardar'}
+                </button>
+                <button onClick={() => { setEditLink(false); setLinkVal(meta.meetingLink || ''); }}
+                  className="px-3 py-1 border border-violet-300 text-violet-700 text-xs rounded-lg hover:bg-violet-100">
+                  Cancelar
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-violet-700 font-medium">Link de reunión:</span>
+                <span className="text-sm text-violet-600 truncate">
+                  {meta.meetingLink || <em className="text-violet-400">sin configurar</em>}
+                </span>
+                <button onClick={() => setEditLink(true)}
+                  className="ml-1 text-violet-500 hover:text-violet-700 text-xs underline">
+                  {meta.meetingLink ? 'Editar' : 'Configurar'}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Listado ── */}
+      {loading ? (
+        <div className="flex justify-center py-10 text-slate-400">
+          <Icon name="loader" size={20} className="animate-spin"/>
+        </div>
+      ) : (
+        <>
+          {/* Filtros admin */}
+          {isAdmin && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-slate-500 font-medium">Filtrar:</span>
+              {['ALL','OPEN','IN_PROGRESS','RESOLVED'].map(f => (
+                <button key={f} onClick={() => setFilter(f)}
+                  className={cx(
+                    'px-2.5 py-1 rounded-lg text-xs font-medium border transition-all',
+                    filter === f
+                      ? 'bg-brand text-white border-brand'
+                      : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                  )}>
+                  {f === 'ALL' ? 'Todos' : STATUS_LABELS[f]}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Lista de posts */}
+          {(isAdmin ? filteredAdmin : myPosts).length === 0 ? (
+            <div className="text-center py-12 text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+              <Icon name="message-circle" size={28} className="mx-auto mb-2 opacity-40"/>
+              <p className="text-sm">{isAdmin ? 'No hay reportes con este filtro.' : 'Todavía no enviaste ningún reporte.'}</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {(isAdmin ? filteredAdmin : myPosts).map(post => {
+                const open = expandedId === post.id;
+                return (
+                  <div key={post.id}
+                    className={cx('bg-white rounded-xl border shadow-sm overflow-hidden transition-all',
+                      open ? 'border-brand/40' : 'border-slate-200'
+                    )}>
+                    {/* Header del post */}
+                    <button
+                      className="w-full text-left px-5 py-4 flex items-start gap-3 hover:bg-slate-50 transition-colors"
+                      onClick={() => setExpandedId(open ? null : post.id)}
+                    >
+                      <span className={cx('shrink-0 px-2 py-0.5 rounded-md text-[11px] font-semibold border mt-0.5', TYPE_COLORS[post.type])}>
+                        {TYPE_LABELS[post.type]}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-semibold text-sm text-slate-800 leading-tight">{post.title}</span>
+                          <span className={cx('px-1.5 py-0.5 rounded text-[10px] font-semibold', STATUS_COLORS[post.status])}>
+                            {STATUS_LABELS[post.status]}
+                          </span>
+                          {post.responses.length > 0 && (
+                            <span className="text-[11px] text-slate-400 flex items-center gap-1">
+                              <Icon name="message-square" size={11}/>{post.responses.length}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-slate-400 mt-0.5 flex items-center gap-1.5">
+                          {isAdmin && <><span className="font-medium text-slate-500">{post.user.name}</span><span>·</span></>}
+                          {fmtDate(post.createdAt)}
+                        </div>
+                      </div>
+                      <Icon name={open ? 'chevron-up' : 'chevron-down'} size={15} className="text-slate-400 shrink-0 mt-1"/>
+                    </button>
+
+                    {/* Contenido expandido */}
+                    {open && (
+                      <div className="border-t border-slate-100 px-5 py-4 space-y-4">
+                        {/* Cuerpo */}
+                        <div className="bg-slate-50 rounded-lg p-3 text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">
+                          {post.body}
+                        </div>
+
+                        {/* Respuestas existentes */}
+                        {post.responses.length > 0 && (
+                          <div className="space-y-2">
+                            {post.responses.map(r => (
+                              <div key={r.id} className="flex gap-2.5">
+                                <div className="w-6 h-6 rounded-full bg-brand/10 flex items-center justify-center shrink-0 mt-0.5">
+                                  <Icon name="shield-check" size={12} className="text-brand"/>
+                                </div>
+                                <div className="flex-1">
+                                  <div className="text-[11px] text-slate-400 mb-0.5">
+                                    <span className="font-medium text-slate-600">{r.user.name}</span>
+                                    {' · '}{fmtDate(r.createdAt)}
+                                  </div>
+                                  <div className="bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 text-sm text-slate-700 whitespace-pre-wrap">
+                                    {r.body}
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Formulario respuesta (solo admin) */}
+                        {isAdmin && post.status !== 'RESOLVED' && (
+                          <div className="space-y-2">
+                            {/* Plantillas */}
+                            <div className="flex gap-2 flex-wrap">
+                              <span className="text-[11px] text-slate-400 self-center">Plantillas:</span>
+                              {['BUG','QUESTION','MEETING'].map(t => (
+                                <button key={t} type="button"
+                                  onClick={() => {
+                                    const tpl = meta.templates?.[t] || '';
+                                    setReplyText(prev => ({ ...prev, [post.id]: tpl }));
+                                  }}
+                                  className="px-2 py-0.5 rounded text-[11px] border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100">
+                                  {TYPE_LABELS[t]}
+                                </button>
+                              ))}
+                            </div>
+                            <textarea
+                              placeholder="Escribí tu respuesta..."
+                              value={replyText[post.id] || ''}
+                              onChange={e => setReplyText(prev => ({ ...prev, [post.id]: e.target.value }))}
+                              rows={3}
+                              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand/30 resize-none"
+                            />
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => handleStatus(post.id, 'RESOLVED')}
+                                  className="px-3 py-1.5 border border-green-200 text-green-700 bg-green-50 rounded-lg text-xs font-medium hover:bg-green-100 flex items-center gap-1">
+                                  <Icon name="check-circle" size={12}/>Marcar resuelto
+                                </button>
+                                {post.status !== 'IN_PROGRESS' && (
+                                  <button
+                                    onClick={() => handleStatus(post.id, 'IN_PROGRESS')}
+                                    className="px-3 py-1.5 border border-blue-200 text-blue-700 bg-blue-50 rounded-lg text-xs font-medium hover:bg-blue-100">
+                                    En progreso
+                                  </button>
+                                )}
+                              </div>
+                              <button
+                                onClick={() => handleRespond(post.id)}
+                                disabled={replyLoading === post.id || !replyText[post.id]?.trim()}
+                                className="px-4 py-1.5 bg-brand text-white rounded-lg text-xs font-medium hover:bg-brand/90 disabled:opacity-50 flex items-center gap-1.5">
+                                {replyLoading === post.id
+                                  ? <><Icon name="loader" size={12} className="animate-spin"/>Enviando...</>
+                                  : <><Icon name="corner-down-right" size={12}/>Responder</>
+                                }
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Si está resuelto, solo mostrar botón para reabrir */}
+                        {isAdmin && post.status === 'RESOLVED' && (
+                          <button onClick={() => handleStatus(post.id, 'OPEN')}
+                            className="text-xs text-slate-400 hover:text-slate-600 underline">
+                            Reabrir
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+Object.assign(window, { MySalesView, LogisticsView, Clients, Articles, Team, Config, PageHead, Comparativa, ArticleFormModal, ClientImportModal, FeedbackView });
