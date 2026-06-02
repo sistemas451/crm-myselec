@@ -261,6 +261,12 @@ const CrmApi = {
   // Attachments
   deleteAttachment: (id) => apiFetch(`/attachments/${id}`, { method: 'DELETE' }),
 
+  // SMTP config (personal email sending)
+  getSmtpConfig:    (id) => apiFetch(`/users/${id}/smtp-config`),
+  saveSmtpConfig:   (id, data) => apiFetch(`/users/${id}/smtp-config`, { method: 'PATCH', body: JSON.stringify(data) }),
+  testSmtp:         (id) => apiFetch(`/users/${id}/smtp-test`, { method: 'POST' }),
+  getSendFrom:      ()  => apiFetch('/quotes/send-from'),
+
   // Email templates
   getEmailTemplates: () => apiFetch('/quotes/email-templates'),
   saveEmailTemplates: (data) => apiFetch('/quotes/email-templates', { method: 'PUT', body: JSON.stringify(data) }),

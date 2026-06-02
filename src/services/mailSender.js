@@ -204,11 +204,23 @@ function applyTemplate(text, vars) {
  * @param {string}   [opts.attachmentName] — Nombre de archivo para el adjunto
  * @returns {Promise<{ messageId: string }>}
  */
-async function sendEmail({ to, cc, subject, body, attachmentPath, attachmentName }) {
-  const { transport, fromEmail } = await createTransport();
+async function sendEmail({ to, cc, subject, body, attachmentPath, attachmentName, userId }) {
+  // Intentar usar cuenta personal del vendedor; fallback a cuenta CRM
+  let transport, fromEmail, fromName;
+  const userTransport = userId ? await getTransportForUser(userId) : null;
+  if (userTransport) {
+    transport = userTransport.transport;
+    fromEmail = userTransport.fromEmail;
+    fromName  = userTransport.fromName;
+  } else {
+    const fallback = await createTransport();
+    transport = fallback.transport;
+    fromEmail = fallback.fromEmail;
+    fromName  = 'Myselec CRM';
+  }
 
   const mailOptions = {
-    from:    `"Myselec CRM" <${fromEmail}>`,
+    from:    `"${fromName}" <${fromEmail}>`,
     to,
     subject,
     text:    body,
@@ -230,7 +242,49 @@ async function sendEmail({ to, cc, subject, body, attachmentPath, attachmentName
   }
 
   const info = await transport.sendMail(mailOptions);
-  return { messageId: info.messageId };
+  return { messageId: info.messageId, sentFrom: fromEmail };
+}
+
+// ─── Resolver cuenta SMTP por userId (para envío personal) ───────────────
+
+/**
+ * Busca la cuenta SMTP vinculada a un usuario (si tiene smtpEmail configurado).
+ * Devuelve { transport, fromEmail } o null si no tiene cuenta personal.
+ */
+async function getTransportForUser(userId) {
+  if (!userId) return null;
+  try {
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { smtpEmail: true, name: true } });
+    if (!user?.smtpEmail) return null;
+
+    const normalizedSmtp = user.smtpEmail.toLowerCase();
+
+    // Buscar credenciales en env + DB
+    const envAccounts = [];
+    if (process.env.MAIL_ACCOUNTS) {
+      try { envAccounts.push(...JSON.parse(process.env.MAIL_ACCOUNTS)); } catch (_) {}
+    } else if (process.env.MAIL_USER && process.env.MAIL_PASSWORD) {
+      envAccounts.push({ user: process.env.MAIL_USER, password: process.env.MAIL_PASSWORD });
+    }
+    const setting = await prisma.appSetting.findUnique({ where: { key: 'mail_accounts' } });
+    const dbAccounts = setting?.value ? JSON.parse(setting.value) : [];
+    const allAccounts = [...envAccounts, ...dbAccounts];
+
+    const account = allAccounts.find(a => a.user.toLowerCase() === normalizedSmtp);
+    if (!account?.password) return null;
+
+    const smtp = smtpConfigForEmail(account.user);
+    const transport = nodemailer.createTransport({
+      host: smtp.host, port: smtp.port, secure: smtp.secure,
+      auth: { user: account.user, pass: account.password },
+      tls: { rejectUnauthorized: false },
+    });
+
+    return { transport, fromEmail: account.user, fromName: user.name || 'MySelec' };
+  } catch (e) {
+    console.error('getTransportForUser error:', e.message);
+    return null;
+  }
 }
 
 // ─── Función de alto nivel usada por la ruta ─────────────────────────────────
@@ -253,8 +307,8 @@ async function sendEmail({ to, cc, subject, body, attachmentPath, attachmentName
 async function sendQuoteEmail(quoteId, opts) {
   const { to, cc, subject, body, attachmentPath, attachmentName, userId } = opts;
 
-  // Enviar
-  const { messageId } = await sendEmail({ to, cc, subject, body, attachmentPath, attachmentName });
+  // Enviar (userId permite enviar desde la cuenta personal del vendedor)
+  const { messageId, sentFrom } = await sendEmail({ to, cc, subject, body, attachmentPath, attachmentName, userId });
 
   // Log de actividad
   await prisma.activity.create({
@@ -285,7 +339,7 @@ async function sendQuoteEmail(quoteId, opts) {
     stageAdvanced = true;
   }
 
-  return { messageId, stageAdvanced };
+  return { messageId, stageAdvanced, sentFrom };
 }
 
 module.exports = {
@@ -295,5 +349,7 @@ module.exports = {
   saveTemplates,
   getDefaultCC,
   applyTemplate,
+  smtpConfigForEmail,
+  getTransportForUser,
   DEFAULT_TEMPLATES,
 };

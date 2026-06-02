@@ -105,6 +105,21 @@ router.get('/', authMiddleware, async (req, res) => {
   }
 });
 
+// GET /api/quotes/send-from — devuelve desde qué cuenta enviaría el usuario actual
+router.get('/send-from', authMiddleware, async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.user.id }, select: { smtpEmail: true, name: true } });
+    const defaultEmail = process.env.MAIL_USER || 'iamyselec@gmail.com';
+    res.json({
+      personalEmail: user?.smtpEmail || null,
+      defaultEmail,
+      sendingAs: user?.smtpEmail || defaultEmail,
+    });
+  } catch (err) {
+    res.json({ personalEmail: null, defaultEmail: process.env.MAIL_USER || 'iamyselec@gmail.com', sendingAs: process.env.MAIL_USER || 'iamyselec@gmail.com' });
+  }
+});
+
 // POST /api/quotes - Create new quote
 router.post('/', authMiddleware, async (req, res) => {
   try {
@@ -842,15 +857,11 @@ router.post('/:id/send-reminder', authMiddleware, async (req, res) => {
     }
     if (!quote.client?.email) return res.status(400).json({ error: 'El cliente no tiene email registrado' });
 
-    // Enviar mail al cliente
-    const { sendMail } = require('../services/mailer');
-    const APP_URL = process.env.APP_URL || `http://localhost:${process.env.PORT || 3000}`;
+    // Enviar mail al cliente — intentar SMTP personal, fallback a Gmail API
+    const { getTransportForUser } = require('../services/mailSender');
+    const { sendMail: sendMailGmailApi } = require('../services/mailer');
     const htmlBody = body.replace(/\n/g, '<br/>');
-
-    await sendMail({
-      to: quote.client.email,
-      subject,
-      html: `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"></head>
+    const htmlContent = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"></head>
 <body style="margin:0;padding:0;background:#F1F5F9;font-family:sans-serif">
 <div style="max-width:520px;margin:32px auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.08)">
   <div style="background:#1B2A4A;padding:24px 32px 20px">
@@ -863,14 +874,29 @@ router.post('/:id/send-reminder', authMiddleware, async (req, res) => {
     <div style="font-size:11px;color:#94A3B8">MySelec · Este es un seguimiento del presupuesto enviado</div>
   </div>
 </div>
-</body></html>`,
-    });
+</body></html>`;
+
+    let sentFrom = null;
+    const userTransport = await getTransportForUser(req.user.id);
+    if (userTransport) {
+      await userTransport.transport.sendMail({
+        from: `"${userTransport.fromName}" <${userTransport.fromEmail}>`,
+        to: quote.client.email,
+        subject,
+        text: body,
+        html: htmlContent,
+      });
+      sentFrom = userTransport.fromEmail;
+    } else {
+      await sendMailGmailApi({ to: quote.client.email, subject, html: htmlContent });
+      sentFrom = process.env.MAIL_USER || 'iamyselec@gmail.com';
+    }
 
     // Registrar actividad
     await prisma.activity.create({
       data: {
         action: 'REMINDER_SENT',
-        detail: `Recordatorio enviado a ${quote.client.email} — "${subject}"`,
+        detail: `Recordatorio enviado a ${quote.client.email} desde ${sentFrom} — "${subject}"`,
         userId: req.user.id,
         quoteId: req.params.id,
       },
@@ -886,7 +912,7 @@ router.post('/:id/send-reminder', authMiddleware, async (req, res) => {
       data: { followUpDate: newFollowUp },
     });
 
-    res.json({ ok: true, sentTo: quote.client.email, nextFollowUp: newFollowUp.toISOString() });
+    res.json({ ok: true, sentTo: quote.client.email, sentFrom, nextFollowUp: newFollowUp.toISOString() });
   } catch (err) {
     console.error('Error sending reminder:', err);
     res.status(500).json({ error: err.message || 'Error al enviar recordatorio' });
