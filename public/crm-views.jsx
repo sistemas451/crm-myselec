@@ -1182,6 +1182,7 @@ function UserModal({ user, onClose, onSave }) {
                 <option value="VENDEDOR">Vendedor</option>
                 <option value="ADMIN">Administrador</option>
                 <option value="LOGISTICA">Logística</option>
+                {CrmAuth.getUser()?.role === 'DEVELOPER' && <option value="DEVELOPER">Desarrollador</option>}
               </select>
             </div>
             <div>
@@ -1265,7 +1266,7 @@ function ApproveUserModal({ user, onClose, onApprove }) {
     setLoading(false);
   };
 
-  const roleLabel = { ADMIN:'Administrador', VENDEDOR:'Vendedor', LOGISTICA:'Logística' };
+  const roleLabel = { DEVELOPER:'Desarrollador', ADMIN:'Administrador', VENDEDOR:'Vendedor', LOGISTICA:'Logística' };
 
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
@@ -1285,7 +1286,7 @@ function ApproveUserModal({ user, onClose, onApprove }) {
           <div>
             <label className="text-[12px] font-medium text-ink-600 mb-1.5 block">Asignar rol</label>
             <div className="flex flex-col gap-2">
-              {['VENDEDOR','LOGISTICA','ADMIN'].map(r => (
+              {['VENDEDOR','LOGISTICA','ADMIN', ...(CrmAuth.getUser()?.role === 'DEVELOPER' ? ['DEVELOPER'] : [])].map(r => (
                 <label key={r} className={cx('flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors',
                   role === r ? 'border-brand bg-blue-50' : 'border-line hover:bg-surface')}>
                   <input type="radio" name="role" value={r} checked={role === r} onChange={() => setRole(r)} className="accent-brand"/>
@@ -1373,8 +1374,8 @@ function Team() {
     }
   };
 
-  const roleLabel = { ADMIN:'Administrador', VENDEDOR:'Vendedor', LOGISTICA:'Logística' };
-  const roleTone  = { ADMIN:'navy', VENDEDOR:'blue', LOGISTICA:'amber' };
+  const roleLabel = { DEVELOPER:'Desarrollador', ADMIN:'Administrador', VENDEDOR:'Vendedor', LOGISTICA:'Logística' };
+  const roleTone  = { DEVELOPER:'violet', ADMIN:'navy', VENDEDOR:'blue', LOGISTICA:'amber' };
 
   const sellers = (users || []).filter(u => u.role === 'VENDEDOR');
   const others  = (users || []).filter(u => u.role !== 'VENDEDOR');
