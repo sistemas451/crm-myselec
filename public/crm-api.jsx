@@ -308,6 +308,7 @@ async function loadAllData() {
       email: u.email,
       role: roleMap[u.role] || u.role,
       zone: u.zone || '—',
+      smtpEmail: u.smtpEmail || null,
     }));
 
     // Map clients to frontend format

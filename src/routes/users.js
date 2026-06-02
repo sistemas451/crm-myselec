@@ -131,7 +131,7 @@ router.get('/', authMiddleware, async (req, res) => {
     const users = await prisma.user.findMany({
       where: { pendingApproval: false },
       orderBy: [{ role: 'asc' }, { name: 'asc' }],
-      select: { id: true, name: true, email: true, role: true, zone: true, active: true, avatar: true, phone: true, passwordChangedAt: true, notifyUnassigned: true, notificationPrefs: true, createdAt: true },
+      select: { id: true, name: true, email: true, role: true, zone: true, active: true, avatar: true, phone: true, passwordChangedAt: true, notifyUnassigned: true, notificationPrefs: true, smtpEmail: true, createdAt: true },
     });
 
     // Enriquecer con stats solo para admin
@@ -625,35 +625,18 @@ router.patch('/:id/smtp-config', authMiddleware, async (req, res) => {
 
     const normalizedEmail = smtpEmail.toLowerCase().trim();
 
-    // Si se envía contraseña → agregar/actualizar la cuenta en mail_accounts
-    if (smtpPassword) {
-      const setting = await prisma.appSetting.findUnique({ where: { key: 'mail_accounts' } });
-      const accounts = setting?.value ? JSON.parse(setting.value) : [];
-      const idx = accounts.findIndex(a => a.user.toLowerCase() === normalizedEmail);
-      if (idx >= 0) {
-        accounts[idx].password = smtpPassword; // actualizar
-      } else {
-        accounts.push({ user: normalizedEmail, password: smtpPassword }); // agregar
-      }
-      await prisma.appSetting.upsert({
-        where:  { key: 'mail_accounts' },
-        update: { value: JSON.stringify(accounts) },
-        create: { key: 'mail_accounts', value: JSON.stringify(accounts) },
-      });
-    } else {
-      // Sin contraseña: solo verificar que la cuenta ya exista en mail_accounts o env
-      const setting = await prisma.appSetting.findUnique({ where: { key: 'mail_accounts' } });
-      const dbAccounts = setting?.value ? JSON.parse(setting.value) : [];
-      const envAccounts = [];
-      if (process.env.MAIL_ACCOUNTS) {
-        try { envAccounts.push(...JSON.parse(process.env.MAIL_ACCOUNTS)); } catch (_) {}
-      } else if (process.env.MAIL_USER) {
-        envAccounts.push({ user: process.env.MAIL_USER });
-      }
-      const allAccounts = [...envAccounts, ...dbAccounts];
-      const found = allAccounts.find(a => a.user.toLowerCase() === normalizedEmail);
-      if (!found) return res.status(400).json({ error: 'Esa cuenta no está configurada. Ingresá también la contraseña de aplicación.' });
+    // Verificar que la cuenta exista en mail_accounts (env o DB)
+    const setting = await prisma.appSetting.findUnique({ where: { key: 'mail_accounts' } });
+    const dbAccounts = setting?.value ? JSON.parse(setting.value) : [];
+    const envAccounts = [];
+    if (process.env.MAIL_ACCOUNTS) {
+      try { envAccounts.push(...JSON.parse(process.env.MAIL_ACCOUNTS)); } catch (_) {}
+    } else if (process.env.MAIL_USER) {
+      envAccounts.push({ user: process.env.MAIL_USER });
     }
+    const allAccounts = [...envAccounts, ...dbAccounts];
+    const found = allAccounts.find(a => a.user.toLowerCase() === normalizedEmail);
+    if (!found) return res.status(400).json({ error: 'Esa cuenta no está configurada en el sistema. Pedí al admin que la agregue en Configuración → Mail.' });
 
     const updated = await prisma.user.update({
       where: { id: req.params.id },

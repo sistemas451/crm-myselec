@@ -606,13 +606,11 @@ function ProfileModal({ user, onClose, onUpdated }) {
             {/* ── TAB EMAIL ── */}
             {tab === 'email' && (() => {
               const [smtpEmail, setSmtpEmail] = React.useState('');
-              const [smtpPassword, setSmtpPassword] = React.useState('');
               const [availableAccounts, setAvailableAccounts] = React.useState([]);
               const [smtpLoading, setSmtpLoading] = React.useState(true);
               const [smtpSaving, setSmtpSaving] = React.useState(false);
               const [smtpTesting, setSmtpTesting] = React.useState(false);
               const [smtpMsg, setSmtpMsg] = React.useState({ type: '', text: '' });
-              const [mode, setMode] = React.useState('select'); // 'select' | 'new'
 
               React.useEffect(() => {
                 CrmApi.getSmtpConfig(user.id).then(data => {
@@ -626,13 +624,7 @@ function ProfileModal({ user, onClose, onUpdated }) {
                 setSmtpMsg({ type: '', text: '' });
                 setSmtpSaving(true);
                 try {
-                  const payload = { smtpEmail: smtpEmail || null };
-                  if (mode === 'new' && smtpPassword) payload.smtpPassword = smtpPassword;
-                  await CrmApi.saveSmtpConfig(user.id, payload);
-                  setSmtpPassword('');
-                  // Recargar accounts por si se agregó una nueva
-                  const data = await CrmApi.getSmtpConfig(user.id);
-                  setAvailableAccounts(data.availableAccounts || []);
+                  await CrmApi.saveSmtpConfig(user.id, { smtpEmail: smtpEmail || null });
                   setSmtpMsg({ type: 'ok', text: smtpEmail ? 'Cuenta de envío configurada' : 'Cuenta desvinculada — se usará la cuenta del CRM' });
                 } catch (err) {
                   setSmtpMsg({ type: 'err', text: err.message });
@@ -644,31 +636,19 @@ function ProfileModal({ user, onClose, onUpdated }) {
                 setSmtpTesting(true);
                 try {
                   const res = await CrmApi.testSmtp(user.id);
-                  setSmtpMsg({ type: 'ok', text: `Conexión OK con ${res.email}` });
+                  setSmtpMsg({ type: 'ok', text: 'Conexión SMTP OK con ' + res.email });
                 } catch (err) {
-                  setSmtpMsg({ type: 'err', text: `Error: ${err.message}` });
+                  setSmtpMsg({ type: 'err', text: 'Error: ' + err.message });
                 } finally { setSmtpTesting(false); }
               };
 
-              const handleClear = async () => {
-                setSmtpEmail('');
-                setSmtpPassword('');
-                setSmtpSaving(true);
-                try {
-                  await CrmApi.saveSmtpConfig(user.id, { smtpEmail: null });
-                  setSmtpMsg({ type: 'ok', text: 'Cuenta desvinculada' });
-                } catch (err) {
-                  setSmtpMsg({ type: 'err', text: err.message });
-                } finally { setSmtpSaving(false); }
-              };
-
-              if (smtpLoading) return <div className="p-6 text-center text-ink-400 text-sm">Cargando...</div>;
+              if (smtpLoading) return React.createElement('div', { className: 'p-6 text-center text-ink-400 text-sm' }, 'Cargando...');
 
               return (
                 <div className="p-6 space-y-4">
                   <p className="text-[12px] text-ink-400 leading-relaxed">
-                    Configurá tu cuenta de email personal para enviar presupuestos y recordatorios desde tu propio correo.
-                    Si no configurás una, se envía desde la cuenta general del CRM.
+                    Elegí desde qué cuenta se envían tus presupuestos y recordatorios.
+                    Las cuentas se cargan en <strong>Configuración → Mail</strong>.
                   </p>
 
                   {smtpMsg.text && (
@@ -677,64 +657,29 @@ function ProfileModal({ user, onClose, onUpdated }) {
                     </div>
                   )}
 
-                  {/* Toggle: seleccionar existente o cargar nueva */}
-                  <div className="flex items-center gap-1 bg-line rounded-lg p-0.5">
-                    <button type="button" onClick={() => { setMode('select'); setSmtpPassword(''); }}
-                      className={cx('flex-1 text-[11px] px-2.5 py-1.5 rounded-md transition-colors', mode === 'select' ? 'bg-white text-ink-800 shadow-sm font-medium' : 'text-ink-500 hover:text-ink-700')}>
-                      Cuenta existente
-                    </button>
-                    <button type="button" onClick={() => setMode('new')}
-                      className={cx('flex-1 text-[11px] px-2.5 py-1.5 rounded-md transition-colors', mode === 'new' ? 'bg-white text-ink-800 shadow-sm font-medium' : 'text-ink-500 hover:text-ink-700')}>
-                      Cargar nueva
-                    </button>
+                  <div>
+                    <label className="text-xs font-medium text-ink-700 mb-1.5 block">Cuenta de envío</label>
+                    {availableAccounts.length > 0 ? (
+                      <select className="inp w-full" value={smtpEmail} onChange={e => setSmtpEmail(e.target.value)}>
+                        <option value="">— Usar cuenta general del CRM —</option>
+                        {availableAccounts.map(acc => (
+                          <option key={acc} value={acc}>{acc}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div className="text-[12px] text-ink-400 bg-surface rounded-lg p-3 border border-line">
+                        No hay cuentas cargadas todavía. Pedí al administrador que agregue una en Configuración → Mail.
+                      </div>
+                    )}
                   </div>
-
-                  {mode === 'select' && (
-                    <div>
-                      <label className="text-xs font-medium text-ink-700 mb-1 block">Cuenta de envío</label>
-                      {availableAccounts.length > 0 ? (
-                        <select className="inp w-full" value={smtpEmail} onChange={e => setSmtpEmail(e.target.value)}>
-                          <option value="">— Usar cuenta del CRM (iamyselec) —</option>
-                          {availableAccounts.map(acc => (
-                            <option key={acc} value={acc}>{acc}</option>
-                          ))}
-                        </select>
-                      ) : (
-                        <div className="text-[12px] text-ink-400 bg-surface rounded-lg p-3 border border-line">
-                          No hay cuentas cargadas. Usá la opción "Cargar nueva" o pedí al admin que configure una en Config → Mail.
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {mode === 'new' && (
-                    <div className="space-y-3">
-                      <div>
-                        <label className="text-xs font-medium text-ink-700 mb-1 block">Email (Gmail)</label>
-                        <input className="inp w-full" type="email" placeholder="tu.email@gmail.com"
-                          value={smtpEmail} onChange={e => setSmtpEmail(e.target.value)}/>
-                      </div>
-                      <div>
-                        <label className="text-xs font-medium text-ink-700 mb-1 block">Contraseña de aplicación</label>
-                        <input className="inp w-full" type="password" placeholder="xxxx xxxx xxxx xxxx"
-                          value={smtpPassword} onChange={e => setSmtpPassword(e.target.value)}/>
-                        <div className="text-[11px] text-ink-400 mt-1">
-                          Generala en{' '}
-                          <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener" className="text-brand underline">
-                            myaccount.google.com/apppasswords
-                          </a>
-                        </div>
-                      </div>
-                    </div>
-                  )}
 
                   {/* Estado actual */}
                   <div className="flex items-center gap-2 px-3 py-2.5 bg-surface border border-line rounded-lg">
                     <Icon name={smtpEmail ? 'check-circle' : 'info'} size={14} className={smtpEmail ? 'text-green-500' : 'text-ink-400'}/>
                     <span className="text-[12px] text-ink-600">
                       {smtpEmail
-                        ? <>Enviando como: <strong>{smtpEmail}</strong></>
-                        : <>Enviando desde la cuenta general del CRM</>
+                        ? <>Tus mails salen como: <strong>{smtpEmail}</strong></>
+                        : <>Se usa la cuenta general del CRM</>
                       }
                     </span>
                   </div>
@@ -745,15 +690,10 @@ function ProfileModal({ user, onClose, onUpdated }) {
                       {smtpSaving ? 'Guardando...' : 'Guardar'}
                     </button>
                     {smtpEmail && (
-                      <>
-                        <button onClick={handleTest} disabled={smtpTesting} className="btn-ghost text-[12px] flex items-center gap-1.5">
-                          <Icon name="plug" size={12} className={smtpTesting ? 'animate-pulse' : ''}/>
-                          {smtpTesting ? 'Probando...' : 'Probar conexión'}
-                        </button>
-                        <button onClick={handleClear} disabled={smtpSaving} className="btn-ghost text-[12px] text-red-500 hover:text-red-700">
-                          Desvincular
-                        </button>
-                      </>
+                      <button onClick={handleTest} disabled={smtpTesting} className="btn-ghost text-[12px] flex items-center gap-1.5">
+                        <Icon name="plug" size={12} className={smtpTesting ? 'animate-pulse' : ''}/>
+                        {smtpTesting ? 'Probando...' : 'Probar envío'}
+                      </button>
                     )}
                   </div>
                 </div>
