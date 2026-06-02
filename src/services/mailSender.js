@@ -110,7 +110,10 @@ async function createTransport() {
     port:   account.smtp.port,
     secure: account.smtp.secure,
     auth:   { user: account.user, pass: account.password },
-    tls:    { rejectUnauthorized: false }, // Permite certs self-signed
+    tls:    { rejectUnauthorized: false },
+    connectionTimeout: 20000,
+    greetingTimeout:   20000,
+    socketTimeout:     60000,
   });
   return { transport, fromEmail: account.user };
 }
@@ -276,9 +279,9 @@ async function getTransportForEmail(email, fromName) {
       host: smtp.host, port: smtp.port, secure: smtp.secure,
       auth: { user: account.user, pass: account.password },
       tls: { rejectUnauthorized: false },
-      connectionTimeout: 10000,  // 10s para conectar
-      greetingTimeout: 10000,
-      socketTimeout: 15000,      // 15s para enviar
+      connectionTimeout: 20000,  // 20s para conectar
+      greetingTimeout: 20000,
+      socketTimeout: 60000,      // 60s para enviar (PDF puede ser grande)
     });
 
     return { transport, fromEmail: account.user, fromName: fromName || 'MySelec' };
