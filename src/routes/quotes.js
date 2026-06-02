@@ -105,18 +105,30 @@ router.get('/', authMiddleware, async (req, res) => {
   }
 });
 
-// GET /api/quotes/send-from — devuelve desde qué cuenta enviaría el usuario actual
-router.get('/send-from', authMiddleware, async (req, res) => {
+// GET /api/quotes/send-accounts — lista cuentas disponibles para envío SMTP
+router.get('/send-accounts', authMiddleware, async (req, res) => {
   try {
-    const user = await prisma.user.findUnique({ where: { id: req.user.id }, select: { smtpEmail: true, name: true } });
-    const defaultEmail = process.env.MAIL_USER || 'iamyselec@gmail.com';
-    res.json({
-      personalEmail: user?.smtpEmail || null,
-      defaultEmail,
-      sendingAs: user?.smtpEmail || defaultEmail,
-    });
+    const accounts = [];
+    // Env accounts
+    if (process.env.MAIL_ACCOUNTS) {
+      try { JSON.parse(process.env.MAIL_ACCOUNTS).forEach(a => accounts.push(a.user)); } catch (_) {}
+    } else if (process.env.MAIL_USER) {
+      accounts.push(process.env.MAIL_USER);
+    }
+    // DB accounts
+    const setting = await prisma.appSetting.findUnique({ where: { key: 'mail_accounts' } });
+    if (setting?.value) {
+      try {
+        const dbAccs = JSON.parse(setting.value);
+        dbAccs.forEach(a => { if (!accounts.includes(a.user)) accounts.push(a.user); });
+      } catch (_) {}
+    }
+    // Detectar cuál preseleccionar: si el email del usuario logueado coincide con alguna cuenta
+    const userEmail = req.user.email?.toLowerCase();
+    const defaultAccount = accounts.find(a => a.toLowerCase() === userEmail) || accounts[0] || null;
+    res.json({ accounts, defaultAccount });
   } catch (err) {
-    res.json({ personalEmail: null, defaultEmail: process.env.MAIL_USER || 'iamyselec@gmail.com', sendingAs: process.env.MAIL_USER || 'iamyselec@gmail.com' });
+    res.json({ accounts: [], defaultAccount: null });
   }
 });
 
@@ -774,7 +786,7 @@ router.put('/email-templates', authMiddleware, async (req, res) => {
 // POST /api/quotes/:id/send-email — enviar presupuesto por email (o registrar envío por Gmail)
 router.post('/:id/send-email', authMiddleware, async (req, res) => {
   try {
-    const { to, cc, subject, body, attachmentId, _gmailOnly } = req.body;
+    const { to, cc, subject, body, attachmentId, fromEmail, _gmailOnly } = req.body;
     if (!to)      return res.status(400).json({ error: '"to" es requerido' });
     if (!subject) return res.status(400).json({ error: '"subject" es requerido' });
     if (!body)    return res.status(400).json({ error: '"body" es requerido' });
@@ -832,6 +844,8 @@ router.post('/:id/send-email', authMiddleware, async (req, res) => {
       to, cc, subject, body,
       attachmentPath, attachmentName,
       userId: req.user.id,
+      fromEmail: fromEmail || null,
+      fromName: req.user.name || 'MySelec',
     });
 
     res.json(result);
@@ -857,9 +871,10 @@ router.post('/:id/send-reminder', authMiddleware, async (req, res) => {
     }
     if (!quote.client?.email) return res.status(400).json({ error: 'El cliente no tiene email registrado' });
 
-    // Enviar mail al cliente — intentar SMTP personal, fallback a Gmail API
-    const { getTransportForUser } = require('../services/mailSender');
+    // Enviar mail al cliente — usar cuenta específica si se indica, sino fallback a Gmail API
+    const { getTransportForEmail } = require('../services/mailSender');
     const { sendMail: sendMailGmailApi } = require('../services/mailer');
+    const { fromEmail: reminderFrom } = req.body;
     const htmlBody = body.replace(/\n/g, '<br/>');
     const htmlContent = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"></head>
 <body style="margin:0;padding:0;background:#F1F5F9;font-family:sans-serif">
@@ -877,16 +892,16 @@ router.post('/:id/send-reminder', authMiddleware, async (req, res) => {
 </body></html>`;
 
     let sentFrom = null;
-    const userTransport = await getTransportForUser(req.user.id);
-    if (userTransport) {
-      await userTransport.transport.sendMail({
-        from: `"${userTransport.fromName}" <${userTransport.fromEmail}>`,
+    const smtpTransport = reminderFrom ? await getTransportForEmail(reminderFrom, req.user.name) : null;
+    if (smtpTransport) {
+      await smtpTransport.transport.sendMail({
+        from: `"${smtpTransport.fromName}" <${smtpTransport.fromEmail}>`,
         to: quote.client.email,
         subject,
         text: body,
         html: htmlContent,
       });
-      sentFrom = userTransport.fromEmail;
+      sentFrom = smtpTransport.fromEmail;
     } else {
       await sendMailGmailApi({ to: quote.client.email, subject, html: htmlContent });
       sentFrom = process.env.MAIL_USER || 'iamyselec@gmail.com';

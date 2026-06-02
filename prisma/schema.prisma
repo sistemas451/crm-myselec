@@ -24,7 +24,6 @@ model User {
   pendingApproval    Boolean  @default(false)
   notifyUnassigned   Boolean  @default(true)   // Recibe mail cuando llega cotización sin cliente asignado
   notificationPrefs  Json?                     // Preferencias personales { email:{...}, inapp:{...} }
-  smtpEmail          String?                   // Cuenta de mail vinculada para envío SMTP (debe existir en mail_accounts)
   createdAt          DateTime @default(now())
 
   quotesAssigned    Quote[]              @relation("QuoteSeller")

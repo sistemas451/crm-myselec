@@ -458,14 +458,14 @@ function SendEmailModal({ quote, attachments, onClose, onSent }) {
   const [subject, setSubject]           = React.useState('');
   const [body, setBody]                 = React.useState('');
   const [sending, setSending] = React.useState(false);
-  const [sendingAs, setSendingAs] = React.useState('');
-  const [hasPersonalEmail, setHasPersonalEmail] = React.useState(false);
+  const [sendAccounts, setSendAccounts] = React.useState([]);
+  const [fromEmail, setFromEmail] = React.useState('');
 
-  // Cargar info de cuenta de envío
+  // Cargar cuentas de envío disponibles
   React.useEffect(() => {
-    CrmApi.getSendFrom().then(data => {
-      setSendingAs(data.sendingAs || '');
-      setHasPersonalEmail(!!data.personalEmail);
+    CrmApi.getSendAccounts().then(data => {
+      setSendAccounts(data.accounts || []);
+      setFromEmail(data.defaultAccount || '');
     }).catch(() => {});
   }, []);
 
@@ -606,59 +606,57 @@ function SendEmailModal({ quote, attachments, onClose, onSent }) {
               value={body} onChange={e => setBody(e.target.value)}/>
           </div>
 
-          {/* Nota adjunto para Gmail */}
-          {!hasPersonalEmail && (
-            <div className="flex items-start gap-2 px-3 py-2.5 bg-amber-50 border border-amber-200 rounded-lg text-[12px] text-amber-800">
-              <Icon name="info" size={13} className="shrink-0 mt-0.5 text-amber-500"/>
-              <span>El adjunto (PDF) lo tenés que agregar desde Gmail una vez que se abra. Podés descargarlo desde la pestaña <strong>Adjuntos</strong>.</span>
+          {/* Selector de cuenta "Desde" */}
+          {sendAccounts.length > 0 && (
+            <div>
+              <label className="text-[11px] font-semibold text-ink-600 uppercase tracking-wide mb-1 block">Desde</label>
+              <select className="inp w-full text-sm" value={fromEmail} onChange={e => setFromEmail(e.target.value)}>
+                {sendAccounts.map(acc => (
+                  <option key={acc} value={acc}>{acc}</option>
+                ))}
+              </select>
             </div>
           )}
 
-          {/* Indicador de cuenta de envío */}
-          {sendingAs && (
-            <div className="flex items-center gap-2 px-3 py-2 bg-surface border border-line rounded-lg">
-              <Icon name={hasPersonalEmail ? 'user-check' : 'mail'} size={13} className={hasPersonalEmail ? 'text-green-500' : 'text-ink-400'}/>
-              <span className="text-[11.5px] text-ink-600">
-                {hasPersonalEmail
-                  ? <>Enviando como: <strong className="text-ink-800">{sendingAs}</strong></>
-                  : <>Cuenta CRM: <strong className="text-ink-800">{sendingAs}</strong> · Configurá tu email desde <em>Mi Perfil → Email</em></>
-                }
-              </span>
-            </div>
-          )}
+          {/* Nota adjunto para Gmail */}
+          <div className="flex items-start gap-2 px-3 py-2.5 bg-blue-50 border border-blue-200 rounded-lg text-[12px] text-blue-800">
+            <Icon name="info" size={13} className="shrink-0 mt-0.5 text-blue-500"/>
+            <span>
+              <strong>Enviar:</strong> manda el mail directo con el adjunto PDF (si hay).<br/>
+              <strong>Abrir en Gmail:</strong> abre un borrador en Gmail para agregar firma o personalizar.
+            </span>
+          </div>
         </div>
 
         {/* Footer */}
         <div className="px-5 py-3 border-t border-line bg-surface flex items-center justify-between gap-2">
           <button className="btn-ghost" onClick={onClose} disabled={sending}>Cancelar</button>
           <div className="flex items-center gap-2">
-            {hasPersonalEmail && (
-              <button className="btn-primary" onClick={async () => {
-                if (!to.trim())      { pushToast('El destinatario (Para) es requerido', 'bad'); return; }
-                if (!subject.trim()) { pushToast('El asunto es requerido', 'bad'); return; }
-                if (!body.trim())    { pushToast('El cuerpo es requerido', 'bad'); return; }
-                setSending(true);
-                try {
-                  // Buscar el primer adjunto PDF para enviar
-                  const pdfAtt = (attachments || []).find(a => a.mimeType === 'application/pdf' || a.filename?.endsWith('.pdf'));
-                  const result = await CrmApi.sendQuoteEmail(quote.id, {
-                    to: to.trim(), cc: cc.trim(),
-                    subject: subject.trim(), body: body.trim(),
-                    attachmentId: pdfAtt?.id || null,
-                  });
-                  pushToast(`Enviado desde ${result.sentFrom || sendingAs}${result.stageAdvanced ? ' · Etapa → Enviado' : ''}`, 'ok');
-                  onSent && onSent(result);
-                  onClose();
-                } catch (err) {
-                  pushToast(`Error al enviar: ${err.message}`, 'bad');
-                } finally { setSending(false); }
-              }} disabled={sending}>
-                {sending
-                  ? <><span className="inline-block w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin mr-1.5"/>Enviando...</>
-                  : <><Icon name="send" size={13}/>Enviar desde CRM</>
-                }
-              </button>
-            )}
+            <button className="btn-primary" onClick={async () => {
+              if (!to.trim())      { pushToast('El destinatario (Para) es requerido', 'bad'); return; }
+              if (!subject.trim()) { pushToast('El asunto es requerido', 'bad'); return; }
+              if (!body.trim())    { pushToast('El cuerpo es requerido', 'bad'); return; }
+              setSending(true);
+              try {
+                const pdfAtt = (attachments || []).find(a => a.mimeType === 'application/pdf' || a.filename?.endsWith('.pdf'));
+                const result = await CrmApi.sendQuoteEmail(quote.id, {
+                  to: to.trim(), cc: cc.trim(),
+                  subject: subject.trim(), body: body.trim(),
+                  attachmentId: pdfAtt?.id || null,
+                  fromEmail: fromEmail || null,
+                });
+                pushToast(`Enviado desde ${result.sentFrom || fromEmail}${result.stageAdvanced ? ' · Etapa → Enviado' : ''}`, 'ok');
+                onSent && onSent(result);
+                onClose();
+              } catch (err) {
+                pushToast('Error al enviar: ' + err.message, 'bad');
+              } finally { setSending(false); }
+            }} disabled={sending}>
+              {sending
+                ? <><span className="inline-block w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin mr-1.5"/>Enviando...</>
+                : <><Icon name="send" size={13}/>Enviar</>
+              }
+            </button>
             <button className="btn-ghost border border-line" onClick={handleOpenGmail} disabled={sending}>
               <Icon name="external-link" size={13}/>Abrir en Gmail
             </button>

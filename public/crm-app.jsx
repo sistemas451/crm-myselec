@@ -400,7 +400,7 @@ function ProfileModal({ user, onClose, onUpdated }) {
 
           {/* Tabs */}
           <div className="flex border-b border-line shrink-0">
-            {[{k:'datos',label:'Datos',icon:'user'},{k:'seguridad',label:'Seguridad',icon:'shield'},{k:'email',label:'Email',icon:'mail'},{k:'notifs',label:'Notifs',icon:'bell'}].map(t => (
+            {[{k:'datos',label:'Datos',icon:'user'},{k:'seguridad',label:'Seguridad',icon:'shield'},{k:'notifs',label:'Notificaciones',icon:'bell'}].map(t => (
               <button key={t.k} onClick={() => { setTab(t.k); clearMessages(); }}
                 className={cx('flex-1 flex items-center justify-center gap-1.5 py-3 text-[12px] font-medium transition-colors border-b-2',
                   tab === t.k ? 'border-brand text-brand' : 'border-transparent text-ink-500 hover:text-ink-800')}>
@@ -603,102 +603,6 @@ function ProfileModal({ user, onClose, onUpdated }) {
               </form>
             )}
 
-            {/* ── TAB EMAIL ── */}
-            {tab === 'email' && (() => {
-              const [smtpEmail, setSmtpEmail] = React.useState('');
-              const [availableAccounts, setAvailableAccounts] = React.useState([]);
-              const [smtpLoading, setSmtpLoading] = React.useState(true);
-              const [smtpSaving, setSmtpSaving] = React.useState(false);
-              const [smtpTesting, setSmtpTesting] = React.useState(false);
-              const [smtpMsg, setSmtpMsg] = React.useState({ type: '', text: '' });
-
-              React.useEffect(() => {
-                CrmApi.getSmtpConfig(user.id).then(data => {
-                  setSmtpEmail(data.smtpEmail || '');
-                  setAvailableAccounts(data.availableAccounts || []);
-                  setSmtpLoading(false);
-                }).catch(() => setSmtpLoading(false));
-              }, []);
-
-              const handleSave = async () => {
-                setSmtpMsg({ type: '', text: '' });
-                setSmtpSaving(true);
-                try {
-                  await CrmApi.saveSmtpConfig(user.id, { smtpEmail: smtpEmail || null });
-                  setSmtpMsg({ type: 'ok', text: smtpEmail ? 'Cuenta de envío configurada' : 'Cuenta desvinculada — se usará la cuenta del CRM' });
-                } catch (err) {
-                  setSmtpMsg({ type: 'err', text: err.message });
-                } finally { setSmtpSaving(false); }
-              };
-
-              const handleTest = async () => {
-                setSmtpMsg({ type: '', text: '' });
-                setSmtpTesting(true);
-                try {
-                  const res = await CrmApi.testSmtp(user.id);
-                  setSmtpMsg({ type: 'ok', text: 'Conexión SMTP OK con ' + res.email });
-                } catch (err) {
-                  setSmtpMsg({ type: 'err', text: 'Error: ' + err.message });
-                } finally { setSmtpTesting(false); }
-              };
-
-              if (smtpLoading) return React.createElement('div', { className: 'p-6 text-center text-ink-400 text-sm' }, 'Cargando...');
-
-              return (
-                <div className="p-6 space-y-4">
-                  <p className="text-[12px] text-ink-400 leading-relaxed">
-                    Elegí desde qué cuenta se envían tus presupuestos y recordatorios.
-                    Las cuentas se cargan en <strong>Configuración → Mail</strong>.
-                  </p>
-
-                  {smtpMsg.text && (
-                    <div className={cx('p-3 rounded-lg text-sm border', smtpMsg.type === 'ok' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-red-50 border-red-200 text-red-700')}>
-                      {smtpMsg.text}
-                    </div>
-                  )}
-
-                  <div>
-                    <label className="text-xs font-medium text-ink-700 mb-1.5 block">Cuenta de envío</label>
-                    {availableAccounts.length > 0 ? (
-                      <select className="inp w-full" value={smtpEmail} onChange={e => setSmtpEmail(e.target.value)}>
-                        <option value="">— Usar cuenta general del CRM —</option>
-                        {availableAccounts.map(acc => (
-                          <option key={acc} value={acc}>{acc}</option>
-                        ))}
-                      </select>
-                    ) : (
-                      <div className="text-[12px] text-ink-400 bg-surface rounded-lg p-3 border border-line">
-                        No hay cuentas cargadas todavía. Pedí al administrador que agregue una en Configuración → Mail.
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Estado actual */}
-                  <div className="flex items-center gap-2 px-3 py-2.5 bg-surface border border-line rounded-lg">
-                    <Icon name={smtpEmail ? 'check-circle' : 'info'} size={14} className={smtpEmail ? 'text-green-500' : 'text-ink-400'}/>
-                    <span className="text-[12px] text-ink-600">
-                      {smtpEmail
-                        ? <>Tus mails salen como: <strong>{smtpEmail}</strong></>
-                        : <>Se usa la cuenta general del CRM</>
-                      }
-                    </span>
-                  </div>
-
-                  {/* Botones */}
-                  <div className="flex items-center gap-2 pt-1">
-                    <button onClick={handleSave} disabled={smtpSaving} className="btn-primary text-[12px]">
-                      {smtpSaving ? 'Guardando...' : 'Guardar'}
-                    </button>
-                    {smtpEmail && (
-                      <button onClick={handleTest} disabled={smtpTesting} className="btn-ghost text-[12px] flex items-center gap-1.5">
-                        <Icon name="plug" size={12} className={smtpTesting ? 'animate-pulse' : ''}/>
-                        {smtpTesting ? 'Probando...' : 'Probar envío'}
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })()}
           </div>
         </div>
       </div>

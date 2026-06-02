@@ -204,19 +204,19 @@ function applyTemplate(text, vars) {
  * @param {string}   [opts.attachmentName] — Nombre de archivo para el adjunto
  * @returns {Promise<{ messageId: string }>}
  */
-async function sendEmail({ to, cc, subject, body, attachmentPath, attachmentName, userId }) {
-  // Intentar usar cuenta personal del vendedor; fallback a cuenta CRM
+async function sendEmail({ to, cc, subject, body, attachmentPath, attachmentName, fromEmail: requestedFrom, fromName: requestedName }) {
+  // Si se pide enviar desde una cuenta específica, buscar sus credenciales
   let transport, fromEmail, fromName;
-  const userTransport = userId ? await getTransportForUser(userId) : null;
-  if (userTransport) {
-    transport = userTransport.transport;
-    fromEmail = userTransport.fromEmail;
-    fromName  = userTransport.fromName;
+  const specificTransport = requestedFrom ? await getTransportForEmail(requestedFrom, requestedName) : null;
+  if (specificTransport) {
+    transport = specificTransport.transport;
+    fromEmail = specificTransport.fromEmail;
+    fromName  = specificTransport.fromName;
   } else {
     const fallback = await createTransport();
     transport = fallback.transport;
     fromEmail = fallback.fromEmail;
-    fromName  = 'Myselec CRM';
+    fromName  = requestedName || 'Myselec CRM';
   }
 
   const mailOptions = {
@@ -245,21 +245,19 @@ async function sendEmail({ to, cc, subject, body, attachmentPath, attachmentName
   return { messageId: info.messageId, sentFrom: fromEmail };
 }
 
-// ─── Resolver cuenta SMTP por userId (para envío personal) ───────────────
+// ─── Resolver cuenta SMTP por email (para envío desde cuenta específica) ──
 
 /**
- * Busca la cuenta SMTP vinculada a un usuario (si tiene smtpEmail configurado).
- * Devuelve { transport, fromEmail } o null si no tiene cuenta personal.
+ * Busca las credenciales de una cuenta de mail en mail_accounts (env + DB).
+ * Devuelve { transport, fromEmail } o null si no se encontró.
+ * @param {string} email — dirección de la cuenta (ej: "bruscofacundo1@gmail.com")
+ * @param {string} [fromName] — nombre para el "From" header
  */
-async function getTransportForUser(userId) {
-  if (!userId) return null;
+async function getTransportForEmail(email, fromName) {
+  if (!email) return null;
   try {
-    const user = await prisma.user.findUnique({ where: { id: userId }, select: { smtpEmail: true, name: true } });
-    if (!user?.smtpEmail) return null;
+    const normalized = email.toLowerCase().trim();
 
-    const normalizedSmtp = user.smtpEmail.toLowerCase();
-
-    // Buscar credenciales en env + DB
     const envAccounts = [];
     if (process.env.MAIL_ACCOUNTS) {
       try { envAccounts.push(...JSON.parse(process.env.MAIL_ACCOUNTS)); } catch (_) {}
@@ -270,7 +268,7 @@ async function getTransportForUser(userId) {
     const dbAccounts = setting?.value ? JSON.parse(setting.value) : [];
     const allAccounts = [...envAccounts, ...dbAccounts];
 
-    const account = allAccounts.find(a => a.user.toLowerCase() === normalizedSmtp);
+    const account = allAccounts.find(a => a.user.toLowerCase() === normalized);
     if (!account?.password) return null;
 
     const smtp = smtpConfigForEmail(account.user);
@@ -280,9 +278,9 @@ async function getTransportForUser(userId) {
       tls: { rejectUnauthorized: false },
     });
 
-    return { transport, fromEmail: account.user, fromName: user.name || 'MySelec' };
+    return { transport, fromEmail: account.user, fromName: fromName || 'MySelec' };
   } catch (e) {
-    console.error('getTransportForUser error:', e.message);
+    console.error('getTransportForEmail error:', e.message);
     return null;
   }
 }
@@ -307,8 +305,8 @@ async function getTransportForUser(userId) {
 async function sendQuoteEmail(quoteId, opts) {
   const { to, cc, subject, body, attachmentPath, attachmentName, userId } = opts;
 
-  // Enviar (userId permite enviar desde la cuenta personal del vendedor)
-  const { messageId, sentFrom } = await sendEmail({ to, cc, subject, body, attachmentPath, attachmentName, userId });
+  // Enviar (fromEmail permite enviar desde una cuenta específica)
+  const { messageId, sentFrom } = await sendEmail({ to, cc, subject, body, attachmentPath, attachmentName, fromEmail: opts.fromEmail, fromName: opts.fromName });
 
   // Log de actividad
   await prisma.activity.create({
@@ -350,6 +348,6 @@ module.exports = {
   getDefaultCC,
   applyTemplate,
   smtpConfigForEmail,
-  getTransportForUser,
+  getTransportForEmail,
   DEFAULT_TEMPLATES,
 };

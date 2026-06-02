@@ -131,7 +131,7 @@ router.get('/', authMiddleware, async (req, res) => {
     const users = await prisma.user.findMany({
       where: { pendingApproval: false },
       orderBy: [{ role: 'asc' }, { name: 'asc' }],
-      select: { id: true, name: true, email: true, role: true, zone: true, active: true, avatar: true, phone: true, passwordChangedAt: true, notifyUnassigned: true, notificationPrefs: true, smtpEmail: true, createdAt: true },
+      select: { id: true, name: true, email: true, role: true, zone: true, active: true, avatar: true, phone: true, passwordChangedAt: true, notifyUnassigned: true, notificationPrefs: true, createdAt: true },
     });
 
     // Enriquecer con stats solo para admin
@@ -603,112 +603,6 @@ router.post('/:id/avatar', authMiddleware, uploadAvatar.single('avatar'), async 
       select: { id: true, name: true, email: true, role: true, zone: true, avatar: true },
     });
     res.json(user);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// PATCH /api/users/:id/smtp-config — configurar cuenta SMTP para envío personal
-router.patch('/:id/smtp-config', authMiddleware, async (req, res) => {
-  try {
-    const isSelf  = req.user.id === req.params.id;
-    const isAdmin = req.user.role === 'ADMIN';
-    if (!isAdmin && !isSelf) return res.status(403).json({ error: 'Sin permiso' });
-
-    const { smtpEmail, smtpPassword } = req.body;
-
-    // Si se envía smtpEmail vacío/null → desvincula
-    if (!smtpEmail) {
-      await prisma.user.update({ where: { id: req.params.id }, data: { smtpEmail: null } });
-      return res.json({ ok: true, smtpEmail: null });
-    }
-
-    const normalizedEmail = smtpEmail.toLowerCase().trim();
-
-    // Verificar que la cuenta exista en mail_accounts (env o DB)
-    const setting = await prisma.appSetting.findUnique({ where: { key: 'mail_accounts' } });
-    const dbAccounts = setting?.value ? JSON.parse(setting.value) : [];
-    const envAccounts = [];
-    if (process.env.MAIL_ACCOUNTS) {
-      try { envAccounts.push(...JSON.parse(process.env.MAIL_ACCOUNTS)); } catch (_) {}
-    } else if (process.env.MAIL_USER) {
-      envAccounts.push({ user: process.env.MAIL_USER });
-    }
-    const allAccounts = [...envAccounts, ...dbAccounts];
-    const found = allAccounts.find(a => a.user.toLowerCase() === normalizedEmail);
-    if (!found) return res.status(400).json({ error: 'Esa cuenta no está configurada en el sistema. Pedí al admin que la agregue en Configuración → Mail.' });
-
-    const updated = await prisma.user.update({
-      where: { id: req.params.id },
-      data: { smtpEmail: normalizedEmail },
-      select: { id: true, smtpEmail: true },
-    });
-    res.json(updated);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// POST /api/users/:id/smtp-test — probar conexión SMTP de la cuenta del usuario
-router.post('/:id/smtp-test', authMiddleware, async (req, res) => {
-  try {
-    const isSelf  = req.user.id === req.params.id;
-    const isAdmin = req.user.role === 'ADMIN';
-    if (!isAdmin && !isSelf) return res.status(403).json({ error: 'Sin permiso' });
-
-    const user = await prisma.user.findUnique({ where: { id: req.params.id }, select: { smtpEmail: true } });
-    if (!user?.smtpEmail) return res.status(400).json({ ok: false, error: 'No hay cuenta SMTP configurada' });
-
-    // Buscar credenciales en mail_accounts (DB + env)
-    const setting = await prisma.appSetting.findUnique({ where: { key: 'mail_accounts' } });
-    const dbAccounts = setting?.value ? JSON.parse(setting.value) : [];
-    const envAccounts = [];
-    if (process.env.MAIL_ACCOUNTS) {
-      try { envAccounts.push(...JSON.parse(process.env.MAIL_ACCOUNTS)); } catch (_) {}
-    } else if (process.env.MAIL_USER && process.env.MAIL_PASSWORD) {
-      envAccounts.push({ user: process.env.MAIL_USER, password: process.env.MAIL_PASSWORD });
-    }
-    const allAccounts = [...envAccounts, ...dbAccounts];
-    const account = allAccounts.find(a => a.user.toLowerCase() === user.smtpEmail.toLowerCase());
-    if (!account) return res.status(400).json({ ok: false, error: 'Cuenta no encontrada en mail_accounts' });
-
-    // Probar SMTP con nodemailer
-    const nodemailer = require('nodemailer');
-    const { smtpConfigForEmail } = require('../services/mailSender');
-    const smtp = smtpConfigForEmail(account.user);
-    const transport = nodemailer.createTransport({
-      host: smtp.host, port: smtp.port, secure: smtp.secure,
-      auth: { user: account.user, pass: account.password },
-      tls: { rejectUnauthorized: false },
-    });
-    await transport.verify();
-    res.json({ ok: true, email: account.user });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
-
-// GET /api/users/:id/smtp-config — obtener config SMTP del usuario
-router.get('/:id/smtp-config', authMiddleware, async (req, res) => {
-  try {
-    const isSelf  = req.user.id === req.params.id;
-    const isAdmin = req.user.role === 'ADMIN';
-    if (!isAdmin && !isSelf) return res.status(403).json({ error: 'Sin permiso' });
-
-    const user = await prisma.user.findUnique({ where: { id: req.params.id }, select: { smtpEmail: true } });
-
-    // También devolver las cuentas disponibles para vincular (solo las ya configuradas)
-    const setting = await prisma.appSetting.findUnique({ where: { key: 'mail_accounts' } });
-    const dbAccounts = setting?.value ? JSON.parse(setting.value) : [];
-    const envAccounts = [];
-    if (process.env.MAIL_ACCOUNTS) {
-      try { envAccounts.push(...JSON.parse(process.env.MAIL_ACCOUNTS)); } catch (_) {}
-    } else if (process.env.MAIL_USER) {
-      envAccounts.push({ user: process.env.MAIL_USER });
-    }
-    const availableAccounts = [...envAccounts, ...dbAccounts].map(a => a.user);
-
-    res.json({ smtpEmail: user?.smtpEmail || null, availableAccounts });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

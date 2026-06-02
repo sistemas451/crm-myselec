@@ -2527,10 +2527,7 @@ function Config() {
               </div>
             ) : (
               <div className="divide-y divide-line">
-                {mailAccounts.map(acc => {
-                  // Buscar usuarios que tienen esta cuenta asignada para envío
-                  const assignedUsers = (users || []).filter(u => u.smtpEmail && u.smtpEmail.toLowerCase() === acc.user.toLowerCase());
-                  return (
+                {mailAccounts.map(acc => (
                   <div key={acc.user}>
                     <div className="px-5 py-3 flex items-center gap-3">
                       <div className="flex-1 min-w-0">
@@ -2541,14 +2538,6 @@ function Config() {
                             ? 'Último sync: ' + new Date(acc.lastSyncAt).toLocaleString('es-AR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })
                             : 'Sin sync'}
                         </div>
-                        {assignedUsers.length > 0 && (
-                          <div className="flex items-center gap-1 mt-1">
-                            <Icon name="send" size={11} className="text-brand"/>
-                            <span className="text-[11px] text-brand font-medium">
-                              Envío: {assignedUsers.map(u => u.name).join(', ')}
-                            </span>
-                          </div>
-                        )}
                       </div>
                       <Badge tone={acc.isActive ? 'green' : 'gray'} dot>{acc.isActive ? 'Activa' : 'Inactiva'}</Badge>
                       <button onClick={() => handleTestAccount(acc.user)} disabled={mailTesting[acc.user]}
@@ -2596,43 +2585,8 @@ function Config() {
                         )}
                       </div>
                     )}
-                    {/* Asignar envío a vendedor */}
-                    <div className="mx-5 mb-3 flex items-center gap-2">
-                      <span className="text-[11px] text-ink-500 shrink-0">Asignar envío a:</span>
-                      <select className="inp text-[12px] py-1 flex-1"
-                        value=""
-                        onChange={async (e) => {
-                          const userId = e.target.value;
-                          if (!userId) return;
-                          try {
-                            await CrmApi.saveSmtpConfig(userId, { smtpEmail: acc.user });
-                            pushToast('Cuenta asignada');
-                            // Recargar usuarios para actualizar indicador
-                            const updatedUsers = await CrmApi.getUsersFull();
-                            if (updatedUsers && Array.isArray(updatedUsers)) {
-                              // Actualizar smtpEmail en el estado local de users
-                              users.forEach(u => {
-                                const upd = updatedUsers.find(x => x.id === u.id);
-                                if (upd) u.smtpEmail = upd.smtpEmail;
-                              });
-                            }
-                            // Force re-render
-                            setMailAccounts(prev => [...prev]);
-                          } catch (err) {
-                            pushToast(err.message, 'bad');
-                          }
-                        }}>
-                        <option value="">— Seleccionar vendedor —</option>
-                        {(users || []).filter(u => u.active !== false && (!u.smtpEmail || u.smtpEmail.toLowerCase() === acc.user.toLowerCase())).map(u => (
-                          <option key={u.id} value={u.id}>
-                            {u.name}{u.smtpEmail?.toLowerCase() === acc.user.toLowerCase() ? ' (asignado)' : ''}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
                   </div>
-                  );
-                })}
+                ))}
               </div>
             )}
           </div>

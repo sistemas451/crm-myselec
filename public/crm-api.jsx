@@ -261,11 +261,8 @@ const CrmApi = {
   // Attachments
   deleteAttachment: (id) => apiFetch(`/attachments/${id}`, { method: 'DELETE' }),
 
-  // SMTP config (personal email sending)
-  getSmtpConfig:    (id) => apiFetch(`/users/${id}/smtp-config`),
-  saveSmtpConfig:   (id, data) => apiFetch(`/users/${id}/smtp-config`, { method: 'PATCH', body: JSON.stringify(data) }),
-  testSmtp:         (id) => apiFetch(`/users/${id}/smtp-test`, { method: 'POST' }),
-  getSendFrom:      ()  => apiFetch('/quotes/send-from'),
+  // Email sending accounts
+  getSendAccounts:  ()  => apiFetch('/quotes/send-accounts'),
 
   // Email templates
   getEmailTemplates: () => apiFetch('/quotes/email-templates'),
@@ -308,7 +305,6 @@ async function loadAllData() {
       email: u.email,
       role: roleMap[u.role] || u.role,
       zone: u.zone || '—',
-      smtpEmail: u.smtpEmail || null,
     }));
 
     // Map clients to frontend format
