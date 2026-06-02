@@ -4340,9 +4340,9 @@ function FeedbackView() {
           <span className="font-semibold text-sm text-slate-700">Nuevo reporte</span>
         </div>
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
-          {/* Tipo */}
+          {/* Tipo — solo BUG y QUESTION para los usuarios */}
           <div className="flex gap-2 flex-wrap">
-            {['BUG','QUESTION','MEETING'].map(t => (
+            {['BUG','QUESTION'].map(t => (
               <button key={t} type="button"
                 onClick={() => setType(t)}
                 className={cx(
