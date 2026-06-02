@@ -1,5 +1,5 @@
 const express = require('express');
-const { authMiddleware, requireRole } = require('../middleware/auth');
+const {authMiddleware, requireRole, isAdmin } = require('../middleware/auth');
 const prisma = require('../db');
 
 const router = express.Router();

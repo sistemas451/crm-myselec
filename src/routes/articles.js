@@ -2,7 +2,7 @@ const express = require('express');
 const multer  = require('multer');
 const XLSX    = require('xlsx');
 const crypto  = require('crypto');
-const { authMiddleware } = require('../middleware/auth');
+const {authMiddleware, isAdmin } = require('../middleware/auth');
 const prisma = require('../db');
 
 const router  = express.Router();
@@ -140,7 +140,7 @@ router.get('/:code', authMiddleware, async (req, res) => {
 
 // POST /api/articles — crear artículo manualmente (admin only)
 router.post('/', authMiddleware, async (req, res) => {
-  if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Solo administradores' });
+  if (!isAdmin(req.user)) return res.status(403).json({ error: 'Solo administradores' });
   try {
     const { code, description, category, type, class: cls, coefVar, active = true } = req.body;
     if (!code?.trim())        return res.status(400).json({ error: 'El código es requerido' });
@@ -165,7 +165,7 @@ router.post('/', authMiddleware, async (req, res) => {
 
 // PATCH /api/articles/:code — editar artículo (admin only)
 router.patch('/:code', authMiddleware, async (req, res) => {
-  if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Solo administradores' });
+  if (!isAdmin(req.user)) return res.status(403).json({ error: 'Solo administradores' });
   try {
     const { description, category, type, class: cls, coefVar, active } = req.body;
     const data = {};
@@ -185,7 +185,7 @@ router.patch('/:code', authMiddleware, async (req, res) => {
 
 // DELETE /api/articles/:code — eliminar artículo individual o todos (admin only)
 router.delete('/:code', authMiddleware, async (req, res) => {
-  if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Solo administradores' });
+  if (!isAdmin(req.user)) return res.status(403).json({ error: 'Solo administradores' });
 
   // Caso especial: eliminar TODO el catálogo
   if (req.params.code === 'all') {
@@ -209,7 +209,7 @@ router.delete('/:code', authMiddleware, async (req, res) => {
 
 // POST /api/articles/preview — subir XLS, comparar con DB, devolver diff sin tocar nada
 router.post('/preview', authMiddleware, upload.single('file'), async (req, res) => {
-  if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Solo administradores' });
+  if (!isAdmin(req.user)) return res.status(403).json({ error: 'Solo administradores' });
   try {
     if (!req.file) return res.status(400).json({ error: 'No se recibió ningún archivo' });
 
@@ -278,7 +278,7 @@ router.post('/preview', authMiddleware, upload.single('file'), async (req, res) 
 
 // POST /api/articles/sync — aplicar cambios confirmados
 router.post('/sync', authMiddleware, async (req, res) => {
-  if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Solo administradores' });
+  if (!isAdmin(req.user)) return res.status(403).json({ error: 'Solo administradores' });
   try {
     const { token, deleteCodes = [] } = req.body;
     if (!token) return res.status(400).json({ error: 'Token requerido' });

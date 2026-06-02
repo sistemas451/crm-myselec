@@ -1,12 +1,12 @@
 const express = require('express');
-const { authMiddleware } = require('../middleware/auth');
+const {authMiddleware, isAdmin } = require('../middleware/auth');
 const { runStageAlerts, runWeeklyReport } = require('../services/notifier');
 const prisma = require('../db');
 
 const router = express.Router();
 
 const adminOnly = (req, res, next) => {
-  if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Solo administradores' });
+  if (!isAdmin(req.user)) return res.status(403).json({ error: 'Solo administradores' });
   next();
 };
 
@@ -459,7 +459,7 @@ function _formatByStage(byStage) {
 // GET /api/notifications/counts — conteos ligeros para badges del sidebar (solo admin)
 router.get('/counts', authMiddleware, async (req, res) => {
   try {
-    if (req.user.role !== 'ADMIN') return res.json({ unlinkedPresupuestos: 0 });
+    if (!isAdmin(req.user)) return res.json({ unlinkedPresupuestos: 0 });
     const unlinkedPresupuestos = await prisma.quote.count({
       where: { mailType: 'PRESUPUESTO', linkedQuoteId: null, stage: { notIn: ['rechazada'] } },
     });

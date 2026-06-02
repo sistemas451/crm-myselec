@@ -1729,7 +1729,8 @@ function NotifModal({ rule, stages, onSave, onClose }) {
 }
 
 function Config() {
-  const { pushToast, users } = useApp();
+  const { pushToast, users, roleKey } = useApp();
+  const isDeveloper = roleKey === 'admin' && CrmAuth.getUser()?.role === 'DEVELOPER';
   const [tab, setTab] = useState('stages');
   const [stagesData, setStagesData] = useState(null);
   const [stagesLoading, setStagesLoading] = useState(true);
@@ -2337,6 +2338,7 @@ function Config() {
         { id:'articles', label:'Artículos' },
         { id:'access',   label:'Acceso' },
         { id:'logs',     label:'Registros' },
+        ...(isDeveloper ? [{ id:'developer', label:'🛠 Desarrolladores' }] : []),
       ]}/>
 
       {tab==='stages' && (
@@ -3001,6 +3003,7 @@ function Config() {
       )}
 
       {tab==='logs' && <LoginLogs/>}
+      {tab==='developer' && isDeveloper && <DeveloperSettings/>}
 
     </div>
   );
@@ -4196,6 +4199,118 @@ function Comparativa() {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// ─── DeveloperSettings — Tab visible solo para DEVELOPER ────────────────────
+function DeveloperSettings() {
+  const { users: allUsersCtx } = useApp();
+  const [notifyIds, setNotifyIds] = useState([]);
+  const [allUsers,  setAllUsers]  = useState([]);
+  const [loading,   setLoading]   = useState(true);
+  const [saving,    setSaving]    = useState(false);
+  const [saved,     setSaved]     = useState(false);
+
+  useEffect(() => {
+    CrmApi.getFeedbackNotifyUsers()
+      .then(d => { setNotifyIds(d.notifyIds || []); setAllUsers(d.users || []); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  function toggleUser(id) {
+    setNotifyIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+    setSaved(false);
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      await CrmApi.saveFeedbackNotifyUsers(notifyIds);
+      setSaved(true);
+    } catch (e) {
+      alert('Error al guardar: ' + e.message);
+    }
+    setSaving(false);
+  }
+
+  const ROLE_LABEL = { DEVELOPER: 'Desarrollador', ADMIN: 'Administrador', VENDEDOR: 'Vendedor', LOGISTICA: 'Logística' };
+  const ROLE_COLOR = { DEVELOPER: 'text-violet-700 bg-violet-100', ADMIN: 'text-blue-700 bg-blue-100', VENDEDOR: 'text-green-700 bg-green-100', LOGISTICA: 'text-orange-700 bg-orange-100' };
+
+  return (
+    <div className="p-6 max-w-2xl space-y-6">
+
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <div className="w-9 h-9 rounded-xl bg-violet-100 flex items-center justify-center">
+          <Icon name="code-2" size={17} className="text-violet-600"/>
+        </div>
+        <div>
+          <div className="font-semibold text-sm text-slate-800">Panel de Desarrolladores</div>
+          <div className="text-xs text-slate-500">Configuraciones avanzadas visibles solo para este rol.</div>
+        </div>
+      </div>
+
+      {/* Sección: notificaciones del foro */}
+      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+        <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
+          <Icon name="bell" size={14} className="text-brand"/>
+          <span className="font-semibold text-sm text-slate-700">Reciben mails del Foro</span>
+          <span className="ml-auto text-[11px] text-slate-400">Cuando alguien publica un reporte</span>
+        </div>
+
+        {loading ? (
+          <div className="flex justify-center py-8 text-slate-300">
+            <Icon name="loader" size={18} className="animate-spin"/>
+          </div>
+        ) : (
+          <div className="divide-y divide-slate-50">
+            {allUsers.map(u => {
+              const active = notifyIds.includes(u.id);
+              return (
+                <div key={u.id} className="flex items-center gap-3 px-5 py-3 hover:bg-slate-50 transition-colors">
+                  {/* Avatar */}
+                  <div className="w-8 h-8 rounded-full shrink-0 overflow-hidden bg-brand/10 flex items-center justify-center">
+                    {u.avatar
+                      ? <img src={u.avatar} alt={u.name} className="w-full h-full object-cover"/>
+                      : <span className="text-[11px] font-bold text-brand">{u.name.charAt(0).toUpperCase()}</span>
+                    }
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-slate-700 truncate">{u.name}</div>
+                    <div className="text-[11px] text-slate-400 truncate">{u.email}</div>
+                  </div>
+                  <span className={cx('text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0', ROLE_COLOR[u.role] || 'text-slate-600 bg-slate-100')}>
+                    {ROLE_LABEL[u.role] || u.role}
+                  </span>
+                  {/* Toggle */}
+                  <button onClick={() => toggleUser(u.id)}
+                    className={cx(
+                      'relative shrink-0 w-10 h-5 rounded-full transition-colors',
+                      active ? 'bg-brand' : 'bg-slate-200'
+                    )}>
+                    <span className={cx(
+                      'absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all',
+                      active ? 'left-5' : 'left-0.5'
+                    )}/>
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <div className="px-5 py-3 border-t border-slate-100 flex items-center justify-between">
+          <span className="text-[11px] text-slate-400">
+            {notifyIds.length === 0 ? 'Sin selección — se usarán los Desarrolladores activos por defecto.' : `${notifyIds.length} usuario${notifyIds.length !== 1 ? 's' : ''} seleccionado${notifyIds.length !== 1 ? 's' : ''}`}
+          </span>
+          <button onClick={handleSave} disabled={saving}
+            className="flex items-center gap-1.5 px-4 py-1.5 bg-brand text-white rounded-lg text-xs font-medium hover:bg-brand/90 disabled:opacity-50">
+            {saving ? <><Icon name="loader" size={11} className="animate-spin"/>Guardando…</> : saved ? <><Icon name="check" size={11}/>Guardado</> : 'Guardar cambios'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

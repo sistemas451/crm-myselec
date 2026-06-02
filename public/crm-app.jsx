@@ -113,7 +113,7 @@ function App() {
   // Initialize role and user ID from token on mount
   useEffect(() => {
     if (!loggedUser) return;
-    const roleMap = { ADMIN: 'admin', VENDEDOR: 'seller', LOGISTICA: 'logistics' };
+    const roleMap = { DEVELOPER: 'admin', ADMIN: 'admin', VENDEDOR: 'seller', LOGISTICA: 'logistics' };
     setCurrentUserId(loggedUser.id);
     setRoleKey(roleMap[loggedUser.role] || 'admin');
   }, []);

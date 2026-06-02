@@ -12,7 +12,7 @@
 
 const router = require('express').Router();
 const prisma  = require('../db');
-const { authMiddleware } = require('../middleware/auth');
+const {authMiddleware, isAdmin } = require('../middleware/auth');
 const { sendMail }       = require('../services/mailer');
 
 router.use(authMiddleware);
@@ -73,12 +73,27 @@ async function getMeetingLink() {
   } catch (_) { return ''; }
 }
 
-async function getAdminEmails() {
-  const admins = await prisma.user.findMany({
-    where: { role: 'ADMIN', active: true },
+async function getFeedbackNotifyEmails() {
+  try {
+    // Si hay usuarios configurados manualmente, usarlos
+    const setting = await prisma.appSetting.findUnique({ where: { key: 'feedback_notify_users' } });
+    if (setting?.value) {
+      const ids = JSON.parse(setting.value);
+      if (Array.isArray(ids) && ids.length > 0) {
+        const users = await prisma.user.findMany({
+          where: { id: { in: ids }, active: true },
+          select: { email: true },
+        });
+        return users.map(u => u.email).filter(Boolean);
+      }
+    }
+  } catch (_) {}
+  // Fallback: todos los DEVELOPER activos
+  const devs = await prisma.user.findMany({
+    where: { role: 'DEVELOPER', active: true },
     select: { email: true },
   });
-  return admins.map(a => a.email).filter(Boolean);
+  return devs.map(u => u.email).filter(Boolean);
 }
 
 async function nextCode() {
@@ -164,7 +179,7 @@ router.post('/', async (req, res) => {
 
     // Notificar admins
     try {
-      const adminEmails = await getAdminEmails();
+      const adminEmails = await getFeedbackNotifyEmails();
       if (adminEmails.length > 0) {
         const typeLabel = TYPE_LABEL[type] || type;
         await sendMail({
@@ -203,7 +218,7 @@ router.post('/', async (req, res) => {
 // ── POST /:id/respond ─────────────────────────────────────────────────────────
 router.post('/:id/respond', async (req, res) => {
   try {
-    if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Solo admins pueden responder.' });
+    if (!isAdmin(req.user)) return res.status(403).json({ error: 'Solo admins pueden responder.' });
     const { body, status } = req.body;
     if (!body?.trim()) return res.status(400).json({ error: 'La respuesta no puede estar vacía.' });
     if (status && !VALID_STATUSES.includes(status)) return res.status(400).json({ error: 'Estado inválido.' });
@@ -258,7 +273,7 @@ router.post('/:id/respond', async (req, res) => {
 // ── PATCH /:id/status ────────────────────────────────────────────────────────
 router.patch('/:id/status', async (req, res) => {
   try {
-    if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Solo admins.' });
+    if (!isAdmin(req.user)) return res.status(403).json({ error: 'Solo admins.' });
     const { status } = req.body;
     if (!VALID_STATUSES.includes(status)) return res.status(400).json({ error: 'Estado inválido.' });
     const post = await prisma.feedbackPost.update({ where: { id: req.params.id }, data: { status } });

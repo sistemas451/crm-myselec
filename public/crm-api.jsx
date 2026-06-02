@@ -270,7 +270,12 @@ const CrmApi = {
   createFeedbackPost: (data)       => apiFetch('/feedback', { method: 'POST', body: JSON.stringify(data) }),
   respondFeedback:    (id, body, status) => apiFetch(`/feedback/${id}/respond`, { method: 'POST', body: JSON.stringify({ body, status }) }),
   setFeedbackStatus:  (id, status) => apiFetch(`/feedback/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
-  voteFeedback:       (id)         => apiFetch(`/feedback/${id}/vote`, { method: 'POST' }),
+  voteFeedback:         (id)           => apiFetch(`/feedback/${id}/vote`, { method: 'POST' }),
+
+  // ── Developer settings ────────────────────────────────────────────────────
+  getFeedbackNotifyUsers: ()      => apiFetch('/settings/feedback-notify-users'),
+  saveFeedbackNotifyUsers: (ids)  => apiFetch('/settings/feedback-notify-users', { method: 'PUT', body: JSON.stringify({ ids }) }),
+  setUserRole: (id, role)         => apiFetch(`/users/${id}`, { method: 'PUT', body: JSON.stringify({ role }) }),
   getFeedbackPost:    (id)         => apiFetch(`/feedback/${id}`),
 
   uploadFeedbackImage: (file) => {

@@ -2,7 +2,7 @@ const express = require('express');
 const multer  = require('multer');
 const XLSX    = require('xlsx');
 const crypto  = require('crypto');
-const { authMiddleware } = require('../middleware/auth');
+const {authMiddleware, isAdmin } = require('../middleware/auth');
 const prisma = require('../db');
 
 const router  = express.Router();
@@ -104,7 +104,7 @@ router.get('/', authMiddleware, async (req, res) => {
 
 // GET /api/clients/export — descargar XLS con todos los clientes (ANTES de /:id)
 router.get('/export', authMiddleware, async (req, res) => {
-  if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Solo administradores' });
+  if (!isAdmin(req.user)) return res.status(403).json({ error: 'Solo administradores' });
   try {
     const clients = await prisma.client.findMany({
       orderBy: { name: 'asc' },
@@ -239,7 +239,7 @@ router.put('/:id', authMiddleware, async (req, res) => {
 
 // DELETE /api/clients/:id — eliminar cliente individual o todos (admin only)
 router.delete('/:id', authMiddleware, async (req, res) => {
-  if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Solo administradores' });
+  if (!isAdmin(req.user)) return res.status(403).json({ error: 'Solo administradores' });
 
   // Caso especial: eliminar TODOS los clientes sin historial
   if (req.params.id === 'all') {
@@ -324,7 +324,7 @@ router.delete('/:id/emails/:emailId', authMiddleware, async (req, res) => {
 
 // POST /api/clients/preview — subir XLS, comparar con DB, devolver diff
 router.post('/preview', authMiddleware, upload.single('file'), async (req, res) => {
-  if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Solo administradores' });
+  if (!isAdmin(req.user)) return res.status(403).json({ error: 'Solo administradores' });
   try {
     if (!req.file) return res.status(400).json({ error: 'No se recibió ningún archivo' });
 
@@ -436,7 +436,7 @@ router.post('/preview', authMiddleware, upload.single('file'), async (req, res) 
 
 // POST /api/clients/sync — aplicar cambios confirmados
 router.post('/sync', authMiddleware, async (req, res) => {
-  if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Solo administradores' });
+  if (!isAdmin(req.user)) return res.status(403).json({ error: 'Solo administradores' });
   try {
     const { token, deleteCodes = [] } = req.body;
     if (!token) return res.status(400).json({ error: 'Token requerido' });

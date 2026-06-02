@@ -4,7 +4,7 @@ const path    = require('path');
 const fs      = require('fs');
 const multer  = require('multer');
 const crypto  = require('crypto');
-const { authMiddleware } = require('../middleware/auth');
+const { authMiddleware, isAdmin, isDeveloper } = require('../middleware/auth');
 const { sendMail } = require('../services/mailer');
 const { emailAllowed, getAllowedDomains } = require('./auth');
 const prisma = require('../db');
@@ -22,7 +22,7 @@ const uploadAvatar = multer({
 const router = express.Router();
 
 const adminOnly = (req, res, next) => {
-  if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Solo administradores' });
+  if (!isAdmin(req.user)) return res.status(403).json({ error: 'Solo administradores' });
   next();
 };
 
@@ -44,7 +44,9 @@ router.get('/pending', authMiddleware, adminOnly, async (req, res) => {
 router.post('/:id/approve', authMiddleware, adminOnly, async (req, res) => {
   try {
     const { role } = req.body;
-    if (!['ADMIN', 'VENDEDOR', 'LOGISTICA'].includes(role)) {
+    // Only DEVELOPER can assign DEVELOPER role
+    if (role === 'DEVELOPER' && !isDeveloper(req.user)) return res.status(403).json({ error: 'Solo un Desarrollador puede asignar ese rol.' });
+    if (!['DEVELOPER', 'ADMIN', 'VENDEDOR', 'LOGISTICA'].includes(role)) {
       return res.status(400).json({ error: 'Rol inválido' });
     }
 
@@ -53,12 +55,12 @@ router.post('/:id/approve', authMiddleware, adminOnly, async (req, res) => {
 
     const updated = await prisma.user.update({
       where: { id: req.params.id },
-      data: { role, active: true, pendingApproval: false, notifyUnassigned: role === 'ADMIN' },
+      data: { role, active: true, pendingApproval: false, notifyUnassigned: ['DEVELOPER','ADMIN'].includes(role) },
       select: { id: true, name: true, email: true, role: true, zone: true, active: true, createdAt: true },
     });
 
     const APP_URL = process.env.APP_URL || `http://localhost:${process.env.PORT || 3000}`;
-    const roleLabel = role === 'ADMIN' ? 'Administrador' : role === 'VENDEDOR' ? 'Vendedor' : 'Logística';
+    const roleLabel = role === 'DEVELOPER' ? 'Desarrollador' : role === 'ADMIN' ? 'Administrador' : role === 'VENDEDOR' ? 'Vendedor' : 'Logística';
     await sendMail({
       to: user.email,
       subject: '🎉 Tu cuenta fue aprobada · MySelec CRM',
@@ -135,7 +137,7 @@ router.get('/', authMiddleware, async (req, res) => {
     });
 
     // Enriquecer con stats solo para admin
-    if (req.user.role === 'ADMIN') {
+    if (isAdmin(req.user)) {
       const enriched = await Promise.all(users.map(async u => {
         const [cotiz, ganadas, ocs, clientes] = await Promise.all([
           prisma.quote.count({ where: { sellerId: u.id } }),
@@ -187,7 +189,7 @@ router.post('/', authMiddleware, adminOnly, async (req, res) => {
         password: hashed,
         role,
         zone: zone || null,
-        notifyUnassigned: role === 'ADMIN',
+        notifyUnassigned: ['DEVELOPER','ADMIN'].includes(role),
       },
       select: { id: true, name: true, email: true, role: true, zone: true, active: true, createdAt: true },
     });
@@ -202,7 +204,7 @@ router.post('/', authMiddleware, adminOnly, async (req, res) => {
     // Enviar mails (no bloquean la respuesta al admin)
     const APP_URL = process.env.APP_URL || `http://localhost:${process.env.PORT || 3000}`;
     const resetLink = `${APP_URL}?reset=${resetToken}`;
-    const roleLabel = role === 'ADMIN' ? 'Administrador' : role === 'VENDEDOR' ? 'Vendedor' : 'Logística';
+    const roleLabel = role === 'DEVELOPER' ? 'Desarrollador' : role === 'ADMIN' ? 'Administrador' : role === 'VENDEDOR' ? 'Vendedor' : 'Logística';
     const adminName = req.user.name || 'Un administrador';
 
     // 1. Mail al nuevo usuario
@@ -294,7 +296,7 @@ router.post('/:id/resend-welcome', authMiddleware, adminOnly, async (req, res) =
 
     const APP_URL = process.env.APP_URL || `http://localhost:${process.env.PORT || 3000}`;
     const resetLink = `${APP_URL}?reset=${resetToken}`;
-    const roleLabel = user.role === 'ADMIN' ? 'Administrador' : user.role === 'VENDEDOR' ? 'Vendedor' : 'Logística';
+    const roleLabel = user.role === 'DEVELOPER' ? 'Desarrollador' : user.role === 'ADMIN' ? 'Administrador' : user.role === 'VENDEDOR' ? 'Vendedor' : 'Logística';
 
     const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"></head>
 <body style="margin:0;padding:0;background:#F1F5F9;font-family:sans-serif">
@@ -472,8 +474,8 @@ router.patch('/:id/toggle', authMiddleware, adminOnly, async (req, res) => {
 router.patch('/:id/notification-prefs', authMiddleware, async (req, res) => {
   try {
     const isSelf  = req.user.id === req.params.id;
-    const isAdmin = req.user.role === 'ADMIN';
-    if (!isAdmin && !isSelf) return res.status(403).json({ error: 'Sin permiso' });
+    const isAdminUser = isAdmin(req.user);
+    if ((!isAdminUser && !isSelf)) return res.status(403).json({ error: 'Sin permiso' });
 
     const { prefs } = req.body; // { email: {...}, inapp: {...} }
     if (!prefs || typeof prefs !== 'object') return res.status(400).json({ error: 'prefs requerido' });
@@ -517,8 +519,8 @@ router.patch('/:id/notify-unassigned', authMiddleware, adminOnly, async (req, re
 router.patch('/:id/password', authMiddleware, async (req, res) => {
   try {
     const isSelf  = req.user.id === req.params.id;
-    const isAdmin = req.user.role === 'ADMIN';
-    if (!isAdmin && !isSelf) return res.status(403).json({ error: 'Sin permiso' });
+    const isAdminUser = isAdmin(req.user);
+    if ((!isAdminUser && !isSelf)) return res.status(403).json({ error: 'Sin permiso' });
 
     const { password, currentPassword } = req.body;
     if (!password || password.length < 8) return res.status(400).json({ error: 'Contraseña mínimo 8 caracteres' });
@@ -567,7 +569,7 @@ router.patch('/:id/password', authMiddleware, async (req, res) => {
 // PATCH /api/users/:id/profile — actualizar nombre (propio usuario o admin)
 router.patch('/:id/profile', authMiddleware, async (req, res) => {
   try {
-    if (req.user.role !== 'ADMIN' && req.user.id !== req.params.id) {
+    if (!isAdmin(req.user) && req.user.id !== req.params.id) {
       return res.status(403).json({ error: 'Sin permiso' });
     }
     const { name, phone } = req.body;
@@ -590,7 +592,7 @@ router.patch('/:id/profile', authMiddleware, async (req, res) => {
 // POST /api/users/:id/avatar — subir foto de perfil (propio usuario o admin)
 router.post('/:id/avatar', authMiddleware, uploadAvatar.single('avatar'), async (req, res) => {
   try {
-    if (req.user.role !== 'ADMIN' && req.user.id !== req.params.id) {
+    if (!isAdmin(req.user) && req.user.id !== req.params.id) {
       return res.status(403).json({ error: 'Sin permiso' });
     }
     if (!req.file) return res.status(400).json({ error: 'No se recibió imagen' });
@@ -611,7 +613,7 @@ router.post('/:id/avatar', authMiddleware, uploadAvatar.single('avatar'), async 
 // DELETE /api/users/:id/avatar — eliminar foto de perfil
 router.delete('/:id/avatar', authMiddleware, async (req, res) => {
   try {
-    if (req.user.role !== 'ADMIN' && req.user.id !== req.params.id) {
+    if (!isAdmin(req.user) && req.user.id !== req.params.id) {
       return res.status(403).json({ error: 'Sin permiso' });
     }
     const user = await prisma.user.update({

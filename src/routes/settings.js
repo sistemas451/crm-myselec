@@ -1,5 +1,5 @@
 const express = require('express');
-const { authMiddleware, requireRole } = require('../middleware/auth');
+const {authMiddleware, requireRole, isAdmin, isDeveloper } = require('../middleware/auth');
 const prisma = require('../db');
 
 const router = express.Router();
@@ -71,8 +71,13 @@ const DEFAULTS = {
   reminder_body:              'Hola {clientName},\n\nTe escribimos para hacer seguimiento del presupuesto {flexxusCode} que te enviamos hace {daysSent} días.\n\n¿Pudiste revisarlo? Quedamos a disposición para cualquier consulta.\n\nSaludos cordiales,\nEquipo MySelec',
 };
 
+const adminOrDevMiddleware = (req, res, next) => {
+  if (!isAdmin(req.user)) return res.status(403).json({ error: 'Sin permisos' });
+  next();
+};
+
 // GET /api/settings — devuelve todos los settings con defaults
-router.get('/', authMiddleware, requireRole('ADMIN'), async (req, res) => {
+router.get('/', authMiddleware, adminOrDevMiddleware, async (req, res) => {
   try {
     const rows = await prisma.appSetting.findMany();
     const map  = Object.fromEntries(rows.map(r => [r.key, r.value]));
@@ -83,7 +88,7 @@ router.get('/', authMiddleware, requireRole('ADMIN'), async (req, res) => {
 });
 
 // PATCH /api/settings — guarda uno o varios settings
-router.patch('/', authMiddleware, requireRole('ADMIN'), async (req, res) => {
+router.patch('/', authMiddleware, adminOrDevMiddleware, async (req, res) => {
   try {
     const updates = req.body; // { key: value, ... }
     for (const [key, value] of Object.entries(updates)) {
@@ -98,6 +103,42 @@ router.patch('/', authMiddleware, requireRole('ADMIN'), async (req, res) => {
     res.json({ ...DEFAULTS, ...map });
   } catch (err) {
     res.status(500).json({ error: 'Error al guardar configuración' });
+  }
+});
+
+// ── Developer: usuarios que reciben mails del foro ───────────────────────────
+
+// GET /api/settings/feedback-notify-users
+router.get('/feedback-notify-users', authMiddleware, async (req, res) => {
+  if (!isDeveloper(req.user)) return res.status(403).json({ error: 'Solo desarrolladores.' });
+  try {
+    const setting = await prisma.appSetting.findUnique({ where: { key: 'feedback_notify_users' } });
+    const ids = setting?.value ? JSON.parse(setting.value) : [];
+    const allUsers = await prisma.user.findMany({
+      where: { active: true },
+      select: { id: true, name: true, email: true, role: true, avatar: true },
+      orderBy: { name: 'asc' },
+    });
+    res.json({ notifyIds: ids, users: allUsers });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/settings/feedback-notify-users
+router.put('/feedback-notify-users', authMiddleware, async (req, res) => {
+  if (!isDeveloper(req.user)) return res.status(403).json({ error: 'Solo desarrolladores.' });
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids)) return res.status(400).json({ error: 'ids debe ser un array.' });
+    await prisma.appSetting.upsert({
+      where:  { key: 'feedback_notify_users' },
+      update: { value: JSON.stringify(ids) },
+      create: { key: 'feedback_notify_users', value: JSON.stringify(ids) },
+    });
+    res.json({ ok: true, ids });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

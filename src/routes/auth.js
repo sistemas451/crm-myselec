@@ -113,7 +113,7 @@ router.post('/login', async (req, res) => {
 });
 
 // GET /api/auth/me
-const { authMiddleware } = require('../middleware/auth');
+const {authMiddleware, isAdmin } = require('../middleware/auth');
 router.get('/me', authMiddleware, async (req, res) => {
   try {
     const user = await prisma.user.findUnique({
@@ -276,7 +276,7 @@ router.post('/reset-password', async (req, res) => {
 
 // GET /api/auth/smtp-test — diagnóstico de conexión SMTP (admin only)
 router.get('/smtp-test', authMiddleware, async (req, res) => {
-  if (req.user.role !== 'ADMIN') return res.status(403).json({ error: 'Solo administradores' });
+  if (!isAdmin(req.user)) return res.status(403).json({ error: 'Solo administradores' });
   try {
     const info = await verifySmtp();
     res.json({ ok: true, ...info });

@@ -1,5 +1,5 @@
 const express = require('express');
-const { authMiddleware } = require('../middleware/auth');
+const {authMiddleware, isAdmin } = require('../middleware/auth');
 const prisma = require('../db');
 
 const router = express.Router();
@@ -190,7 +190,7 @@ router.get('/stages/full', authMiddleware, async (req, res) => {
 // PATCH /data/stages/:id — edit a stage definition (admin only)
 router.patch('/stages/:id', authMiddleware, async (req, res) => {
   try {
-    if (req.user.role !== 'ADMIN') {
+    if (!isAdmin(req.user)) {
       return res.status(403).json({ error: 'Solo administradores' });
     }
     const { mandatory, maxHours, label, tone, emailAlert } = req.body;
@@ -213,7 +213,7 @@ router.patch('/stages/:id', authMiddleware, async (req, res) => {
 // POST /data/stages — crear nueva etapa (admin only)
 router.post('/stages', authMiddleware, async (req, res) => {
   try {
-    if (req.user.role !== 'ADMIN') {
+    if (!isAdmin(req.user)) {
       return res.status(403).json({ error: 'Solo administradores' });
     }
     const { label, phase, tone = 'gray' } = req.body;
@@ -247,7 +247,7 @@ router.post('/stages', authMiddleware, async (req, res) => {
 // DELETE /data/stages/:id — eliminar etapa (admin only, solo si no tiene quotes)
 router.delete('/stages/:id', authMiddleware, async (req, res) => {
   try {
-    if (req.user.role !== 'ADMIN') {
+    if (!isAdmin(req.user)) {
       return res.status(403).json({ error: 'Solo administradores' });
     }
     const stage = await prisma.stageDefinition.findUnique({ where: { id: req.params.id } });
@@ -268,7 +268,7 @@ router.delete('/stages/:id', authMiddleware, async (req, res) => {
 // PATCH /data/stages/reorder — reordenar etapas (admin only)
 router.patch('/stages-reorder', authMiddleware, async (req, res) => {
   try {
-    if (req.user.role !== 'ADMIN') {
+    if (!isAdmin(req.user)) {
       return res.status(403).json({ error: 'Solo administradores' });
     }
     // ids: array de IDs en el nuevo orden (por fase)

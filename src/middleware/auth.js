@@ -51,4 +51,13 @@ function requireRole(...roles) {
   };
 }
 
-module.exports = { authMiddleware, requireRole };
+// DEVELOPER hereda todos los permisos de ADMIN
+function isAdmin(user) {
+  return user && ['ADMIN', 'DEVELOPER'].includes(user.role);
+}
+
+function isDeveloper(user) {
+  return user && user.role === 'DEVELOPER';
+}
+
+module.exports = { authMiddleware, requireRole, isAdmin, isDeveloper };

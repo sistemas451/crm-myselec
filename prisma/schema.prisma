@@ -64,6 +64,7 @@ model NotificationRule {
 }
 
 enum Role {
+  DEVELOPER
   ADMIN
   VENDEDOR
   LOGISTICA

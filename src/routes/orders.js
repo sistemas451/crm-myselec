@@ -1,6 +1,6 @@
 const express = require('express');
 const multer  = require('multer');
-const { authMiddleware } = require('../middleware/auth');
+const {authMiddleware, isAdmin } = require('../middleware/auth');
 const { parseNotaPedidoPDF } = require('../services/flexxusParser');
 const prisma = require('../db');
 
@@ -358,7 +358,7 @@ router.patch('/:id/stage', authMiddleware, async (req, res) => {
 // DELETE /api/orders/:id — elimina NP/OC y devuelve el presupuesto a 'enviado'
 router.delete('/:id', authMiddleware, async (req, res) => {
   try {
-    if (req.user.role !== 'ADMIN') {
+    if (!isAdmin(req.user)) {
       return res.status(403).json({ error: 'Solo administradores pueden eliminar órdenes' });
     }
 

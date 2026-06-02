@@ -1,7 +1,7 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const { authMiddleware } = require('../middleware/auth');
+const {authMiddleware, isAdmin } = require('../middleware/auth');
 const { onStageChange } = require('../services/notifier');
 const { resyncQuoteEmail } = require('../services/mailReader');
 const { parseFlexxusPDF } = require('../services/flexxusParser');
@@ -489,7 +489,7 @@ router.delete('/:id', authMiddleware, async (req, res) => {
     });
     if (!quote) return res.status(404).json({ error: 'No encontrada' });
 
-    if (req.user.role !== 'ADMIN') {
+    if (!isAdmin(req.user)) {
       return res.status(403).json({ error: 'Solo administradores pueden eliminar cotizaciones' });
     }
 
