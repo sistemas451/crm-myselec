@@ -4779,7 +4779,7 @@ function FeedbackDetailView({ postId, onBack, onUpdate, isAdmin, currentUserId }
               <button
                 onClick={handleVote}
                 disabled={isOwn || votingLoading}
-                title={isOwn ? 'No podés votar tu propio reporte' : iVoted ? 'Quitar voto' : 'Me pasa también'}
+                title={isOwn ? 'No podés votar tu propio reporte' : iVoted ? 'Quitar — ya reporté este problema' : 'Yo también tengo este problema'}
                 className={cx(
                   'flex flex-col items-center justify-center w-12 h-14 rounded-xl border-2 transition-all',
                   isOwn ? 'cursor-default opacity-40 border-slate-200 bg-slate-50' :
@@ -4789,7 +4789,7 @@ function FeedbackDetailView({ postId, onBack, onUpdate, isAdmin, currentUserId }
                 <Icon name="chevron-up" size={16}/>
                 <span className="text-sm font-bold leading-none">{totalReporters}</span>
               </button>
-              <span className="text-[9px] text-slate-400 text-center leading-tight">me<br/>pasa</span>
+              <span className="text-[9px] text-slate-400 text-center leading-tight">{iVoted ? 'reportado' : 'me pasa'}</span>
             </div>
 
             <div className="flex-1 min-w-0">
