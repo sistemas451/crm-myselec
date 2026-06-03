@@ -167,6 +167,23 @@ router.post('/', authMiddleware, async (req, res) => {
       },
     });
 
+    // Si se asignó a un vendedor distinto al creador, agregar a pendingAssigned para notificación persistente
+    if (sellerId && sellerId !== req.user.id) {
+      try {
+        const seller = await prisma.user.findUnique({ where: { id: sellerId }, select: { notificationPrefs: true } });
+        const prefs   = seller?.notificationPrefs || {};
+        const pending = Array.isArray(prefs.pendingAssigned) ? prefs.pendingAssigned : [];
+        if (!pending.includes(quote.id)) {
+          await prisma.user.update({
+            where: { id: sellerId },
+            data:  { notificationPrefs: { ...prefs, pendingAssigned: [...pending, quote.id] } },
+          });
+        }
+      } catch (e) {
+        console.error('pendingAssigned update error:', e.message);
+      }
+    }
+
     res.status(201).json(quote);
   } catch (err) {
     console.error('Error creating quote:', err);

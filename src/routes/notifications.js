@@ -175,36 +175,31 @@ router.get('/inbox', authMiddleware, async (req, res) => {
       }
 
     } else if (role === 'VENDEDOR') {
-      // 0. Cotizaciones nuevas asignadas por otro usuario (admin/developer)
+      // 0. Cotizaciones asignadas pendientes de "Listo" (persisten hasta que el vendedor confirma)
       {
-        const since = lastCheck || new Date(now.getTime() - 48 * 3600 * 1000);
-        const recentAssigned = await prisma.quote.findMany({
-          where: { sellerId: userId, isDraft: false, createdAt: { gte: since } },
-          select: { id: true, code: true, createdAt: true, client: { select: { name: true } } },
-          take: 10,
-        });
-        if (recentAssigned.length > 0) {
-          const quoteIds = recentAssigned.map(q => q.id);
-          const createdActivities = await prisma.activity.findMany({
-            where: { quoteId: { in: quoteIds }, action: 'CREATED' },
-            select: { quoteId: true, userId: true, user: { select: { name: true } } },
+        const pendingAssigned = Array.isArray(prefs.pendingAssigned) ? prefs.pendingAssigned : [];
+        if (pendingAssigned.length > 0) {
+          const assignedQuotes = await prisma.quote.findMany({
+            where: { id: { in: pendingAssigned }, isDraft: false },
+            select: { id: true, code: true, createdAt: true, client: { select: { name: true } } },
+            take: 10,
           });
-          const createdByMap = Object.fromEntries(createdActivities.map(a => [a.quoteId, a]));
-          // Solo las creadas por alguien que NO es el propio vendedor
-          const assignedByOther = recentAssigned.filter(q => {
-            const act = createdByMap[q.id];
-            return act && act.userId !== userId;
-          });
-          if (assignedByOther.length > 0) {
-            const creators = [...new Set(assignedByOther.map(q => createdByMap[q.id]?.user?.name).filter(Boolean))];
-            const creatorStr = creators.length === 1 ? creators[0] : `${creators[0]} y otros`;
+          if (assignedQuotes.length > 0) {
+            const quoteIds = assignedQuotes.map(q => q.id);
+            const createdActivities = await prisma.activity.findMany({
+              where: { quoteId: { in: quoteIds }, action: 'CREATED' },
+              select: { quoteId: true, userId: true, user: { select: { name: true } } },
+            });
+            const createdByMap = Object.fromEntries(createdActivities.map(a => [a.quoteId, a]));
+            const creators = [...new Set(assignedQuotes.map(q => createdByMap[q.id]?.user?.name).filter(Boolean))];
+            const creatorStr = creators.length === 1 ? creators[0] : creators.length > 1 ? `${creators[0]} y otros` : 'Un administrador';
             alerts.push({
               id: 'assigned-quotes', type: 'ASSIGNED_QUOTES', severity: 'high', icon: 'user-plus',
-              title: `${assignedByOther.length} cotización${assignedByOther.length > 1 ? 'es' : ''} nueva${assignedByOther.length > 1 ? 's' : ''} asignada${assignedByOther.length > 1 ? 's' : ''}`,
-              description: `${creatorStr} te asignó${assignedByOther.length > 1 ? ' ' : ' '}${assignedByOther.length === 1 ? 'una nueva cotización' : `${assignedByOther.length} cotizaciones`}.`,
+              title: `${assignedQuotes.length} cotización${assignedQuotes.length > 1 ? 'es' : ''} nueva${assignedQuotes.length > 1 ? 's' : ''} asignada${assignedQuotes.length > 1 ? 's' : ''}`,
+              description: `${creatorStr} te asignó${assignedQuotes.length === 1 ? ' una nueva cotización' : ` ${assignedQuotes.length} cotizaciones`}. Confirmá cada una cuando la hayas revisado.`,
               action: { label: 'Ver mis cotizaciones', view: 'quotes' },
-              count: assignedByOther.length,
-              items: assignedByOther.map(q => ({
+              count: assignedQuotes.length,
+              items: assignedQuotes.map(q => ({
                 id: q.id, code: q.code,
                 clientName: q.client?.name,
                 assignedBy: createdByMap[q.id]?.user?.name || 'Administrador',
@@ -431,6 +426,25 @@ router.post('/dismiss', authMiddleware, async (req, res) => {
     res.json({ ok: true, dismissedUntil: until });
   } catch (err) {
     console.error('POST /notifications/dismiss error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/notifications/ack-assigned — vendedor confirma que vio una cotización asignada
+router.post('/ack-assigned', authMiddleware, async (req, res) => {
+  try {
+    const { quoteId } = req.body;
+    if (!quoteId) return res.status(400).json({ error: 'quoteId requerido' });
+    const { id: userId } = req.user;
+    const userFull = await prisma.user.findUnique({ where: { id: userId }, select: { notificationPrefs: true } });
+    const prefs   = userFull?.notificationPrefs || {};
+    const pending = Array.isArray(prefs.pendingAssigned) ? prefs.pendingAssigned : [];
+    await prisma.user.update({
+      where: { id: userId },
+      data:  { notificationPrefs: { ...prefs, pendingAssigned: pending.filter(id => id !== quoteId) } },
+    });
+    res.json({ ok: true });
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });

@@ -104,7 +104,7 @@ function AppProvider({ children }) {
     }).catch(() => setNotifications([]));
   }, []);
 
-  // ── Carga y polling de inbox alerts (cada 10 min) ────────────────────────────
+  // ── Carga y polling de inbox alerts (cada 3 min) ─────────────────────────────
   const loadInboxAlerts = useRef(null);
   loadInboxAlerts.current = () => {
     CrmApi.getNotificationsInbox().then(alerts => {
@@ -113,8 +113,39 @@ function AppProvider({ children }) {
   };
   useEff(() => {
     loadInboxAlerts.current();
-    const t = setInterval(() => loadInboxAlerts.current(), 10 * 60 * 1000);
+    const t = setInterval(() => loadInboxAlerts.current(), 3 * 60 * 1000);
     return () => clearInterval(t);
+  }, []);
+
+  // ── Confirmar cotización asignada vista ("Listo ✓") ───────────────────────────
+  const ackAssigned = useCallback(async (quoteId) => {
+    // Optimista: quitar el ítem de la lista inmediatamente
+    setInboxAlerts(prev => prev.map(a => {
+      if (a.type !== 'ASSIGNED_QUOTES') return a;
+      const newItems = a.items.filter(i => i.id !== quoteId);
+      return newItems.length > 0 ? { ...a, items: newItems, count: newItems.length } : null;
+    }).filter(Boolean));
+    try { await CrmApi.ackAssignedQuote(quoteId); } catch (e) { console.warn('ack error:', e.message); }
+  }, []);
+
+  // ── Auto-refresh de quotes y orders cada 60 segundos ─────────────────────────
+  const refreshData = useRef(null);
+  refreshData.current = async () => {
+    try {
+      const since = new Date(Date.now() - 365 * 86400 * 1000).toISOString().split('T')[0];
+      const [freshQuotes, freshOrders] = await Promise.all([
+        CrmApi.getQuotes({ since }),
+        CrmApi.getOrders({ since }),
+      ]);
+      setQuotes(freshQuotes);
+      setOrders(freshOrders);
+    } catch (_) { /* silencioso — no interrumpir al usuario */ }
+  };
+  useEff(() => {
+    const t = setInterval(() => refreshData.current(), 60 * 1000);
+    const onVisible = () => { if (!document.hidden) refreshData.current(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', onVisible); };
   }, []);
 
   // Quote-level filters (shared by board)
@@ -280,7 +311,7 @@ function AppProvider({ children }) {
 
   const value = {
     quotes, setQuotes, orders, setOrders, clients, setClients, users, activity, comments, notifications,
-    inboxAlerts, snoozeAlert, markInboxSeen,
+    inboxAlerts, snoozeAlert, markInboxSeen, ackAssigned,
     quoteFilters, setQuoteFilters, orderFilters, setOrderFilters,
     currentUserId, setCurrentUserId, roleKey, setRoleKey,
     addQuote, addOrder, addClient, updateQuote, updateOrder,
@@ -1351,7 +1382,7 @@ const MODAL_REGISTRY = {
 // ---------- Notifications Popover ----------
 function NotificationsPopover({ onClose, setScreen }) {
   const { notifications, markNotificationRead, markAllNotificationsRead, openModal,
-          inboxAlerts, snoozeAlert, markInboxSeen } = useApp();
+          inboxAlerts, snoozeAlert, markInboxSeen, ackAssigned } = useApp();
   const [tab, setTab] = useS(inboxAlerts.length > 0 ? 'inbox' : 'activity');
   const [dismissOpen, setDismissOpen] = useS(null); // alert.id with open dismiss dropdown
 
@@ -1478,7 +1509,14 @@ function NotificationsPopover({ onClose, setScreen }) {
                                   )}
                                   {item.stage && !item.clientName && <span className="opacity-60">· {item.stage}</span>}
                                   {item.assignedBy && alert.type === 'ASSIGNED_QUOTES' && (
-                                    <span className="shrink-0 text-[10px] opacity-70">por {item.assignedBy}</span>
+                                    <>
+                                      <span className="shrink-0 text-[10px] opacity-70">por {item.assignedBy}</span>
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); ackAssigned(item.id); }}
+                                        className="shrink-0 ml-auto px-1.5 py-0.5 rounded bg-white/80 hover:bg-white text-[9px] font-semibold border border-current/20">
+                                        Listo ✓
+                                      </button>
+                                    </>
                                   )}
                                   {item.canRemind && alert.type === 'NO_RESPONSE' && (
                                     <button onClick={(e) => { e.stopPropagation(); setReminderItem(item); }}
