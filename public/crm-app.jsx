@@ -472,7 +472,7 @@ function ProfileModal({ user, onClose, onUpdated }) {
             {/* ── TAB NOTIFICACIONES ── */}
             {tab === 'notifs' && (() => {
               const role = user?.role || CrmAuth.getUser()?.role;
-              const isAdmin = role === 'ADMIN';
+              const isAdmin = ['ADMIN','DEVELOPER'].includes(role);
               const isSeller = role === 'VENDEDOR';
 
               const togglePref = async (section, key) => {
@@ -974,7 +974,7 @@ function Sidebar({ role, screen, setScreen, user, onProfileOpen, collapsed, onTo
     { id:'feedback', label:'Foro',        icon:'message-circle', sub:'Soporte interno' },
   ];
   const nav = role === 'admin' ? navAdmin : role === 'seller' ? navSeller : navLog;
-  const roleLabel = { ADMIN:'Administrador', VENDEDOR:'Vendedor', LOGISTICA:'Logística' };
+  const roleLabel = { DEVELOPER:'Desarrollador', ADMIN:'Administrador', VENDEDOR:'Vendedor', LOGISTICA:'Logística' };
 
   return (
     <aside
@@ -1161,7 +1161,7 @@ function Topbar({ user, roleKey, setRoleKey, setScreen }) {
   const _authUser = CrmAuth.getUser();
   const _jwt = decodeJwtPayload(CrmAuth.getToken());
   const loggedUser = _authUser || _jwt; // JWT como fallback si crm_user no está guardado
-  const isAdmin = loggedUser?.role === 'ADMIN';
+  const isAdmin = ['ADMIN','DEVELOPER'].includes(loggedUser?.role);
   // Para el badge: alertas inbox con items nuevos desde la última visita (o sin newCount = siempre nueva)
   const inboxNew = (inboxAlerts || []).filter(a => a.newCount === undefined || a.newCount > 0).length;
   const unreadCount = notifications.filter(n => !n.read).length + inboxNew;
@@ -1184,7 +1184,7 @@ function Topbar({ user, roleKey, setRoleKey, setScreen }) {
         </span>
         {loggedUser?.role && (
           <span className="text-[11px] text-ink-400 font-medium hidden sm:inline">
-            · {{ADMIN:'Administrador', VENDEDOR:'Vendedor', LOGISTICA:'Logística'}[loggedUser.role] || ''}
+            · {{DEVELOPER:'Desarrollador', ADMIN:'Administrador', VENDEDOR:'Vendedor', LOGISTICA:'Logística'}[loggedUser.role] || ''}
           </span>
         )}
       </div>

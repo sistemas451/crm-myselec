@@ -323,7 +323,7 @@ async function loadAllData() {
     ]);
 
     // Map users to frontend format
-    const roleMap = { ADMIN: 'Administrador', VENDEDOR: 'Vendedor', LOGISTICA: 'Logística' };
+    const roleMap = { DEVELOPER: 'Desarrollador', ADMIN: 'Administrador', VENDEDOR: 'Vendedor', LOGISTICA: 'Logística' };
     const mappedUsers = users.map(u => ({
       id: u.id,
       name: u.name,

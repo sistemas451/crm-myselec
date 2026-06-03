@@ -71,7 +71,7 @@ router.get('/inbox', authMiddleware, async (req, res) => {
       return until && new Date(until) > now;
     };
 
-    if (role === 'ADMIN') {
+    if (isAdmin(req.user)) {
       // 1. Solicitudes sin vendedor asignado
       if (sysUnassigned && userInappPref(prefs, 'unassigned_quotes')) {
         const unassigned = await prisma.quote.count({
@@ -519,7 +519,7 @@ router.post('/cron/weekly-report', authMiddleware, adminOnly, async (req, res) =
 
     // Paso 1: obtener admins
     const admins = await prisma.user.findMany({
-      where: { role: 'ADMIN', active: true },
+      where: { role: { in: ['ADMIN','DEVELOPER'] }, active: true },
       select: { email: true, name: true },
     });
     diag.step = 'admins'; diag.adminEmails = admins.map(a => a.email);

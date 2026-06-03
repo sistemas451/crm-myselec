@@ -175,7 +175,7 @@ router.post('/register', async (req, res) => {
     const notifyRegSetting = await prisma.appSetting.findUnique({ where: { key: 'notify_new_register' } });
     const shouldNotify = !notifyRegSetting || notifyRegSetting.value !== 'false';
     const admins = shouldNotify ? await prisma.user.findMany({
-      where: { role: 'ADMIN', active: true },
+      where: { role: { in: ['ADMIN','DEVELOPER'] }, active: true },
       select: { email: true, notificationPrefs: true },
     }) : [];
     // Filtrar admins que no desactivaron esta notificación en sus prefs personales

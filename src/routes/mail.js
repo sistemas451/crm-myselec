@@ -1,7 +1,12 @@
 const express = require('express');
-const { authMiddleware, requireRole } = require('../middleware/auth');
+const { authMiddleware, requireRole, isAdmin } = require('../middleware/auth');
 const { syncMails, syncAccount, listRecentMails } = require('../services/mailReader');
 const prisma = require('../db');
+
+const adminOrDev = (req, res, next) => {
+  if (!isAdmin(req.user)) return res.status(403).json({ error: 'Solo administradores' });
+  next();
+};
 
 const router = express.Router();
 
@@ -41,7 +46,7 @@ async function getMailAccounts() {
 }
 
 // ── POST /api/mail/sync — sincroniza TODAS las cuentas ───────────────────────
-router.post('/sync', authMiddleware, requireRole('ADMIN'), async (req, res) => {
+router.post('/sync', authMiddleware, adminOrDev, async (req, res) => {
   try {
     console.log('📧 Sync manual: todas las cuentas...');
     const result = await syncMails();
@@ -61,7 +66,7 @@ router.post('/sync', authMiddleware, requireRole('ADMIN'), async (req, res) => {
 });
 
 // ── POST /api/mail/sync/:email — sincroniza UNA cuenta específica ─────────────
-router.post('/sync/:email', authMiddleware, requireRole('ADMIN'), async (req, res) => {
+router.post('/sync/:email', authMiddleware, adminOrDev, async (req, res) => {
   try {
     const targetEmail = decodeURIComponent(req.params.email).toLowerCase();
     const accounts = await getMailAccounts();
@@ -83,7 +88,7 @@ router.post('/sync/:email', authMiddleware, requireRole('ADMIN'), async (req, re
 });
 
 // ── GET /api/mail/accounts — lista de cuentas configuradas con estado ─────────
-router.get('/accounts', authMiddleware, requireRole('ADMIN'), async (req, res) => {
+router.get('/accounts', authMiddleware, adminOrDev, async (req, res) => {
   try {
     const accounts = await getMailAccounts();
     const integrations = await prisma.emailIntegration.findMany();
@@ -104,7 +109,7 @@ router.get('/accounts', authMiddleware, requireRole('ADMIN'), async (req, res) =
 });
 
 // ── POST /api/mail/accounts — agregar cuenta via UI ──────────────────────────
-router.post('/accounts', authMiddleware, requireRole('ADMIN'), async (req, res) => {
+router.post('/accounts', authMiddleware, adminOrDev, async (req, res) => {
   try {
     const { user, password } = req.body;
     if (!user || !password) return res.status(400).json({ error: 'Email y contraseña requeridos' });
@@ -127,7 +132,7 @@ router.post('/accounts', authMiddleware, requireRole('ADMIN'), async (req, res) 
 });
 
 // ── DELETE /api/mail/accounts/:email — eliminar cuenta agregada via UI ────────
-router.delete('/accounts/:email', authMiddleware, requireRole('ADMIN'), async (req, res) => {
+router.delete('/accounts/:email', authMiddleware, adminOrDev, async (req, res) => {
   try {
     const email = decodeURIComponent(req.params.email).toLowerCase();
     const setting = await prisma.appSetting.findUnique({ where: { key: 'mail_accounts' } });
@@ -145,7 +150,7 @@ router.delete('/accounts/:email', authMiddleware, requireRole('ADMIN'), async (r
 });
 
 // ── POST /api/mail/test/:email — diagnóstico de conexión IMAP ────────────────
-router.post('/test/:email', authMiddleware, requireRole('ADMIN'), async (req, res) => {
+router.post('/test/:email', authMiddleware, adminOrDev, async (req, res) => {
   try {
     const targetEmail = decodeURIComponent(req.params.email).toLowerCase();
     const accounts    = await getMailAccounts();
