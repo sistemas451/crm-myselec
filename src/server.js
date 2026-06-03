@@ -282,19 +282,73 @@ app.post('/api/orders/:id/attachments', authMiddleware, upload.array('files', 10
             await prisma.order.update({ where: { id: req.params.id }, data: updateData });
           }
 
-          // Si hay presupuesto vinculado y el PDF trae breakdown, guardarlo en el Quote
-          // para que la vista comparativa tenga los datos correctos del NP
+          // Crear/actualizar Quote NOTA_PEDIDO con los ítems del PDF
+          // → necesario para que la vista comparativa (tab NP) tenga los datos
           if (linkedPresId && data.items?.length > 0) {
             try {
-              // Buscar si ya hay una NOTA_PEDIDO Quote vinculada a ese presupuesto
-              const npQuote = await prisma.quote.findFirst({
+              // ¿Ya existe una NP Quote vinculada al presupuesto?
+              let npQuote = await prisma.quote.findFirst({
                 where: { mailType: 'NOTA_PEDIDO', linkedQuoteId: linkedPresId },
+                include: { _count: { select: { items: true } } },
               });
+
               if (!npQuote) {
-                // Crear la NP como Quote para tener los ítems disponibles en la vista
-                // (solo si el upload viene con ítems parseados)
+                // Obtener datos del presupuesto para heredar cliente/vendedor
+                const pres = await prisma.quote.findUnique({
+                  where:  { id: linkedPresId },
+                  select: { clientId: true, sellerId: true },
+                });
+
+                // Código único para la NP Quote
+                const lastQ = await prisma.quote.findFirst({
+                  where:   { code: { startsWith: 'COT-2026' } },
+                  orderBy: { code: 'desc' },
+                  select:  { code: true },
+                });
+                const lastNum  = lastQ ? (parseInt(lastQ.code.split('-').pop()) || 0) : 0;
+                const npQCode  = `COT-2026-${String(lastNum + 1).padStart(3, '0')}`;
+
+                npQuote = await prisma.quote.create({
+                  data: {
+                    code:          npQCode,
+                    source:        'MANUAL',
+                    mailType:      'NOTA_PEDIDO',
+                    stage:         'np_enviada',
+                    flexxusCode:   data.npCode   || null,
+                    amount:        data.total    || null,
+                    subtotalNeto:  data.subtotalNeto       || null,
+                    ivaAmount:     data.ivaAmount          || null,
+                    totalPercepciones: data.totalPercepciones || null,
+                    clientId:      order?.clientId  || pres?.clientId  || null,
+                    sellerId:      order?.sellerId  || pres?.sellerId  || null,
+                    linkedQuoteId: linkedPresId,
+                    emailSubject:  `NP ${data.npCode || ''} — ${data.clientName || ''}`.trim(),
+                  },
+                });
+                console.log(`   ✅ NOTA_PEDIDO Quote creada: ${npQCode} ← presupuesto ${linkedPresId}`);
               }
-            } catch (_) {}
+
+              // Crear ítems si no existen aún
+              if (npQuote._count?.items === 0 || !npQuote._count) {
+                await prisma.quoteItem.createMany({
+                  data: data.items.map((item, i) => ({
+                    quoteId:     npQuote.id,
+                    sku:         item.sku         || null,
+                    description: (item.description || '').substring(0, 500),
+                    quantity:    item.quantity     || 0,
+                    unit:        item.unit         || null,
+                    unitPrice:   item.unitPrice    || null,
+                    total:       item.total        || null,
+                    accepted:    true,
+                    sortOrder:   i,
+                  })),
+                  skipDuplicates: true,
+                });
+                console.log(`   📋 ${data.items.length} ítems NP guardados en ${npQuote.id}`);
+              }
+            } catch (npErr) {
+              console.error('Error creando NOTA_PEDIDO Quote:', npErr.message);
+            }
           }
 
           npParsed = {

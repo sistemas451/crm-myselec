@@ -2389,52 +2389,93 @@ function OrderDetail({ code, onClose, canReassign }) {
               </div>
             </div>
           ) : (
-            /* ── NP manual (Order) o NP sin ítems: vista con checklist ── */
-            <div className="grid grid-cols-5 gap-4">
-              {/* Checklist */}
-              <div className="col-span-3 bg-white border border-line rounded-xl p-5">
-                <div className="text-sm font-semibold mb-3">Checklist de entrega</div>
-                <ul className="text-[13px] space-y-2">
-                  {checklistItems.map(([label, done]) => (
-                    <li key={label} className="flex items-center gap-2.5">
-                      <span className={cx('w-5 h-5 rounded-full inline-flex items-center justify-center shrink-0',
-                        done ? 'bg-emerald-500 text-white' : 'bg-ink-200')}>
-                        {done && <Icon name="check" size={11}/>}
-                      </span>
-                      <span className={done ? 'text-ink-900' : 'text-ink-400'}>{label}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              {/* Dirección */}
-              <div className="col-span-2 bg-white border border-line rounded-xl p-4">
-                <div className="text-[11px] uppercase tracking-wider text-ink-500 font-semibold mb-2">Dirección de entrega</div>
-                {cli ? (
-                  <>
-                    <div className="text-[13px] text-ink-900">{cli.address || '—'}</div>
-                    <div className="text-[12px] text-ink-500 mt-0.5">
-                      {[cli.city, cli.prov].filter(Boolean).join(' — ') || '—'}
-                    </div>
-                    <div className="mt-3 pt-3 border-t border-line text-[12px] space-y-1.5">
-                      <div className="flex justify-between gap-2">
-                        <span className="text-ink-500">Teléfono</span>
-                        <span className="mono">{cli.phone || '—'}</span>
+            /* ── NP manual (Order): checklist + ítems del presupuesto si hay ── */
+            <div className="space-y-4">
+              {/* Ítems del presupuesto vinculado */}
+              {presItems.length > 0 && (
+                <div className="bg-white border border-line rounded-xl p-5">
+                  <div className="text-sm font-semibold mb-3 text-ink-900">
+                    Ítems del presupuesto vinculado
+                    {orderDetail?.fromQuote?.code && (
+                      <span className="ml-2 text-[12px] font-normal text-ink-400 mono">({orderDetail.fromQuote.code})</span>
+                    )}
+                  </div>
+                  <table className="w-full text-[12.5px]">
+                    <thead><tr className="text-left text-ink-500">
+                      <th className="font-semibold pb-2">SKU</th>
+                      <th className="font-semibold pb-2">Descripción</th>
+                      <th className="font-semibold pb-2 text-right">Cant.</th>
+                      <th className="font-semibold pb-2 text-right">P. Unit.</th>
+                      <th className="font-semibold pb-2 text-right">Total</th>
+                    </tr></thead>
+                    <tbody>
+                      {presItems.filter(i => i.accepted !== false).map((it, idx) => (
+                        <tr key={it.id || idx} className="border-t border-line">
+                          <td className="py-2 mono text-ink-700"><CatalogBadge sku={it.sku} description={it.description}/></td>
+                          <td className="py-2">{it.description}</td>
+                          <td className="py-2 mono text-right">{it.quantity}</td>
+                          <td className="py-2 mono text-right">{it.unitPrice != null ? it.unitPrice.toLocaleString('es-AR') : '—'}</td>
+                          <td className="py-2 mono text-right font-semibold">{it.total != null ? it.total.toLocaleString('es-AR') : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="border-t border-line">
+                        <td colSpan="4" className="text-right pt-2 font-semibold text-[12px] text-ink-500">Total presupuesto</td>
+                        <td className="text-right pt-2 mono font-bold text-[13px]">
+                          {presItems.filter(i=>i.accepted!==false).reduce((s,i)=>s+(i.total||0),0).toLocaleString('es-AR',{minimumFractionDigits:2})}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              )}
+              <div className="grid grid-cols-5 gap-4">
+                {/* Checklist */}
+                <div className="col-span-3 bg-white border border-line rounded-xl p-5">
+                  <div className="text-sm font-semibold mb-3">Checklist de entrega</div>
+                  <ul className="text-[13px] space-y-2">
+                    {checklistItems.map(([label, done]) => (
+                      <li key={label} className="flex items-center gap-2.5">
+                        <span className={cx('w-5 h-5 rounded-full inline-flex items-center justify-center shrink-0',
+                          done ? 'bg-emerald-500 text-white' : 'bg-ink-200')}>
+                          {done && <Icon name="check" size={11}/>}
+                        </span>
+                        <span className={done ? 'text-ink-900' : 'text-ink-400'}>{label}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                {/* Dirección */}
+                <div className="col-span-2 bg-white border border-line rounded-xl p-4">
+                  <div className="text-[11px] uppercase tracking-wider text-ink-500 font-semibold mb-2">Dirección de entrega</div>
+                  {cli ? (
+                    <>
+                      <div className="text-[13px] text-ink-900">{cli.address || '—'}</div>
+                      <div className="text-[12px] text-ink-500 mt-0.5">
+                        {[cli.city, cli.prov].filter(Boolean).join(' — ') || '—'}
                       </div>
-                      <div className="flex justify-between gap-2">
-                        <span className="text-ink-500">Email</span>
-                        <span className="truncate max-w-[140px]">{cli.email || '—'}</span>
-                      </div>
-                      {cli.zone && (
+                      <div className="mt-3 pt-3 border-t border-line text-[12px] space-y-1.5">
                         <div className="flex justify-between gap-2">
-                          <span className="text-ink-500">Zona</span>
-                          <span>{cli.zone}</span>
+                          <span className="text-ink-500">Teléfono</span>
+                          <span className="mono">{cli.phone || '—'}</span>
                         </div>
-                      )}
-                    </div>
-                  </>
-                ) : (
-                  <div className="text-[13px] text-ink-400">Sin datos de cliente</div>
-                )}
+                        <div className="flex justify-between gap-2">
+                          <span className="text-ink-500">Email</span>
+                          <span className="truncate max-w-[140px]">{cli.email || '—'}</span>
+                        </div>
+                        {cli.zone && (
+                          <div className="flex justify-between gap-2">
+                            <span className="text-ink-500">Zona</span>
+                            <span>{cli.zone}</span>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="text-[13px] text-ink-400">Sin datos de cliente</div>
+                  )}
+                </div>
               </div>
             </div>
           )}
