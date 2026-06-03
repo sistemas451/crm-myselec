@@ -237,17 +237,17 @@ async function syncAccount(account) {
         // Fuente 1: etiqueta CRM — TODOS (la etiqueta ya es filtro fuerte, dedup por messageId)
         const labelMails = await fetchRawFromFolder(imap, CRM_LABEL, ['ALL'], false);
 
-        // Fuente 2: All Mail con "crm" en asunto — desde lastSyncAt o lookbackDays
-        const subjectMails = await fetchRawFromFolder(imap, GMAIL_ALL, [['SINCE', inboxSince], ['SUBJECT', 'crm']], true);
+        // Fuente 2: All Mail por prefijo de asunto — DESACTIVADA (causa falsos positivos)
+        // const subjectMails = await fetchRawFromFolder(imap, GMAIL_ALL, [['SINCE', inboxSince], ['SUBJECT', 'crm']], true);
 
         // Fuente 3: Enviados — desde lastSyncAt o lookbackDays
         const sentMails = await fetchRawFromFolder(imap, GMAIL_SENT, [['SINCE', sentSince]], false, true);
 
         // ── Mejora 1: inyectar accountEmail en cada mailData ─────────────────
-        const allMails = [...labelMails, ...subjectMails, ...sentMails]
+        const allMails = [...labelMails, ...sentMails]
           .map(m => ({ ...m, accountEmail: account.user }));
 
-        console.log(`📧 [${tag}] Total: ${allMails.length} (label: ${labelMails.length}, asunto: ${subjectMails.length}, enviados: ${sentMails.length})`);
+        console.log(`📧 [${tag}] Total: ${allMails.length} (label: ${labelMails.length}, enviados: ${sentMails.length})`);
 
         // Procesar secuencialmente para evitar race condition en nextCode()
         const successfulMails = []; // mejora 6: mails que crearon quote → para etiquetar
