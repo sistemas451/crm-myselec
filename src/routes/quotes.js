@@ -148,7 +148,7 @@ router.post('/', authMiddleware, async (req, res) => {
         amount: amount ? parseFloat(amount) : null,
         source: source || 'MANUAL',
         mailType: 'PRESUPUESTO',
-        stage: sellerId ? 'asignada' : 'recibida',
+        stage: 'enviado',
         deadline: deadline ? new Date(deadline) : null,
       },
       include: {
