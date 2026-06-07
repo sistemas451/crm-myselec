@@ -5479,4 +5479,4 @@ function FeedbackView() {
   />;
 }
 
-Object.assign(window, { MySalesView, LogisticsView, Clients, Articles, Team, Config, PageHead, Comparativa, ArticleFormModal, ClientImportModal, FeedbackView });
+Object.assign(window, { MySalesView, RejectionAnalysis, LogisticsView, Clients, Articles, Team, Config, PageHead, Comparativa, ArticleFormModal, ClientImportModal, FeedbackView });

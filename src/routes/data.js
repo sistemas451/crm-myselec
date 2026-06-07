@@ -400,7 +400,7 @@ router.get('/rejections-detail', authMiddleware, async (req, res) => {
     const rejected = await prisma.quote.findMany({
       where: { ...base, stage: 'rechazada' },
       include: {
-        client: { select: { name: true, code: true, city: true, prov: true } },
+        client: { select: { name: true, code: true, city: true, province: true } },
         seller: { select: { name: true, id: true } },
         items: { select: { sku: true, description: true, quantity: true, unitPrice: true, total: true }, orderBy: { sortOrder: 'asc' } },
       },
@@ -415,7 +415,6 @@ router.get('/rejections-detail', authMiddleware, async (req, res) => {
       sellerName:   q.seller?.name || '—',
       sellerId:     q.seller?.id || null,
       monto:        q.amount,
-      moneda:       q.currency || 'USD',
       rejectReason: q.rejectReason || 'Sin especificar',
       rejectNotes:  q.rejectNotes || '',
       flexxus:      q.flexxusCode || '',
