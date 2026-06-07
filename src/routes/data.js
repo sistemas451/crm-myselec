@@ -113,6 +113,33 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     ]);
     const conversionRate = totalInPeriod > 0 ? Math.round((accepted / totalInPeriod) * 100) : 0;
 
+    // ── KPI: Tiempo de respuesta ──────────────────────────────────────────
+    // Cotizaciones que ya pasaron de 'recibida' → primera actividad = tiempo de respuesta
+    const respondedQuotes = await prisma.quote.findMany({
+      where: { ...base, stage: { notIn: ['recibida'] } },
+      select: {
+        createdAt: true,
+        activities: {
+          where: { action: { in: ['STAGE_CHANGE', 'ASSIGNED'] } },
+          orderBy: { createdAt: 'asc' },
+          take: 1,
+          select: { createdAt: true },
+        },
+      },
+    });
+    const responseTimes = respondedQuotes
+      .filter(q => q.activities.length > 0)
+      .map(q => (q.activities[0].createdAt.getTime() - q.createdAt.getTime()) / (1000 * 60 * 60)); // horas
+    const avgResponseHours = responseTimes.length > 0
+      ? Math.round(responseTimes.reduce((s, h) => s + h, 0) / responseTimes.length)
+      : null;
+
+    // Cotizaciones en 'recibida' por más de 24h (pendientes de atención)
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const pendingAttention = await prisma.quote.count({
+      where: { ...base, stage: 'recibida', createdAt: { lt: oneDayAgo } },
+    });
+
     res.json({
       cotizacionesActivas:  totalQuotes,
       presupuestosEnviados: sentQuotes,
@@ -121,6 +148,8 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
       montoTotal:           totalAmount._sum.amount    || 0,
       montoConfirmado:      montoConfirmado._sum.amount || 0,
       tasaConversion:       conversionRate,
+      avgResponseHours,
+      pendingAttention,
     });
   } catch (err) {
     res.status(500).json({ error: 'Error' });

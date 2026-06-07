@@ -1285,6 +1285,15 @@ function Dashboard({ setScreen }) {
   const kv  = (val) => kpisLoading ? '...' : (val ?? '—');
   const kMoney = (val) => kpisLoading ? '...' : (val ? `$ ${(val / 1000).toFixed(0)}k` : '—');
 
+  const fmtHours = (h) => {
+    if (h == null) return '—';
+    if (h < 1) return '<1h';
+    if (h < 24) return `${h}h`;
+    const d = Math.floor(h / 24);
+    const rem = h % 24;
+    return rem > 0 ? `${d}d ${rem}h` : `${d}d`;
+  };
+
   const kpis = [
     { label: 'Cotizaciones activas',  value: kv(kpisData?.cotizacionesActivas) },
     { label: 'Presupuestos enviados', value: kv(kpisData?.presupuestosEnviados) },
@@ -1293,6 +1302,9 @@ function Dashboard({ setScreen }) {
     { label: 'Monto cotizado',        value: kMoney(kpisData?.montoTotal), sub: 'presupuestos' },
     { label: 'Monto confirmado',      value: kMoney(kpisData?.montoConfirmado), sub: 'notas de pedido', highlight: true },
     { label: 'Tasa de conversión',    value: kpisLoading ? '...' : (kpisData?.tasaConversion != null ? `${Number(kpisData.tasaConversion).toFixed(0)}%` : '—') },
+    { label: 'Tiempo de respuesta',   value: kpisLoading ? '...' : fmtHours(kpisData?.avgResponseHours), sub: 'promedio recibida → acción', icon: 'clock' },
+    { label: 'Pendientes +24h',       value: kv(kpisData?.pendingAttention), sub: 'sin atender', icon: 'alert-triangle',
+      warn: !kpisLoading && kpisData?.pendingAttention > 0 },
   ];
 
   // ── Vendedores disponibles para el filtro ───────────────────────────────────
@@ -1385,10 +1397,16 @@ function Dashboard({ setScreen }) {
         {/* ── KPI cards ──────────────────────────────────────────────────── */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
           {kpis.map((k,i) => (
-            <div key={i} className={`bg-white rounded-xl border p-4 shadow-card ${k.highlight ? 'border-blue-200 bg-blue-50' : 'border-line'}`}>
-              <div className="text-[11px] uppercase tracking-wider text-ink-500 font-semibold leading-tight">{k.label}</div>
-              <div className={`text-2xl font-bold mt-2 ${k.highlight ? 'text-blue-700' : 'text-ink-900'}`}>{k.value}</div>
-              {k.sub && <div className="text-[10px] text-ink-400 mt-0.5">{k.sub}</div>}
+            <div key={i} className={`bg-white rounded-xl border p-4 shadow-card ${
+              k.warn ? 'border-amber-300 bg-amber-50' :
+              k.highlight ? 'border-blue-200 bg-blue-50' : 'border-line'
+            }`}>
+              <div className={`text-[11px] uppercase tracking-wider font-semibold leading-tight ${k.warn ? 'text-amber-700' : 'text-ink-500'}`}>{k.label}</div>
+              <div className={`text-2xl font-bold mt-2 ${
+                k.warn ? 'text-amber-700' :
+                k.highlight ? 'text-blue-700' : 'text-ink-900'
+              }`}>{k.value}</div>
+              {k.sub && <div className={`text-[10px] mt-0.5 ${k.warn ? 'text-amber-600' : 'text-ink-400'}`}>{k.sub}</div>}
             </div>
           ))}
         </div>
