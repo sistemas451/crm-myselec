@@ -1540,7 +1540,6 @@ function ExportModal({ exportType }) {
   const [sellerId, setSellerId] = useS('');
   const [from, setFrom] = useS('');
   const [toDate, setToDate] = useS('');
-  const [style, setStyle] = useS('modern');
 
   const TYPES = {
     cotizaciones: { label: 'Cotizaciones', icon: 'clipboard-list' },
@@ -1554,7 +1553,6 @@ function ExportModal({ exportType }) {
     if (sellerId) params.sellerId = sellerId;
     if (from)     params.from = from;
     if (toDate)   params.to = toDate;
-    if (style === 'executive') params.style = 'executive';
     const url = CrmApi.exportPdfUrl(exportType, params);
     // Abrir con token en header via fetch + blob
     const token = CrmAuth.getToken();
@@ -1583,7 +1581,7 @@ function ExportModal({ exportType }) {
       if (sellerId) filters.sellerId = sellerId;
       if (from)     filters.from = from;
       if (toDate)   filters.to = toDate;
-      await CrmApi.sendExportMail({ type: exportType, to: to.trim(), cc: cc.trim() || null, subject: subject.trim() || null, body: body.trim() || null, filters, style: style === 'executive' ? 'executive' : undefined });
+      await CrmApi.sendExportMail({ type: exportType, to: to.trim(), cc: cc.trim() || null, subject: subject.trim() || null, body: body.trim() || null, filters });
       pushToast('Reporte enviado por mail correctamente');
       closeModal();
     } catch (err) {
@@ -1616,24 +1614,6 @@ function ExportModal({ exportType }) {
             className={cx('flex-1 flex items-center justify-center gap-1.5 py-2 rounded-md text-[12px] font-medium transition-all',
               mode === m.id ? 'bg-white shadow-sm text-ink-900 border border-line' : 'text-ink-500 hover:text-ink-700')}>
             <Icon name={m.icon} size={13}/>{m.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Style selector */}
-      <div className="flex gap-2 mb-4">
-        {[
-          { id: 'modern',    label: 'Horizontal', desc: 'Apaisado, más columnas', icon: 'layout' },
-          { id: 'executive', label: 'Vertical',   desc: 'Ejecutivo, más compacto', icon: 'file-text' },
-        ].map(s => (
-          <button key={s.id} onClick={() => setStyle(s.id)}
-            className={cx('flex-1 flex items-center gap-2.5 p-2.5 rounded-lg border transition-all text-left',
-              style === s.id ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-200' : 'border-line bg-surface hover:border-ink-300')}>
-            <Icon name={s.icon} size={16} className={style === s.id ? 'text-blue-600' : 'text-ink-400'}/>
-            <div>
-              <div className={cx('text-[12px] font-semibold', style === s.id ? 'text-blue-700' : 'text-ink-700')}>{s.label}</div>
-              <div className="text-[10px] text-ink-400">{s.desc}</div>
-            </div>
           </button>
         ))}
       </div>
