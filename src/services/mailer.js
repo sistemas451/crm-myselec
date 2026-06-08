@@ -123,61 +123,52 @@ function toArray(to) {
 }
 
 async function sendMail({ to, cc, subject, html, text, replyTo, attachments }) {
-  const from       = `MySelec CRM <${GMAIL_USER}>`;
   const recipients = toArray(to);
 
   // 1) Intentar Gmail API (preferido)
   if (process.env.GMAIL_CLIENT_ID && process.env.GMAIL_REFRESH_TOKEN) {
     try {
       const gmail = getGmailClient();
+      const from  = `MySelec CRM <${GMAIL_USER}>`;
       const mime  = buildMime({ from, to: recipients, cc, subject, html, text, replyTo, attachments });
       const raw   = Buffer.from(mime).toString('base64url');
       await gmail.users.messages.send({ userId: 'me', requestBody: { raw } });
       return; // OK — enviado por Gmail API
     } catch (err) {
-      console.warn('⚠️  Gmail API falló:', err.message, '— intentando SMTP fallback…');
+      console.warn('⚠️  Gmail API falló:', err.message, '— intentando Resend fallback…');
     }
   }
 
-  // 2) Fallback: SMTP directo (usa MAIL_USER + MAIL_PASSWORD)
-  if (!process.env.MAIL_USER || !process.env.MAIL_PASSWORD) {
-    console.warn('⚠️  Mailer: ni Gmail API ni SMTP configurados — mail omitido.');
+  // 2) Fallback: Resend API (HTTP, no SMTP — funciona en Railway)
+  if (!process.env.RESEND_API_KEY) {
+    console.warn('⚠️  Mailer: ni Gmail API ni RESEND_API_KEY configurados — mail omitido.');
     return;
   }
 
-  const nodemailer = require('nodemailer');
-  const { smtpConfigForEmail } = require('./mailSender');
-  const smtp = smtpConfigForEmail(process.env.MAIL_USER);
-  const transport = nodemailer.createTransport({
-    host: smtp.host, port: smtp.port, secure: smtp.secure,
-    auth: { user: process.env.MAIL_USER, pass: process.env.MAIL_PASSWORD },
-    tls:  { rejectUnauthorized: false },
-    connectionTimeout: 20000,
-    greetingTimeout:   20000,
-    socketTimeout:     60000,
-  });
+  const { Resend } = require('resend');
+  const resend = new Resend(process.env.RESEND_API_KEY);
 
-  const mailOpts = {
-    from,
-    to: recipients.join(', '),
+  const payload = {
+    from: `MySelec CRM <${process.env.RESEND_FROM || 'onboarding@resend.dev'}>`,
+    to:   recipients,
     subject,
-    ...(html && { html }),
-    ...(text && { text }),
-    ...(replyTo && { replyTo }),
   };
-  if (cc) mailOpts.cc = cc;
+  if (html) payload.html = html;
+  if (text) payload.text = text;
+  if (cc)   payload.cc   = toArray(cc);
+  if (replyTo) payload.reply_to = replyTo;
 
   if (attachments?.length) {
-    const path = require('path');
-    mailOpts.attachments = attachments.map(a => ({
-      filename:    a.filename || path.basename(a.path),
-      path:        a.path,
-      contentType: a.mimeType,
+    const fs = require('fs');
+    payload.attachments = attachments.map(a => ({
+      filename: a.filename || require('path').basename(a.path),
+      content:  fs.readFileSync(a.path),
     }));
   }
 
-  await transport.sendMail(mailOpts);
-  console.log('✅ Mail enviado por SMTP fallback a', recipients.join(', '));
+  const { error } = await resend.emails.send(payload);
+  if (error) throw new Error(`Resend error: ${error.message}`);
+  console.log('✅ Mail enviado por Resend fallback a', recipients.join(', '));
 }
 
 async function sendPasswordReset(toEmail, resetUrl) {
@@ -229,27 +220,21 @@ async function verifySmtp() {
     }
   }
 
-  // Probar SMTP fallback
-  if (process.env.MAIL_USER && process.env.MAIL_PASSWORD) {
+  // Probar Resend fallback
+  if (process.env.RESEND_API_KEY) {
     try {
-      const nodemailer = require('nodemailer');
-      const { smtpConfigForEmail } = require('./mailSender');
-      const smtp = smtpConfigForEmail(process.env.MAIL_USER);
-      const transport = nodemailer.createTransport({
-        host: smtp.host, port: smtp.port, secure: smtp.secure,
-        auth: { user: process.env.MAIL_USER, pass: process.env.MAIL_PASSWORD },
-        tls:  { rejectUnauthorized: false },
-        connectionTimeout: 10000,
-      });
-      await transport.verify();
-      result.smtpFallback = true;
-      if (!result.provider) { result.provider = 'smtp'; result.user = process.env.MAIL_USER; }
+      const { Resend } = require('resend');
+      const resend = new Resend(process.env.RESEND_API_KEY);
+      // Resend no tiene un verify(), pero si la key es válida no tira error en el constructor
+      result.resendFallback = true;
+      result.resendFrom = process.env.RESEND_FROM || 'onboarding@resend.dev';
+      if (!result.provider) { result.provider = 'resend'; result.user = result.resendFrom; }
     } catch (err) {
-      result.smtpError = err.message;
+      result.resendError = err.message;
     }
   }
 
-  if (!result.provider) throw new Error('Ni Gmail API ni SMTP funcionan. Revise la configuración.');
+  if (!result.provider) throw new Error('Ni Gmail API ni Resend API configurados. Revise la configuración.');
   return result;
 }
 
