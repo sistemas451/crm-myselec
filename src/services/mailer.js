@@ -141,8 +141,7 @@ async function sendMail({ to, cc, subject, html, text, replyTo, attachments }) {
 
   // 2) Fallback: Resend API (HTTP, no SMTP — funciona en Railway)
   if (!process.env.RESEND_API_KEY) {
-    console.warn('⚠️  Mailer: ni Gmail API ni RESEND_API_KEY configurados — mail omitido.');
-    return;
+    throw new Error('No se pudo enviar el email: Gmail API falló y RESEND_API_KEY no está configurado.');
   }
 
   const { Resend } = require('resend');
