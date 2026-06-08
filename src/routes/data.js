@@ -205,7 +205,7 @@ router.get('/charts/stages', authMiddleware, async (req, res) => {
     };
     const result = await Promise.all(stages.map(async (s) => {
       const value = await prisma.quote.count({ where: { ...base, stage: s.stageKey } });
-      return { name: s.label, value, color: COLORS[s.tone] || '#94A3B8', stageKey: s.stageKey };
+      return { name: s.label, value, color: COLORS[s.tone] || '#939598', stageKey: s.stageKey };
     }));
     const total = result.reduce((a, b) => a + b.value, 0);
     res.json({ stages: result.filter(r => r.value > 0), total });

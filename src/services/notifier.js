@@ -364,7 +364,7 @@ async function runWeeklyReport() {
     const deltaHtml = (cur, prev) => {
       if (!prev) return cur > 0 ? '<span style="color:#22C55E">+' + cur + '</span>' : '—';
       const d = cur - prev;
-      if (d === 0) return '<span style="color:#94A3B8">↔ igual</span>';
+      if (d === 0) return '<span style="color:#939598">↔ igual</span>';
       return d > 0
         ? '<span style="color:#22C55E">↑ +' + d + '</span>'
         : '<span style="color:#EF4444">↓ ' + d + '</span>';
