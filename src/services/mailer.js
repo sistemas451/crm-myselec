@@ -123,18 +123,61 @@ function toArray(to) {
 }
 
 async function sendMail({ to, cc, subject, html, text, replyTo, attachments }) {
-  if (!process.env.GMAIL_CLIENT_ID || !process.env.GMAIL_REFRESH_TOKEN) {
-    console.warn('⚠️  Mailer: GMAIL_CLIENT_ID/GMAIL_REFRESH_TOKEN no configurados, mail omitido.');
+  const from       = `MySelec CRM <${GMAIL_USER}>`;
+  const recipients = toArray(to);
+
+  // 1) Intentar Gmail API (preferido)
+  if (process.env.GMAIL_CLIENT_ID && process.env.GMAIL_REFRESH_TOKEN) {
+    try {
+      const gmail = getGmailClient();
+      const mime  = buildMime({ from, to: recipients, cc, subject, html, text, replyTo, attachments });
+      const raw   = Buffer.from(mime).toString('base64url');
+      await gmail.users.messages.send({ userId: 'me', requestBody: { raw } });
+      return; // OK — enviado por Gmail API
+    } catch (err) {
+      console.warn('⚠️  Gmail API falló:', err.message, '— intentando SMTP fallback…');
+    }
+  }
+
+  // 2) Fallback: SMTP directo (usa MAIL_USER + MAIL_PASSWORD)
+  if (!process.env.MAIL_USER || !process.env.MAIL_PASSWORD) {
+    console.warn('⚠️  Mailer: ni Gmail API ni SMTP configurados — mail omitido.');
     return;
   }
-  const gmail = getGmailClient();
-  const from  = `MySelec CRM <${GMAIL_USER}>`;
-  const mime  = buildMime({ from, to: toArray(to), cc, subject, html, text, replyTo, attachments });
-  const raw   = Buffer.from(mime).toString('base64url');
-  await gmail.users.messages.send({
-    userId: 'me',
-    requestBody: { raw },
+
+  const nodemailer = require('nodemailer');
+  const { smtpConfigForEmail } = require('./mailSender');
+  const smtp = smtpConfigForEmail(process.env.MAIL_USER);
+  const transport = nodemailer.createTransport({
+    host: smtp.host, port: smtp.port, secure: smtp.secure,
+    auth: { user: process.env.MAIL_USER, pass: process.env.MAIL_PASSWORD },
+    tls:  { rejectUnauthorized: false },
+    connectionTimeout: 20000,
+    greetingTimeout:   20000,
+    socketTimeout:     60000,
   });
+
+  const mailOpts = {
+    from,
+    to: recipients.join(', '),
+    subject,
+    ...(html && { html }),
+    ...(text && { text }),
+    ...(replyTo && { replyTo }),
+  };
+  if (cc) mailOpts.cc = cc;
+
+  if (attachments?.length) {
+    const path = require('path');
+    mailOpts.attachments = attachments.map(a => ({
+      filename:    a.filename || path.basename(a.path),
+      path:        a.path,
+      contentType: a.mimeType,
+    }));
+  }
+
+  await transport.sendMail(mailOpts);
+  console.log('✅ Mail enviado por SMTP fallback a', recipients.join(', '));
 }
 
 async function sendPasswordReset(toEmail, resetUrl) {
@@ -170,13 +213,44 @@ async function sendNotification({ toEmails, subject, body, ctx }) {
 
 // Verifica la configuración — útil para diagnóstico desde el admin panel
 async function verifySmtp() {
-  if (!process.env.GMAIL_CLIENT_ID || !process.env.GMAIL_REFRESH_TOKEN) {
-    throw new Error('GMAIL_CLIENT_ID/GMAIL_REFRESH_TOKEN no configurados');
+  const result = { provider: null, user: null, gmailApi: false, smtpFallback: false };
+
+  // Probar Gmail API
+  if (process.env.GMAIL_CLIENT_ID && process.env.GMAIL_REFRESH_TOKEN) {
+    try {
+      const gmail = getGmailClient();
+      const { data } = await gmail.users.getProfile({ userId: 'me' });
+      result.provider = 'gmail-api';
+      result.user = data.emailAddress;
+      result.gmailApi = true;
+      result.messagesTotal = data.messagesTotal;
+    } catch (err) {
+      result.gmailApiError = err.message;
+    }
   }
-  const gmail = getGmailClient();
-  // Obtiene el perfil del usuario para verificar que el token funcione
-  const { data } = await gmail.users.getProfile({ userId: 'me' });
-  return { provider: 'gmail-api', user: data.emailAddress, messagesTotal: data.messagesTotal };
+
+  // Probar SMTP fallback
+  if (process.env.MAIL_USER && process.env.MAIL_PASSWORD) {
+    try {
+      const nodemailer = require('nodemailer');
+      const { smtpConfigForEmail } = require('./mailSender');
+      const smtp = smtpConfigForEmail(process.env.MAIL_USER);
+      const transport = nodemailer.createTransport({
+        host: smtp.host, port: smtp.port, secure: smtp.secure,
+        auth: { user: process.env.MAIL_USER, pass: process.env.MAIL_PASSWORD },
+        tls:  { rejectUnauthorized: false },
+        connectionTimeout: 10000,
+      });
+      await transport.verify();
+      result.smtpFallback = true;
+      if (!result.provider) { result.provider = 'smtp'; result.user = process.env.MAIL_USER; }
+    } catch (err) {
+      result.smtpError = err.message;
+    }
+  }
+
+  if (!result.provider) throw new Error('Ni Gmail API ni SMTP funcionan. Revise la configuración.');
+  return result;
 }
 
 module.exports = { sendMail, sendPasswordReset, sendNotification, renderTemplate, verifySmtp };
