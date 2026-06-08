@@ -12,8 +12,11 @@ function StageDot({ tone }) {
 
 function EmptyCol() {
   return (
-    <div className="text-[11.5px] text-ink-400 py-10 text-center border border-dashed border-line rounded-lg">
-      Sin tarjetas en esta etapa
+    <div className="flex flex-col items-center justify-center py-10 text-center border border-dashed border-line/70 rounded-xl">
+      <div className="w-9 h-9 rounded-lg bg-surface flex items-center justify-center mb-2">
+        <Icon name="inbox" size={16} className="text-ink-300"/>
+      </div>
+      <div className="text-[11.5px] text-ink-400">Sin tarjetas</div>
     </div>
   );
 }

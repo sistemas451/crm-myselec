@@ -1774,9 +1774,12 @@ function NotificationsPopover({ onClose, setScreen }) {
           {tab === 'inbox' && (
             <>
               {inboxAlerts.length === 0 ? (
-                <div className="py-10 text-center">
-                  <div className="text-2xl mb-2">✨</div>
-                  <div className="text-ink-500 text-[12px]">Todo al día, sin pendientes</div>
+                <div className="py-12 text-center">
+                  <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center mx-auto mb-3">
+                    <Icon name="check-circle" size={20} className="text-emerald-500"/>
+                  </div>
+                  <div className="text-ink-700 text-[13px] font-medium">Todo al día</div>
+                  <div className="text-ink-400 text-[11px] mt-0.5">Sin pendientes por atender</div>
                 </div>
               ) : (
                 <div className="p-3 space-y-2">
@@ -1875,7 +1878,13 @@ function NotificationsPopover({ onClose, setScreen }) {
           {tab === 'activity' && (
             <>
               {notifications.length === 0 && (
-                <div className="py-10 text-center text-ink-500 text-[12px]">Sin actividad reciente</div>
+                <div className="py-12 text-center">
+                  <div className="w-10 h-10 rounded-full bg-surface flex items-center justify-center mx-auto mb-3">
+                    <Icon name="bell-off" size={20} className="text-ink-300"/>
+                  </div>
+                  <div className="text-ink-700 text-[13px] font-medium">Sin actividad</div>
+                  <div className="text-ink-400 text-[11px] mt-0.5">Las notificaciones aparecerán aquí</div>
+                </div>
               )}
               {notifications.map(n => (
                 <button key={n.id}
@@ -1885,8 +1894,8 @@ function NotificationsPopover({ onClose, setScreen }) {
                     if (n.ref?.kind==='quote') openModal('quoteDetail', { code: n.ref.code });
                     if (n.ref?.kind==='order') openModal('orderDetail', { code: n.ref.code });
                   }}
-                  className={cx('w-full text-left px-4 py-3 border-b border-line flex gap-3 items-start hover:bg-surface transition-colors',
-                    !n.read && 'bg-brandSoft/30')}>
+                  className={cx('w-full text-left px-4 py-3 border-b border-line/60 flex gap-3 items-start transition-all duration-150',
+                    !n.read ? 'bg-brandSoft/20 hover:bg-brandSoft/35' : 'hover:bg-surface')}>
                   <span className={cx('w-2 h-2 rounded-full mt-1.5 shrink-0', toneClass[n.kind])}/>
                   <div className="flex-1 min-w-0">
                     <div className="text-[13px] leading-snug text-ink-900">{n.text}</div>

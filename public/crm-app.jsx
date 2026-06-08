@@ -192,6 +192,7 @@ function App() {
       <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
         <Topbar user={displayUser} roleKey={roleKey} setRoleKey={setRoleKey} setScreen={setScreen}/>
         <main className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden">
+          <div key={screen} className="animate-fade-in">
           {screen === 'dashboard'  && <Dashboard setScreen={setScreen}/>}
           {screen === 'quotes'     && <KanbanQuotes onOpen={(c)=>openDetail(c,'quote')}/>}
           {screen === 'orders'     && <KanbanOrders onOpen={(c,k)=>openDetail(c,k||'order')}/>}
@@ -205,6 +206,7 @@ function App() {
           {screen === 'team'        && <Team/>}
           {screen === 'config'      && <Config/>}
           {screen === 'feedback'    && <FeedbackView/>}
+          </div>
         </main>
       </div>
     </div>
@@ -1036,7 +1038,7 @@ function Sidebar({ role, screen, setScreen, user, onProfileOpen, collapsed, onTo
               title={collapsed ? n.label : undefined}
               className={cx(
                 'w-full flex items-center rounded-lg text-[13px] relative',
-                'transition-all duration-200',
+                'transition-all duration-200 active:scale-[0.97]',
                 collapsed ? 'justify-center px-0 py-2.5' : 'gap-3 px-3 py-[9px] text-left',
                 isActive
                   ? 'bg-white/[0.12] text-white font-medium'
@@ -1076,7 +1078,7 @@ function Sidebar({ role, screen, setScreen, user, onProfileOpen, collapsed, onTo
           onClick={onToggle}
           title={collapsed ? 'Expandir panel' : 'Colapsar panel'}
           className={cx(
-            'w-full flex items-center rounded-lg py-2 mb-1.5 transition-all duration-200 text-white/35 hover:text-white/65 hover:bg-white/[0.05]',
+            'w-full flex items-center rounded-lg py-2 mb-1.5 transition-all duration-200 active:scale-[0.97] text-white/35 hover:text-white/65 hover:bg-white/[0.05]',
             collapsed ? 'justify-center' : 'gap-2.5 px-3'
           )}
         >
@@ -1088,7 +1090,7 @@ function Sidebar({ role, screen, setScreen, user, onProfileOpen, collapsed, onTo
         <button onClick={onProfileOpen}
           title={collapsed ? (user?.name || '') : undefined}
           className={cx(
-            'w-full flex items-center rounded-xl py-2.5 transition-all duration-200 group hover:bg-white/[0.06]',
+            'w-full flex items-center rounded-xl py-2.5 transition-all duration-200 active:scale-[0.97] group hover:bg-white/[0.06]',
             collapsed ? 'justify-center px-0' : 'gap-3 px-3 text-left'
           )}
         >
@@ -1298,9 +1300,10 @@ function Dashboard({ setScreen }) {
     }).catch(() => setChartsLoading(false));
   }, [filters.sellerId, filters.from, filters.to]);
 
-  const kv  = (val) => kpisLoading ? '...' : (val ?? '—');
+  const skelVal = () => <span className="skel inline-block h-6 w-16 rounded"/>;
+  const kv  = (val) => kpisLoading ? skelVal() : (val ?? '—');
   const kMoney = (usd, ars) => {
-    if (kpisLoading) return '...';
+    if (kpisLoading) return skelVal();
     const parts = [];
     if (usd) parts.push(`U$S ${(usd / 1000).toFixed(0)}k`);
     if (ars) parts.push(`AR$ ${(ars / 1000).toFixed(0)}k`);
@@ -1492,7 +1495,9 @@ function Dashboard({ setScreen }) {
               )}
             </div>
             {alertsLoading ? (
-              <div className="px-5 py-4 text-sm text-ink-400">Cargando...</div>
+              <div className="px-5 py-4 space-y-3">
+                {[1,2,3].map(i => <div key={i} className="flex items-center gap-4"><span className="skel h-4 w-20"/><span className="skel h-4 w-32"/><span className="skel h-4 w-16"/><span className="skel h-4 w-12 ml-auto"/></div>)}
+              </div>
             ) : (
               <table className="w-full text-sm">
                 <thead>
@@ -1542,7 +1547,7 @@ function Dashboard({ setScreen }) {
                 <CartesianGrid stroke="#ECF0F3" vertical={false}/>
                 <XAxis dataKey="name" tick={{fontSize:12, fill:'#939598'}} axisLine={false} tickLine={false}/>
                 <YAxis tick={{fontSize:11, fill:'#BCBEC0'}} axisLine={false} tickLine={false}/>
-                <Tooltip cursor={{fill:'#F4F5F6'}} contentStyle={{border:'1px solid #E0E2E4', borderRadius:8, fontSize:12}}/>
+                <Tooltip cursor={{fill:'#F4F5F6'}} contentStyle={{border:'1px solid #E0E2E4', borderRadius:10, fontSize:12, boxShadow:'0 4px 12px -2px rgba(0,70,105,0.10)', padding:'8px 12px'}}/>
                 <Legend iconType="circle" wrapperStyle={{fontSize:12, paddingTop:4}}/>
                 <Bar dataKey="cotiz"   name="Cotizadas" fill="#004669" radius={[4,4,0,0]}/>
                 <Bar dataKey="ganadas" name="Ganadas"   fill="#20759E" radius={[4,4,0,0]}/>
@@ -1564,7 +1569,7 @@ function Dashboard({ setScreen }) {
                      innerRadius={48} outerRadius={78} paddingAngle={2} stroke="#fff" strokeWidth={2}>
                   {(chartStages?.stages ?? CH_STAGE_DIST).map((e,i)=><Cell key={i} fill={e.color}/>)}
                 </Pie>
-                <Tooltip contentStyle={{border:'1px solid #E0E2E4', borderRadius:8, fontSize:12}}/>
+                <Tooltip contentStyle={{border:'1px solid #E0E2E4', borderRadius:10, fontSize:12, boxShadow:'0 4px 12px -2px rgba(0,70,105,0.10)', padding:'8px 12px'}}/>
               </PieChart>
             </ResponsiveContainer>
             <div className="grid grid-cols-2 gap-x-2 gap-y-1 mt-1">
@@ -1601,7 +1606,7 @@ function Dashboard({ setScreen }) {
                 <CartesianGrid stroke="#ECF0F3" vertical={false}/>
                 <XAxis dataKey="month" tick={{fontSize:12, fill:'#939598'}} axisLine={false} tickLine={false}/>
                 <YAxis tick={{fontSize:11, fill:'#BCBEC0'}} axisLine={false} tickLine={false}/>
-                <Tooltip contentStyle={{border:'1px solid #E0E2E4', borderRadius:8, fontSize:12}}/>
+                <Tooltip contentStyle={{border:'1px solid #E0E2E4', borderRadius:10, fontSize:12, boxShadow:'0 4px 12px -2px rgba(0,70,105,0.10)', padding:'8px 12px'}}/>
                 <Legend iconType="circle" wrapperStyle={{fontSize:12, paddingTop:4}}/>
                 <Area type="monotone" dataKey="recibidas" name="Recibidas" stroke="#20759E" strokeWidth={2} fill="url(#g1)"/>
                 <Area type="monotone" dataKey="ganadas"   name="Ganadas"   stroke="#16A76E" strokeWidth={2} fill="url(#g2)"/>
@@ -1621,14 +1626,14 @@ function Dashboard({ setScreen }) {
               </div>
             </div>
             {chartsLoading ? (
-              <div className="h-[180px] flex items-center justify-center text-xs text-ink-400">Cargando...</div>
+              <div className="h-[180px] flex items-end gap-3 px-4 pb-4 pt-8">{[60,90,45,75,55].map((h,i) => <span key={i} className="skel flex-1 rounded-t" style={{height:`${h}%`}}/>)}</div>
             ) : (
               <ResponsiveContainer width="100%" height={180}>
                 <BarChart data={chartFunnel ?? []} layout="vertical" margin={{ left: 10, right: 40, top: 4, bottom: 4 }}>
                   <CartesianGrid stroke="#ECF0F3" horizontal={false}/>
                   <XAxis type="number" tick={{fontSize:11, fill:'#BCBEC0'}} axisLine={false} tickLine={false}/>
                   <YAxis type="category" dataKey="label" tick={{fontSize:12, fill:'#939598'}} axisLine={false} tickLine={false} width={80}/>
-                  <Tooltip contentStyle={{border:'1px solid #E0E2E4', borderRadius:8, fontSize:12}} formatter={(v) => [v, 'Cotizaciones']}/>
+                  <Tooltip contentStyle={{border:'1px solid #E0E2E4', borderRadius:10, fontSize:12, boxShadow:'0 4px 12px -2px rgba(0,70,105,0.10)', padding:'8px 12px'}} formatter={(v) => [v, 'Cotizaciones']}/>
                   <Bar dataKey="value" radius={[0,4,4,0]}>
                     {(chartFunnel ?? []).map((e,i) => <Cell key={i} fill={e.color}/>)}
                   </Bar>
@@ -1652,7 +1657,7 @@ function Dashboard({ setScreen }) {
               </button>
             </div>
             {chartsLoading ? (
-              <div className="h-[180px] flex items-center justify-center text-xs text-ink-400">Cargando...</div>
+              <div className="h-[180px] flex items-end gap-3 px-4 pb-4 pt-8">{[60,90,45,75,55].map((h,i) => <span key={i} className="skel flex-1 rounded-t" style={{height:`${h}%`}}/>)}</div>
             ) : !chartRejections?.length ? (
               <div className="h-[180px] flex items-center justify-center flex-col gap-2">
                 <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#939598" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
@@ -1664,7 +1669,7 @@ function Dashboard({ setScreen }) {
                   <CartesianGrid stroke="#ECF0F3" horizontal={false}/>
                   <XAxis type="number" tick={{fontSize:11, fill:'#BCBEC0'}} axisLine={false} tickLine={false}/>
                   <YAxis type="category" dataKey="name" tick={{fontSize:11, fill:'#939598'}} axisLine={false} tickLine={false} width={100}/>
-                  <Tooltip contentStyle={{border:'1px solid #E0E2E4', borderRadius:8, fontSize:12}} formatter={(v) => [v, 'Cotizaciones']}/>
+                  <Tooltip contentStyle={{border:'1px solid #E0E2E4', borderRadius:10, fontSize:12, boxShadow:'0 4px 12px -2px rgba(0,70,105,0.10)', padding:'8px 12px'}} formatter={(v) => [v, 'Cotizaciones']}/>
                   <Bar dataKey="value" fill="#EF4444" radius={[0,4,4,0]}/>
                 </BarChart>
               </ResponsiveContainer>
