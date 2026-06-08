@@ -64,14 +64,19 @@ function Avatar({ name, size=24, tone, src }) {
     return (
       <img src={src} alt={name} title={name}
         className="rounded-full object-cover shrink-0"
-        style={{ width:size, height:size }}
+        style={{ width:size, height:size, boxShadow: '0 0 0 1.5px rgba(255,255,255,0.8), 0 0 0 2.5px rgba(0,70,105,0.08)' }}
       />
     );
   }
   return (
     <span
       className="inline-flex items-center justify-center rounded-full text-white font-semibold leading-none shrink-0"
-      style={{ width:size, height:size, background:bg, fontSize: Math.max(10, size*0.42) }}
+      style={{
+        width:size, height:size, background:bg,
+        fontSize: Math.max(10, size*0.40),
+        letterSpacing: '0.02em',
+        boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.12)',
+      }}
       title={name}
     >
       {initialsOf(name)}
@@ -82,16 +87,16 @@ function Avatar({ name, size=24, tone, src }) {
 // ---------- Badge / Chip ----------
 function Badge({ tone='gray', children, dot=false }) {
   const tones = {
-    gray:   'bg-ink-300/40 text-ink-700',
-    blue:   'bg-brandSoft text-navy-900',
+    gray:   'bg-ink-300/30 text-ink-700',
+    blue:   'badge-blue',
     navy:   'bg-navy-900 text-white',
-    green:  'bg-emerald-100 text-emerald-800',
-    amber:  'bg-amber-100 text-amber-800',
-    red:    'bg-red-100 text-red-700',
-    purple: 'bg-violet-100 text-violet-800',
-    sky:    'bg-sky-100 text-sky-800',
-    orange: 'bg-orange-100 text-orange-800',
-    slate:  'bg-slate-200 text-slate-700',
+    green:  'badge-green',
+    amber:  'badge-amber',
+    red:    'badge-red',
+    purple: 'badge-purple',
+    sky:    'bg-sky-50 text-sky-800',
+    orange: 'bg-orange-50 text-orange-800',
+    slate:  'badge-gray',
   };
   const dotColor = {
     gray:'#939598', blue:'#20759E', navy:'#004669', green:'#16A76E',

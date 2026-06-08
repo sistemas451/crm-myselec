@@ -3,11 +3,11 @@
 // ---------- Page Head (reused) ----------
 function PageHead({ subtitle, title, description, actions }) {
   return (
-    <div className="px-6 pt-5 pb-4 flex items-end justify-between gap-4 border-b border-line bg-white">
+    <div className="px-6 pt-5 pb-4 flex items-end justify-between gap-4 border-b border-line bg-white page-head">
       <div>
-        <div className="text-[13px] uppercase tracking-wider font-semibold text-ink-500">{subtitle}</div>
-        <h2 className="text-xl font-bold text-ink-900 mt-0.5">{title}</h2>
-        {description && <div className="text-[13px] text-ink-500 mt-1">{description}</div>}
+        {subtitle && <div className="page-head-sub">{subtitle}</div>}
+        <h2 className="page-head-title mt-0.5">{title}</h2>
+        {description && <div className="text-[13px] text-ink-500 mt-1.5 leading-relaxed">{description}</div>}
       </div>
       <div className="flex items-center gap-2">{actions}</div>
     </div>
@@ -1613,8 +1613,8 @@ function UserModal({ user, onClose, onSave }) {
   const f = (k) => ({ value: form[k], onChange: e => setForm(v => ({...v, [k]: e.target.value})) });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl shadow-pop w-full max-w-md p-6 border border-line">
+    <div className="fixed inset-0 z-50 flex items-center justify-center modal-overlay p-4">
+      <div className="bg-white rounded-2xl shadow-pop w-full max-w-md p-6 border border-line modal-enter">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-bold text-ink-900">{user ? 'Editar usuario' : 'Nuevo usuario'}</h3>
           <button onClick={onClose} className="btn-ghost p-1"><Icon name="x" size={16}/></button>
@@ -1735,8 +1735,8 @@ function ApproveUserModal({ user, onClose, onApprove }) {
   ];
 
   return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 modal-overlay z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-pop w-full max-w-sm" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-line">
           <div className="font-semibold">Aprobar usuario</div>
           <button onClick={onClose} className="btn-ghost p-1"><Icon name="x" size={16}/></button>
@@ -2107,8 +2107,8 @@ function NotifModal({ rule, stages, onSave, onClose }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto"
+    <div className="fixed inset-0 modal-overlay z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-pop w-full max-w-lg max-h-[90vh] overflow-y-auto"
            onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-line">
           <div className="font-semibold">{isNew ? 'Nueva regla' : 'Editar regla'}</div>

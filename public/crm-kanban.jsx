@@ -33,7 +33,9 @@ function QuoteCard({ q, onOpen, compact }) {
   return (
     <div
       onClick={onOpen}
-      className={`kcard bg-white border rounded-lg p-3 cursor-pointer ${followUpOverdue ? 'border-amber-300 ring-1 ring-amber-200' : 'border-line'}`}
+      className={cx('kcard bg-white border rounded-xl p-3.5 cursor-pointer',
+        followUpOverdue ? 'border-amber-300 ring-1 ring-amber-100' : 'border-line/80'
+      )}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="mono text-[11px] font-semibold text-navy-900">{q.code}</div>
@@ -146,7 +148,7 @@ function OrderCard({ o, onOpen, compact }) {
   const isEmailOC = o._source === 'QUOTE';
   const displayName = cli?.name || o.clientName || o.emailSubject || 'Sin cliente';
   return (
-    <div onClick={onOpen} className="kcard bg-white border border-line rounded-lg p-3 cursor-pointer">
+    <div onClick={onOpen} className="kcard bg-white border border-line/80 rounded-xl p-3.5 cursor-pointer">
       <div className="flex items-start justify-between gap-2">
         <div className="mono text-[11px] font-semibold text-navy-900">{o.code}</div>
         <div className="flex items-center gap-1">
@@ -197,11 +199,11 @@ function KanbanBoard({ stages, items, kind, onOpen, title, subtitle, actions, lo
   }
 
   return (
-    <div className="flex flex-col h-[calc(100vh-62px)]">
-      <div className="px-6 pt-5 pb-4 flex items-end justify-between gap-4 border-b border-line bg-white">
+    <div className="flex flex-col h-[calc(100vh-56px)]">
+      <div className="px-6 pt-5 pb-4 flex items-end justify-between gap-4 border-b border-line bg-white page-head">
         <div>
-          <div className="text-[13px] uppercase tracking-wider font-semibold text-ink-500">{subtitle}</div>
-          <h2 className="text-xl font-bold text-ink-900 mt-0.5">{title}</h2>
+          <div className="page-head-sub">{subtitle}</div>
+          <h2 className="page-head-title mt-0.5">{title}</h2>
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">{actions}</div>
       </div>
@@ -213,15 +215,15 @@ function KanbanBoard({ stages, items, kind, onOpen, title, subtitle, actions, lo
             const totalUSD = list.filter(i => (i.currency||'USD') !== 'ARS').reduce((a,b) => a + (b.monto||0), 0);
             const totalARS = list.filter(i => i.currency === 'ARS').reduce((a,b) => a + (b.monto||0), 0);
             return (
-              <div key={st.id} className="w-[292px] shrink-0 flex flex-col bg-white rounded-xl border border-line">
+              <div key={st.id} className="w-[292px] shrink-0 flex flex-col bg-white rounded-xl border border-line shadow-xs">
                 <div className="px-3.5 py-3 flex items-center justify-between border-b border-line">
                   <div className="flex items-center gap-2 min-w-0">
                     <StageDot tone={st.tone}/>
-                    <span className="text-[12.5px] font-semibold text-ink-900 truncate">{st.label}</span>
+                    <span className="text-[12.5px] font-semibold text-ink-900 truncate" style={{letterSpacing: '-0.005em'}}>{st.label}</span>
                   </div>
                   <span className="text-[11px] font-semibold text-ink-500 bg-surface border border-line rounded-md px-1.5 py-0.5">{list.length}</span>
                 </div>
-                <div className="kcol-body p-2.5 space-y-2 scroll-thin flex-1 bg-surface/50">
+                <div className="kcol-body p-2.5 space-y-2 scroll-thin flex-1 bg-surface/40">
                   {list.length === 0 && <EmptyCol/>}
                   {kind === 'quote'
                     ? list.map(it => {

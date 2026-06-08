@@ -3,20 +3,20 @@
 function Drawer({ onClose, title, subtitle, headerExtras, children, footer, width=900 }) {
   return (
     <div className="fixed inset-0 z-40 flex">
-      <div className="flex-1 bg-ink-900/40 backdrop-blur-[2px]" onClick={onClose}/>
+      <div className="flex-1 modal-overlay" onClick={onClose}/>
       <div className="bg-white shadow-pop modal-enter flex flex-col" style={{ width }}>
         <div className="px-6 py-4 border-b border-line flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <div className="text-[11px] uppercase tracking-wider text-ink-500 font-semibold">{subtitle}</div>
-            <h3 className="text-lg font-bold text-ink-900 mt-0.5 truncate">{title}</h3>
+            <div className="page-head-sub">{subtitle}</div>
+            <h3 className="text-[17px] font-bold text-ink-900 mt-0.5 truncate" style={{letterSpacing: '-0.015em'}}>{title}</h3>
           </div>
           <div className="flex items-center gap-2">
             {headerExtras}
-            <button onClick={onClose} className="w-8 h-8 rounded-lg hover:bg-surface flex items-center justify-center text-ink-500"><Icon name="x" size={16}/></button>
+            <button onClick={onClose} className="w-8 h-8 rounded-lg hover:bg-surface flex items-center justify-center text-ink-400 hover:text-ink-700 transition-colors"><Icon name="x" size={16}/></button>
           </div>
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto scroll-thin">{children}</div>
-        {footer && <div className="px-6 py-3 border-t border-line bg-surface flex items-center justify-end gap-2">{footer}</div>}
+        {footer && <div className="px-6 py-3 border-t border-line bg-surface/80 flex items-center justify-end gap-2">{footer}</div>}
       </div>
     </div>
   );
@@ -1820,9 +1820,9 @@ function QuoteDetail({ code, onClose, canReassign }) {
       };
       return (
         <>
-          <div className="fixed inset-0 z-50 bg-black/40" onClick={() => setReminderOpen(false)}/>
+          <div className="fixed inset-0 z-50 modal-overlay" onClick={() => setReminderOpen(false)}/>
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setReminderOpen(false)}>
-            <div className="bg-white rounded-2xl shadow-pop w-full max-w-lg border border-line" onClick={e => e.stopPropagation()}>
+            <div className="bg-white rounded-2xl shadow-pop w-full max-w-lg border border-line modal-enter" onClick={e => e.stopPropagation()}>
               <div className="px-5 py-4 border-b border-line flex items-center justify-between">
                 <div>
                   <div className="font-semibold text-ink-900 text-[14px]">Enviar recordatorio</div>

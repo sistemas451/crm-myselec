@@ -1231,7 +1231,7 @@ function SearchPaletteModal() {
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-24 p-6">
-      <div className="absolute inset-0 bg-ink-900/50 backdrop-blur-[2px]" onClick={closeModal}/>
+      <div className="absolute inset-0 modal-overlay" onClick={closeModal}/>
       <div className="relative bg-white rounded-2xl shadow-pop modal-enter w-[640px] max-w-full overflow-hidden">
         <div className="flex items-center gap-3 px-5 py-4 border-b border-line">
           <Icon name="search" size={18} className="text-ink-400"/>
@@ -1958,9 +1958,9 @@ function ReminderModal({ item, defaultSubject, defaultBody, onClose, onSent }) {
 
   return (
     <>
-      <div className="fixed inset-0 z-50 bg-black/40" onClick={onClose}/>
+      <div className="fixed inset-0 z-50 modal-overlay" onClick={onClose}/>
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
-        <div className="bg-white rounded-2xl shadow-pop w-full max-w-lg border border-line" onClick={e => e.stopPropagation()}>
+        <div className="bg-white rounded-2xl shadow-pop w-full max-w-lg border border-line modal-enter" onClick={e => e.stopPropagation()}>
           <div className="px-5 py-4 border-b border-line flex items-center justify-between">
             <div>
               <div className="font-semibold text-ink-900 text-[14px]">Enviar recordatorio</div>

@@ -49,12 +49,19 @@ function AppRoot() {
   if (!logged) return <Login onLogin={() => setLogged(true)} />;
 
   if (loading) return (
-    <div className="min-h-screen flex items-center justify-center bg-navy-950">
-      <div className="flex flex-col items-center gap-6">
-        <img src="/Logo.png" alt="MySelec" style={{ width: 'auto', height: 60, objectFit: 'contain', imageRendering: 'auto' }}/>
-        <div className="flex flex-col items-center gap-1">
-          <div className="text-white/60 text-sm">Cargando sistema…</div>
-          <div className="text-white/30 text-xs">Conectando con la base de datos</div>
+    <div className="min-h-screen flex items-center justify-center" style={{
+      background: 'linear-gradient(180deg, #00304D 0%, #004669 100%)',
+    }}>
+      <div className="flex flex-col items-center gap-8">
+        <img src="/Logo.png" alt="MySelec" style={{ width: 'auto', height: 56, objectFit: 'contain', imageRendering: 'auto' }}/>
+        <div className="flex flex-col items-center gap-2">
+          <div className="flex gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-white/40 animate-pulse-soft" style={{animationDelay:'0s'}}/>
+            <span className="w-1.5 h-1.5 rounded-full bg-white/40 animate-pulse-soft" style={{animationDelay:'.3s'}}/>
+            <span className="w-1.5 h-1.5 rounded-full bg-white/40 animate-pulse-soft" style={{animationDelay:'.6s'}}/>
+          </div>
+          <div className="text-white/50 text-[13px] mt-1">Cargando sistema</div>
+          <div className="text-white/25 text-[11px]">Conectando con la base de datos</div>
         </div>
       </div>
     </div>
@@ -253,7 +260,7 @@ function ImageCropper({ src, onConfirm, onCancel }) {
 
   return (
     <div className="fixed inset-0 bg-black/70 z-[60] flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xs p-6">
+      <div className="bg-white rounded-2xl shadow-pop w-full max-w-xs p-6">
         <div className="font-semibold text-ink-900 mb-4 text-center">Ajustar foto</div>
 
         {/* Área de crop */}
@@ -390,8 +397,8 @@ function ProfileModal({ user, onClose, onUpdated }) {
     <>
       {cropSrc && <ImageCropper src={cropSrc} onConfirm={handleCropConfirm} onCancel={() => setCropSrc(null)}/>}
 
-      <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-start p-4" onClick={onClose}>
-        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm ml-2 flex flex-col max-h-[90vh]"
+      <div className="fixed inset-0 modal-overlay z-50 flex items-center justify-start p-4" onClick={onClose}>
+        <div className="bg-white rounded-2xl shadow-pop w-full max-w-sm ml-2 flex flex-col max-h-[90vh]"
              onClick={e => e.stopPropagation()}>
 
           {/* Header */}
@@ -796,20 +803,21 @@ function Login({ onLogin }) {
 
   return (
     <div className="min-h-screen flex items-center justify-center relative overflow-hidden" style={bgStyle}>
-      <div className="relative flex items-center justify-center p-8 w-full">
-        <div className="w-full max-w-sm bg-white rounded-2xl shadow-[0_25px_60px_rgba(0,0,0,0.4)] p-8 border border-line">
+      <div className="relative flex items-center justify-center p-8 w-full animate-fade-up">
+        <div className="w-full max-w-sm bg-white rounded-2xl p-8" style={{
+          boxShadow: '0 25px 50px -12px rgba(0,30,50,0.35), 0 0 0 1px rgba(255,255,255,0.06)',
+        }}>
           <div className="flex flex-col items-center mb-8">
             <div style={{
-              background: 'linear-gradient(135deg, #004669 0%, #0A5A82 100%)',
-              borderRadius: 20,
-              padding: '18px 28px',
+              background: 'linear-gradient(145deg, #004669 0%, #0A5A82 100%)',
+              borderRadius: 16,
+              padding: '16px 26px',
               display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
-              boxShadow: '0 8px 24px rgba(0,70,105,0.30)',
-              marginBottom: 0,
+              boxShadow: '0 6px 20px rgba(0,70,105,0.28)',
             }}>
-              <img src="/Logo.png" alt="MySelec" style={{ height: 48, width: 'auto', objectFit: 'contain', display: 'block' }}/>
+              <img src="/Logo.png" alt="MySelec" style={{ height: 44, width: 'auto', objectFit: 'contain', display: 'block' }}/>
             </div>
           </div>
 
@@ -988,17 +996,21 @@ function Sidebar({ role, screen, setScreen, user, onProfileOpen, collapsed, onTo
 
   return (
     <aside
-      className="shrink-0 bg-navy-900 text-white flex flex-col h-screen overflow-hidden"
-      style={{ width: collapsed ? 60 : 244, transition: 'width 0.2s ease' }}
+      className="shrink-0 text-white flex flex-col h-screen overflow-hidden"
+      style={{
+        width: collapsed ? 60 : 248,
+        transition: 'width .25s cubic-bezier(.32,.72,0,1)',
+        background: 'linear-gradient(180deg, #004669 0%, #003A58 100%)',
+      }}
     >
       {/* Logo — click vuelve al inicio */}
       {collapsed ? (
-        <div className="flex items-center justify-center border-b border-white/5 py-4 cursor-pointer" style={{height:64}}
+        <div className="flex items-center justify-center border-b border-white/[0.06] py-4 cursor-pointer" style={{height:64}}
           onClick={() => setScreen(nav[0]?.id || 'dashboard')} title="Ir al inicio">
           <Logo size={32}/>
         </div>
       ) : (
-        <div className="flex items-center justify-center border-b border-white/5 px-5 cursor-pointer" style={{height:72}}
+        <div className="flex items-center justify-center border-b border-white/[0.06] px-5 cursor-pointer" style={{height:72}}
           onClick={() => setScreen(nav[0]?.id || 'dashboard')} title="Ir al inicio">
           <img
             src="/Logo.png"
@@ -1009,29 +1021,33 @@ function Sidebar({ role, screen, setScreen, user, onProfileOpen, collapsed, onTo
       )}
 
       {/* Nav */}
-      <nav className="flex-1 py-4 space-y-0.5 overflow-hidden" style={{ padding: collapsed ? '16px 8px' : '16px 10px' }}>
+      <nav className="flex-1 overflow-hidden" style={{ padding: collapsed ? '16px 6px' : '16px 8px' }}>
         {!collapsed && (
-          <div className="px-3 pb-1.5 text-[10px] uppercase tracking-wider text-white/35 font-semibold">
+          <div className="px-3 pb-2 text-[10px] uppercase tracking-[0.08em] text-white/30 font-semibold">
             {role==='admin' ? 'Gestión' : role==='seller' ? 'Mi pipeline' : 'Operaciones'}
           </div>
         )}
+        <div className="space-y-0.5">
         {nav.map(n => {
           const badge = badges[n.id] || 0;
+          const isActive = screen === n.id;
           return (
             <button key={n.id} onClick={()=>setScreen(n.id)}
               title={collapsed ? n.label : undefined}
               className={cx(
-                'w-full flex items-center rounded-lg py-2.5 text-[13.5px] transition-colors',
-                collapsed ? 'justify-center px-0' : 'gap-3 px-3 text-left',
-                screen === n.id
-                  ? 'bg-brand text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.1)]'
-                  : 'text-white/75 hover:bg-white/5 hover:text-white'
+                'w-full flex items-center rounded-lg text-[13px] relative',
+                'transition-all duration-200',
+                collapsed ? 'justify-center px-0 py-2.5' : 'gap-3 px-3 py-[9px] text-left',
+                isActive
+                  ? 'bg-white/[0.12] text-white font-medium'
+                  : 'text-white/65 hover:bg-white/[0.06] hover:text-white/90'
               )}
+              style={isActive && !collapsed ? { boxShadow: 'inset 3px 0 0 0 #20759E' } : undefined}
             >
               <div className="relative shrink-0">
-                <Icon name={n.icon} size={17}/>
+                <Icon name={n.icon} size={16} strokeWidth={isActive ? 2 : 1.75}/>
                 {badge > 0 && collapsed && (
-                  <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-orange-400 text-[8px] font-bold text-white flex items-center justify-center leading-none">
+                  <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-warn text-[8px] font-bold text-white flex items-center justify-center leading-none shadow-xs">
                     {badge > 9 ? '9+' : badge}
                   </span>
                 )}
@@ -1039,28 +1055,29 @@ function Sidebar({ role, screen, setScreen, user, onProfileOpen, collapsed, onTo
               {!collapsed && (
                 <span className="flex-1 leading-tight whitespace-nowrap overflow-hidden">
                   {n.label}
-                  {n.sub && <span className="block text-[10px] uppercase tracking-wider opacity-60 font-medium">{n.sub}</span>}
+                  {n.sub && <span className="block text-[10px] tracking-wide opacity-50 font-medium mt-0.5">{n.sub}</span>}
                 </span>
               )}
               {!collapsed && badge > 0 && (
-                <span className="shrink-0 min-w-[18px] h-[18px] px-1 rounded-full bg-orange-400 text-[10px] font-bold text-white flex items-center justify-center">
+                <span className="shrink-0 min-w-[18px] h-[18px] px-1 rounded-full bg-warn text-[10px] font-bold text-white flex items-center justify-center">
                   {badge > 99 ? '99+' : badge}
                 </span>
               )}
             </button>
           );
         })}
+        </div>
       </nav>
 
       {/* Footer */}
-      <div className="border-t border-white/5" style={{ padding: collapsed ? '12px 8px' : '12px 10px' }}>
+      <div className="border-t border-white/[0.06]" style={{ padding: collapsed ? '10px 6px' : '10px 8px' }}>
         {/* Toggle button */}
         <button
           onClick={onToggle}
           title={collapsed ? 'Expandir panel' : 'Colapsar panel'}
           className={cx(
-            'w-full flex items-center rounded-lg py-2 mb-2 hover:bg-white/8 transition-colors text-white/40 hover:text-white/70',
-            collapsed ? 'justify-center' : 'gap-2 px-3'
+            'w-full flex items-center rounded-lg py-2 mb-1.5 transition-all duration-200 text-white/35 hover:text-white/65 hover:bg-white/[0.05]',
+            collapsed ? 'justify-center' : 'gap-2.5 px-3'
           )}
         >
           <Icon name={collapsed ? 'panel-left-open' : 'panel-left-close'} size={15}/>
@@ -1071,7 +1088,7 @@ function Sidebar({ role, screen, setScreen, user, onProfileOpen, collapsed, onTo
         <button onClick={onProfileOpen}
           title={collapsed ? (user?.name || '') : undefined}
           className={cx(
-            'w-full flex items-center rounded-xl py-2.5 hover:bg-white/8 transition-colors group',
+            'w-full flex items-center rounded-xl py-2.5 transition-all duration-200 group hover:bg-white/[0.06]',
             collapsed ? 'justify-center px-0' : 'gap-3 px-3 text-left'
           )}
         >
@@ -1079,10 +1096,10 @@ function Sidebar({ role, screen, setScreen, user, onProfileOpen, collapsed, onTo
           {!collapsed && (
             <>
               <div className="flex-1 min-w-0 overflow-hidden">
-                <div className="text-[13px] font-semibold text-white truncate">{effectiveName || '—'}</div>
-                <div className="text-[12px] text-white/75">{roleLabel[effectiveRole] || '—'}</div>
+                <div className="text-[13px] font-semibold text-white truncate leading-tight">{effectiveName || '—'}</div>
+                <div className="text-[11.5px] text-white/55 mt-0.5">{roleLabel[effectiveRole] || '—'}</div>
               </div>
-              <Icon name="settings" size={14} className="text-white/30 group-hover:text-white/60 shrink-0"/>
+              <Icon name="settings" size={14} className="text-white/25 group-hover:text-white/55 shrink-0 transition-colors"/>
             </>
           )}
         </button>
@@ -1099,7 +1116,7 @@ function SyncResultModal({ result, onClose }) {
   const errors = result.errors || [];
   return (
     <>
-      <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}/>
+      <div className="fixed inset-0 modal-overlay z-50 flex items-center justify-center p-4" onClick={onClose}/>
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
         <div className="bg-white rounded-2xl shadow-pop w-full max-w-md pointer-events-auto" onClick={e=>e.stopPropagation()}>
           {/* Header */}
@@ -1182,13 +1199,13 @@ function Topbar({ user, roleKey, setRoleKey, setScreen }) {
   };
 
   return (
-    <header className="h-[62px] bg-white border-b border-line flex items-center gap-4 px-6 shrink-0 relative">
+    <header className="h-[56px] bg-white border-b border-line flex items-center gap-3 px-5 shrink-0 relative">
       <div className="flex items-center gap-2 text-sm flex-1 min-w-0">
-        <img src="/Logo-M.png" alt="MySelec" style={{height:26, width:'auto', objectFit:'contain', flexShrink:0, cursor: setScreen ? 'pointer' : 'default'}}
+        <img src="/Logo-M.png" alt="MySelec" style={{height:24, width:'auto', objectFit:'contain', flexShrink:0, cursor: setScreen ? 'pointer' : 'default', opacity: 0.85}}
           onClick={() => setScreen && setScreen(roleKey==='admin' ? 'dashboard' : roleKey==='seller' ? 'my-quotes' : 'ops')}
           title="Ir al inicio"/>
-        <span className="text-ink-300">/</span>
-        <span className="font-semibold text-ink-900 truncate">
+        <span className="text-ink-300 text-xs">/</span>
+        <span className="font-semibold text-ink-900 truncate text-[13.5px]" style={{letterSpacing: '-0.01em'}}>
           {(user?.name || loggedUser?.name)?.split(' ')?.[0] || 'MySelec CRM'}
         </span>
         {loggedUser?.role && (
@@ -1198,31 +1215,30 @@ function Topbar({ user, roleKey, setRoleKey, setScreen }) {
         )}
       </div>
 
-      {/* El rol se asigna desde el JWT — no hay selector manual en producción */}
-
       <button onClick={()=>openModal('search')}
-        className="relative hidden md:inline-flex items-center gap-2 px-3 h-9 rounded-lg bg-surface hover:bg-white hover:border-line border border-transparent text-ink-500 text-xs">
-        <Icon name="search" size={14}/>
-        <span>Buscar…</span>
-        <kbd className="ml-2 text-[10px] font-mono px-1.5 py-0.5 rounded border border-line bg-white text-ink-500">⌘K</kbd>
+        className="relative hidden md:inline-flex items-center gap-2 px-3 h-8 rounded-lg bg-surface/80 hover:bg-surface border border-line/60 text-ink-400 hover:text-ink-600 text-xs transition-all duration-200">
+        <Icon name="search" size={13}/>
+        <span className="text-ink-400">Buscar...</span>
+        <kbd className="ml-2 text-[10px] font-mono px-1.5 py-0.5 rounded bg-white border border-line text-ink-400">⌘K</kbd>
       </button>
 
-      <div className="relative">
-        <button onClick={()=>setNotifOpen(o=>!o)}
-          className="relative w-9 h-9 rounded-lg hover:bg-surface flex items-center justify-center text-ink-700">
-          <Icon name="bell" size={17}/>
-          {unreadCount > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-bad text-white text-[10px] font-bold flex items-center justify-center">{unreadCount}</span>
-          )}
+      <div className="flex items-center gap-1">
+        <div className="relative">
+          <button onClick={()=>setNotifOpen(o=>!o)}
+            className="relative w-8 h-8 rounded-lg hover:bg-surface flex items-center justify-center text-ink-500 hover:text-ink-700 transition-colors">
+            <Icon name="bell" size={16}/>
+            {unreadCount > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 min-w-[15px] h-[15px] px-0.5 rounded-full bg-bad text-white text-[9px] font-bold flex items-center justify-center shadow-xs">{unreadCount}</span>
+            )}
+          </button>
+          {notifOpen && <NotificationsPopover onClose={()=>setNotifOpen(false)} setScreen={setScreen}/>}
+        </div>
+
+        <button onClick={handleLogout} title="Cerrar sesión"
+          className="w-8 h-8 rounded-lg hover:bg-red-50 flex items-center justify-center text-ink-400 hover:text-bad transition-colors">
+          <Icon name="log-out" size={15}/>
         </button>
-        {notifOpen && <NotificationsPopover onClose={()=>setNotifOpen(false)} setScreen={setScreen}/>}
       </div>
-
-      <button onClick={handleLogout} title="Cerrar sesión"
-        className="w-9 h-9 rounded-lg hover:bg-surface flex items-center justify-center text-ink-400 hover:text-bad border border-transparent hover:border-line transition-colors">
-        <Icon name="log-out" size={15}/>
-      </button>
-
     </header>
   );
 }
@@ -1338,7 +1354,7 @@ function Dashboard({ setScreen }) {
           <select
             value={filters.sellerId}
             onChange={e => setFilter('sellerId', e.target.value)}
-            className="h-8 rounded-lg border border-line bg-white px-3 text-sm text-ink-700 focus:outline-none focus:ring-2 focus:ring-blue-200"
+            className="h-8 rounded-lg border border-line bg-white px-3 text-sm text-ink-700 focus:outline-none focus:ring-2 focus:ring-brand/15"
           >
             <option value="">Todos los vendedores</option>
             {sellerUsers.map(u => (
@@ -1352,7 +1368,7 @@ function Dashboard({ setScreen }) {
               type="date"
               value={filters.from}
               onChange={e => setFilter('from', e.target.value)}
-              className="h-8 rounded-lg border border-line bg-white px-2 text-sm text-ink-700 focus:outline-none focus:ring-2 focus:ring-blue-200"
+              className="h-8 rounded-lg border border-line bg-white px-2 text-sm text-ink-700 focus:outline-none focus:ring-2 focus:ring-brand/15"
             />
           </div>
           <div className="flex items-center gap-1.5">
@@ -1361,7 +1377,7 @@ function Dashboard({ setScreen }) {
               type="date"
               value={filters.to}
               onChange={e => setFilter('to', e.target.value)}
-              className="h-8 rounded-lg border border-line bg-white px-2 text-sm text-ink-700 focus:outline-none focus:ring-2 focus:ring-blue-200"
+              className="h-8 rounded-lg border border-line bg-white px-2 text-sm text-ink-700 focus:outline-none focus:ring-2 focus:ring-brand/15"
             />
           </div>
 
@@ -1418,7 +1434,7 @@ function Dashboard({ setScreen }) {
                     <Icon name="file-down" size={13}/>Exportar PDF
                   </button>
                   {expOpen && (
-                    <div className="absolute right-0 top-full mt-1 w-56 bg-white rounded-lg shadow-xl border border-line py-1 z-50">
+                    <div className="absolute right-0 top-full mt-1 w-56 bg-white rounded-lg shadow-pop border border-line py-1 z-50">
                       {[
                         { type: 'cotizaciones', label: 'Cotizaciones', icon: 'clipboard-list' },
                         { type: 'rechazos', label: 'Rechazos', icon: 'x-circle' },
@@ -1442,18 +1458,23 @@ function Dashboard({ setScreen }) {
         </div>
 
         {/* ── KPI cards ──────────────────────────────────────────────────── */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3 stagger-children">
           {kpis.map((k,i) => (
-            <div key={i} className={`bg-white rounded-xl border p-4 shadow-card ${
-              k.warn ? 'border-amber-300 bg-amber-50' :
-              k.highlight ? 'border-blue-200 bg-blue-50' : 'border-line'
-            }`}>
-              <div className={`text-[11px] uppercase tracking-wider font-semibold leading-tight ${k.warn ? 'text-amber-700' : 'text-ink-500'}`}>{k.label}</div>
-              <div className={`text-2xl font-bold mt-2 ${
+            <div key={i} className={cx(
+              'rounded-xl border p-4 transition-all duration-200 hover:shadow-lift group',
+              k.warn ? 'border-amber-200 bg-amber-50/80' :
+              k.highlight ? 'border-brand/20 bg-brandSoft/50' : 'border-line bg-white shadow-card'
+            )}>
+              <div className={cx('text-[10.5px] uppercase tracking-[0.06em] font-semibold leading-tight',
+                k.warn ? 'text-amber-700' : 'text-ink-500'
+              )}>{k.label}</div>
+              <div className={cx('text-[22px] font-bold mt-2',
                 k.warn ? 'text-amber-700' :
-                k.highlight ? 'text-blue-700' : 'text-ink-900'
-              }`}>{k.value}</div>
-              {k.sub && <div className={`text-[10px] mt-0.5 ${k.warn ? 'text-amber-600' : 'text-ink-400'}`}>{k.sub}</div>}
+                k.highlight ? 'text-navy-800' : 'text-ink-900'
+              )} style={{letterSpacing: '-0.02em', lineHeight: 1.1}}>{k.value}</div>
+              {k.sub && <div className={cx('text-[10px] mt-1',
+                k.warn ? 'text-amber-600/80' : 'text-ink-400'
+              )}>{k.sub}</div>}
             </div>
           ))}
         </div>
@@ -1507,10 +1528,10 @@ function Dashboard({ setScreen }) {
         )}
 
         <div className="grid grid-cols-12 gap-4">
-          <div className="col-span-5 bg-white rounded-xl border border-line shadow-card p-4">
-            <div className="mb-2">
-              <div className="text-sm font-semibold text-ink-900">Cotizaciones por vendedor</div>
-              <div className="text-xs text-ink-500">
+          <div className="col-span-5 bg-white rounded-xl border border-line shadow-card p-5 transition-all duration-200 hover:shadow-lift">
+            <div className="mb-3">
+              <div className="text-[13px] font-semibold text-ink-900" style={{letterSpacing: '-0.01em'}}>Cotizaciones por vendedor</div>
+              <div className="text-[11px] text-ink-400 mt-0.5">
                 {filters.from || filters.to
                   ? `${filters.from || '—'} → ${filters.to || 'hoy'} · cotizadas vs. ganadas`
                   : 'Período seleccionado · cotizadas vs. ganadas'}
@@ -1529,10 +1550,10 @@ function Dashboard({ setScreen }) {
             </ResponsiveContainer>
           </div>
 
-          <div className="col-span-3 bg-white rounded-xl border border-line shadow-card p-4">
-            <div className="mb-2">
-              <div className="text-sm font-semibold text-ink-900">Distribución por etapa</div>
-              <div className="text-xs text-ink-500">
+          <div className="col-span-3 bg-white rounded-xl border border-line shadow-card p-5 transition-all duration-200 hover:shadow-lift">
+            <div className="mb-3">
+              <div className="text-[13px] font-semibold text-ink-900" style={{letterSpacing: '-0.01em'}}>Distribución por etapa</div>
+              <div className="text-[11px] text-ink-400 mt-0.5">
                 {chartStages?.total ?? '...'} cotizaciones
                 {filters.sellerId ? ` · ${sellerUsers.find(u=>u.id===filters.sellerId)?.name || ''}` : ''}
               </div>
@@ -1557,10 +1578,10 @@ function Dashboard({ setScreen }) {
             </div>
           </div>
 
-          <div className="col-span-4 bg-white rounded-xl border border-line shadow-card p-4">
-            <div className="mb-2">
-              <div className="text-sm font-semibold text-ink-900">Evolución mensual</div>
-              <div className="text-xs text-ink-500">
+          <div className="col-span-4 bg-white rounded-xl border border-line shadow-card p-5 transition-all duration-200 hover:shadow-lift">
+            <div className="mb-3">
+              <div className="text-[13px] font-semibold text-ink-900" style={{letterSpacing: '-0.01em'}}>Evolución mensual</div>
+              <div className="text-[11px] text-ink-400 mt-0.5">
                 Últimos 6 meses · recibidas vs. ganadas
                 {filters.sellerId ? ` · ${sellerUsers.find(u=>u.id===filters.sellerId)?.name?.split(' ')[0] || ''}` : ''}
               </div>
@@ -1591,10 +1612,10 @@ function Dashboard({ setScreen }) {
 
         {/* ── Embudo + Motivos de rechazo ────────────────────────────────── */}
         <div className="grid grid-cols-12 gap-4">
-          <div className="col-span-6 bg-white rounded-xl border border-line shadow-card p-4">
+          <div className="col-span-6 bg-white rounded-xl border border-line shadow-card p-5 transition-all duration-200 hover:shadow-lift">
             <div className="mb-3">
-              <div className="text-sm font-semibold text-ink-900">Embudo de conversión</div>
-              <div className="text-xs text-ink-500">
+              <div className="text-[13px] font-semibold text-ink-900" style={{letterSpacing: '-0.01em'}}>Embudo de conversión</div>
+              <div className="text-[11px] text-ink-400 mt-0.5">
                 Del total recibido, cuántas llegaron a cada etapa
                 {filters.sellerId ? ` · ${sellerUsers.find(u=>u.id===filters.sellerId)?.name?.split(' ')[0] || ''}` : ''}
               </div>
@@ -1616,17 +1637,17 @@ function Dashboard({ setScreen }) {
             )}
           </div>
 
-          <div className="col-span-6 bg-white rounded-xl border border-line shadow-card p-4">
+          <div className="col-span-6 bg-white rounded-xl border border-line shadow-card p-5 transition-all duration-200 hover:shadow-lift">
             <div className="flex items-start justify-between mb-3">
               <div>
-                <div className="text-sm font-semibold text-ink-900">Motivos de rechazo</div>
-                <div className="text-xs text-ink-500">
+                <div className="text-[13px] font-semibold text-ink-900" style={{letterSpacing: '-0.01em'}}>Motivos de rechazo</div>
+                <div className="text-[11px] text-ink-400 mt-0.5">
                   Por qué se perdieron cotizaciones en el período
                   {filters.sellerId ? ` · ${sellerUsers.find(u=>u.id===filters.sellerId)?.name?.split(' ')[0] || ''}` : ''}
                 </div>
               </div>
               <button onClick={() => setScreen('rechazos')}
-                className="text-xs text-brand hover:underline whitespace-nowrap flex items-center gap-1">
+                className="text-[11px] text-brand hover:underline whitespace-nowrap flex items-center gap-1">
                 Ver detalle <Icon name="arrow-right" size={12}/>
               </button>
             </div>
@@ -1652,11 +1673,11 @@ function Dashboard({ setScreen }) {
         </div>
 
         <div className="grid grid-cols-12 gap-4">
-          <div className="col-span-7 bg-white rounded-xl border border-line shadow-card overflow-hidden">
+          <div className="col-span-7 bg-white rounded-xl border border-line shadow-card overflow-hidden transition-all duration-200 hover:shadow-lift">
             <div className="flex items-center justify-between px-5 py-3.5 border-b border-line">
               <div>
-                <div className="text-sm font-semibold text-ink-900">Cotizaciones próximas a vencer</div>
-                <div className="text-xs text-ink-500">Pasaron más de 5 días sin resolución</div>
+                <div className="text-[13px] font-semibold text-ink-900" style={{letterSpacing: '-0.01em'}}>Cotizaciones próximas a vencer</div>
+                <div className="text-[11px] text-ink-400 mt-0.5">Pasaron más de 5 días sin resolución</div>
               </div>
               {overdueQuotes.length > 0 && <Badge tone="red" dot>{overdueQuotes.length} vencidas</Badge>}
             </div>
@@ -1689,10 +1710,10 @@ function Dashboard({ setScreen }) {
             </table>
           </div>
 
-          <div className="col-span-5 bg-white rounded-xl border border-line shadow-card">
+          <div className="col-span-5 bg-white rounded-xl border border-line shadow-card transition-all duration-200 hover:shadow-lift">
             <div className="flex items-center justify-between px-5 py-3.5 border-b border-line">
-              <div className="text-sm font-semibold text-ink-900">Últimas actividades</div>
-              <button className="text-xs text-brand hover:underline">Ver todo</button>
+              <div className="text-[13px] font-semibold text-ink-900" style={{letterSpacing: '-0.01em'}}>Últimas actividades</div>
+              <button className="text-[11px] text-brand hover:underline">Ver todo</button>
             </div>
             <ul className="p-2 max-h-[360px] overflow-y-auto scroll-thin">
               {activity.map((a,i) => {
