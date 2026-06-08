@@ -76,7 +76,8 @@ router.get('/cotizaciones', authMiddleware, async (req, res) => {
     const filterLabels = await resolveFilterLabels(req.query);
     const filters = { ...filterLabels, from: req.query.from, to: req.query.to };
 
-    const pdf = await generateCotizaciones(quotes, { filters, stages });
+    const style = req.query.style === 'executive' ? 'executive' : undefined;
+    const pdf = await generateCotizaciones(quotes, { filters, stages, style });
 
     res.set({
       'Content-Type': 'application/pdf',
@@ -111,7 +112,8 @@ router.get('/rechazos', authMiddleware, async (req, res) => {
     const filterLabels = await resolveFilterLabels(req.query);
     const filters = { ...filterLabels, from: req.query.from, to: req.query.to };
 
-    const pdf = await generateRechazos(quotes, { filters });
+    const style = req.query.style === 'executive' ? 'executive' : undefined;
+    const pdf = await generateRechazos(quotes, { filters, style });
 
     res.set({
       'Content-Type': 'application/pdf',
@@ -147,7 +149,8 @@ router.get('/ordenes', authMiddleware, async (req, res) => {
     const filterLabels = await resolveFilterLabels(req.query);
     const filters = { ...filterLabels, from: req.query.from, to: req.query.to };
 
-    const pdf = await generateOrdenes(orders, { filters, stages });
+    const style = req.query.style === 'executive' ? 'executive' : undefined;
+    const pdf = await generateOrdenes(orders, { filters, stages, style });
 
     res.set({
       'Content-Type': 'application/pdf',
@@ -169,7 +172,8 @@ router.get('/ordenes', authMiddleware, async (req, res) => {
 
 router.post('/send', authMiddleware, async (req, res) => {
   try {
-    const { type, to, cc, subject, body: emailBody, filters: rawFilters } = req.body;
+    const { type, to, cc, subject, body: emailBody, filters: rawFilters, style: rawStyle } = req.body;
+    const style = rawStyle === 'executive' ? 'executive' : undefined;
     if (!type || !to) return res.status(400).json({ error: 'Faltan campos requeridos (type, to)' });
     if (!['cotizaciones', 'rechazos', 'ordenes'].includes(type)) {
       return res.status(400).json({ error: 'Tipo inválido. Debe ser: cotizaciones, rechazos, ordenes' });
@@ -197,7 +201,7 @@ router.post('/send', authMiddleware, async (req, res) => {
         orderBy: { createdAt: 'desc' }, take: 500,
       });
       const stages = await getStages('COTIZACION');
-      pdf = await generateCotizaciones(quotes, { filters, stages });
+      pdf = await generateCotizaciones(quotes, { filters, stages, style });
       filename = `cotizaciones_${new Date().toISOString().slice(0, 10)}.pdf`;
     } else if (type === 'rechazos') {
       const quotes = await prisma.quote.findMany({
@@ -205,7 +209,7 @@ router.post('/send', authMiddleware, async (req, res) => {
         include: { client: { select: { name: true } }, seller: { select: { name: true } } },
         orderBy: { updatedAt: 'desc' }, take: 500,
       });
-      pdf = await generateRechazos(quotes, { filters });
+      pdf = await generateRechazos(quotes, { filters, style });
       filename = `rechazos_${new Date().toISOString().slice(0, 10)}.pdf`;
     } else {
       const orders = await prisma.order.findMany({
@@ -214,7 +218,7 @@ router.post('/send', authMiddleware, async (req, res) => {
         orderBy: { createdAt: 'desc' }, take: 500,
       });
       const stages = await getStages('ORDEN_COMPRA');
-      pdf = await generateOrdenes(orders, { filters, stages });
+      pdf = await generateOrdenes(orders, { filters, stages, style });
       filename = `ordenes_${new Date().toISOString().slice(0, 10)}.pdf`;
     }
 
