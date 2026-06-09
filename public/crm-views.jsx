@@ -2202,7 +2202,7 @@ function NotifModal({ rule, stages, onSave, onClose }) {
 function Config() {
   const { pushToast, users, roleKey } = useApp();
   const isDeveloper = roleKey === 'admin' && CrmAuth.getUser()?.role === 'DEVELOPER';
-  const [tab, setTab] = useState('stages');
+  const [tab, setTab] = useState('pipeline');
   const [stagesData, setStagesData] = useState(null);
   const [stagesLoading, setStagesLoading] = useState(true);
   const [editingId, setEditingId] = useState(null);
@@ -2325,7 +2325,7 @@ function Config() {
   }, []);
 
   useEffect(() => {
-    if (tab !== 'notifs') return;
+    if (tab !== 'alertas') return;
     setNotifLoading(true);
     CrmApi.getNotificationRules()
       .then(r => { setNotifRules(r); setNotifLoading(false); })
@@ -2333,7 +2333,7 @@ function Config() {
   }, [tab]);
 
   useEffect(() => {
-    if (tab !== 'mail') return;
+    if (tab !== 'correo' && tab !== 'plantillas') return;
     setMailLoading(true);
     setEmailTplLoading(true);
     Promise.all([
@@ -2799,23 +2799,24 @@ function Config() {
       <PageHead
         subtitle="Preferencias del sistema"
         title="Configuración"
-        description="Etapas del pipeline, integraciones y reglas de negocio."
+        description="Pipeline, alertas, integraciones y reglas de negocio."
       />
 
       <TabBar active={tab} onChange={setTab} tabs={[
-        { id:'stages',   label:'Etapas' },
-        { id:'mail',     label:'Mail' },
-        { id:'notifs',   label:'Notificaciones' },
-        { id:'articles', label:'Artículos' },
-        { id:'access',   label:'Acceso' },
-        { id:'logs',     label:'Registros' },
+        { id:'pipeline',   label:'Pipeline' },
+        { id:'correo',     label:'Correo' },
+        { id:'plantillas', label:'Plantillas' },
+        { id:'alertas',    label:'Alertas' },
+        { id:'articles',   label:'Artículos' },
+        { id:'access',     label:'Acceso' },
+        { id:'logs',       label:'Registros' },
         ...(isDeveloper ? [{ id:'developer', label:'🛠 Desarrolladores' }] : []),
       ]}/>
 
-      {tab==='stages' && (
-        <div className="p-6">
+      {tab==='pipeline' && (
+        <div className="p-6 space-y-5">
           <div className="grid grid-cols-2 gap-5">
-            <StageList stages={f1} phase="COTIZACION"   title="Fase 1 · Cotizaciones"
+            <StageList stages={f1} phase="COTIZACION" title="Fase 1 · Cotizaciones"
               entryKeys={[
                 { key: 'default_stage_solicitud',   label: 'Solicitud' },
                 { key: 'default_stage_presupuesto', label: 'Presupuesto' },
@@ -2828,40 +2829,44 @@ function Config() {
             />
           </div>
 
-          {/* ── Seguimiento ─────────────────────────────────────────────────── */}
-          <div className="mt-5 bg-white border border-line rounded-xl p-4 flex items-center gap-4">
-            <div className="w-8 h-8 rounded-lg bg-orange-50 flex items-center justify-center shrink-0">
-              <Icon name="clock" size={15} className="text-orange-500"/>
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-[13px] font-semibold text-ink-800">⏰ Alerta de seguimiento de presupuesto</div>
-              <div className="text-[11.5px] text-ink-400 mt-0.5 space-y-1">
-                <div>Cuando un presupuesto pasa a etapa <strong>"Enviado"</strong>, el sistema espera esta cantidad de días para que el cliente responda.</div>
-                <div>Si no hay respuesta, aparece el <strong>badge ámbar ⏰ Xd</strong> en la tarjeta del kanban indicando cuántos días lleva sin respuesta.</div>
-                <div>El vendedor puede usar <strong>"Recordar"</strong> desde la campanita para enviarle un mail al cliente y reiniciar el contador.</div>
-                <div className="text-ink-300">Se limpia automáticamente cuando la cotización se acepta o rechaza.</div>
+          <div className="bg-white border border-line rounded-xl overflow-hidden">
+            <div className="px-5 py-3.5 border-b border-line flex items-center gap-2">
+              <div className="w-6 h-6 rounded-md bg-orange-50 flex items-center justify-center">
+                <Icon name="zap" size={12} className="text-orange-500"/>
               </div>
+              <span className="text-[13px] font-semibold text-ink-800">Automatización</span>
             </div>
-            <select
-              className="inp text-[13px] w-36 shrink-0"
-              value={followUpDays}
-              onChange={e => saveFollowUpDays(e.target.value)}
-            >
-              {[1,2,3,4,5,7,10,14,21,30].map(d => (
-                <option key={d} value={String(d)}>{d} {d === 1 ? 'día' : 'días'}</option>
-              ))}
-            </select>
+            <div className="px-5 py-4 flex items-center gap-4">
+              <div className="w-8 h-8 rounded-lg bg-orange-50 flex items-center justify-center shrink-0">
+                <Icon name="clock" size={15} className="text-orange-500"/>
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-[13px] font-semibold text-ink-800">Seguimiento de presupuestos</div>
+                <div className="text-[11.5px] text-ink-400 mt-0.5">
+                  Días para considerar "sin respuesta" después de enviar. Aparece el badge ámbar ⏰ en el kanban.
+                </div>
+              </div>
+              <select
+                className="inp text-[13px] w-28 shrink-0"
+                value={followUpDays}
+                onChange={e => saveFollowUpDays(e.target.value)}
+              >
+                {[1,2,3,4,5,7,10,14,21,30].map(d => (
+                  <option key={d} value={String(d)}>{d} {d === 1 ? 'día' : 'días'}</option>
+                ))}
+              </select>
+            </div>
           </div>
         </div>
       )}
 
-      {tab==='mail' && (
+      {tab==='correo' && (
         <div className="p-6 space-y-5 max-w-3xl">
 
           {/* ── Sincronización ───────────────────────────────── */}
           <div className="bg-white border border-line rounded-xl p-5">
             <div className="flex items-center justify-between mb-4">
-              <div className="text-sm font-semibold">Sincronización</div>
+              <div className="text-sm font-semibold">Sincronización IMAP</div>
               <button
                 onClick={() => setMailSettings(s => ({ ...s, mail_sync_enabled: s.mail_sync_enabled === 'false' ? 'true' : 'false' }))}
                 className="flex items-center gap-2 text-[12px] text-ink-600 select-none"
@@ -2897,26 +2902,8 @@ function Config() {
                 </select>
               </div>
             </div>
-            <div className="mt-4 pt-4 border-t border-line">
-              <label className="block text-[12px] text-ink-500 mb-1">CC por defecto al enviar presupuesto</label>
-              <input className="inp text-sm w-full" type="text"
-                placeholder="ventas@myselec.com.ar, gerencia@myselec.com.ar"
-                value={emailCCDefault}
-                onChange={e => setEmailCCDefault(e.target.value)}/>
-              <div className="text-[11px] text-ink-400 mt-1">Separar múltiples direcciones con comas.</div>
-            </div>
             <div className="flex items-center gap-2 mt-4">
-              <button onClick={async () => {
-                try {
-                  await Promise.all([
-                    handleMailSettingSave(),
-                    CrmApi.saveEmailTemplates({ ccDefault: emailCCDefault }),
-                  ]);
-                  pushToast('Configuración guardada');
-                } catch { pushToast('Error al guardar', 'bad'); }
-              }} className="btn-primary text-[12px]">
-                Guardar
-              </button>
+              <button onClick={handleMailSettingSave} className="btn-primary text-[12px]">Guardar</button>
               <button onClick={handleSyncAll} disabled={mailSyncingAll}
                 className="btn-ghost text-[12px] flex items-center gap-1.5 disabled:opacity-60">
                 <Icon name="refresh-cw" size={13} className={mailSyncingAll ? 'animate-spin' : ''}/>
@@ -3031,7 +3018,6 @@ function Config() {
                         </button>
                       )}
                     </div>
-                    {/* Resultado del test de conexión */}
                     {mailTestResult[acc.user] && (
                       <div className={`mx-5 mb-3 rounded-lg px-3 py-2.5 text-[12px] ${mailTestResult[acc.user].ok ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
                         {mailTestResult[acc.user].ok ? (
@@ -3065,8 +3051,33 @@ function Config() {
               </div>
             )}
           </div>
+        </div>
+      )}
 
-          {/* ── Plantillas de email ───────────────────────────── */}
+      {/* ═══ PLANTILLAS ═══════════════════════════════════════ */}
+      {tab==='plantillas' && (
+        <div className="p-6 space-y-5 max-w-3xl">
+
+          {/* CC por defecto */}
+          <div className="bg-white border border-line rounded-xl p-5">
+            <div className="text-sm font-semibold mb-1">CC por defecto al enviar presupuesto</div>
+            <div className="text-[11.5px] text-ink-400 mb-3">Se agrega automáticamente como CC cuando un vendedor envía un presupuesto.</div>
+            <div className="flex items-center gap-2">
+              <input className="inp text-sm flex-1" type="text"
+                placeholder="ventas@myselec.com.ar, gerencia@myselec.com.ar"
+                value={emailCCDefault}
+                onChange={e => setEmailCCDefault(e.target.value)}/>
+              <button onClick={async () => {
+                try {
+                  await CrmApi.saveEmailTemplates({ ccDefault: emailCCDefault });
+                  pushToast('CC guardado');
+                } catch { pushToast('Error al guardar', 'bad'); }
+              }} className="btn-primary text-[12px] shrink-0">Guardar</button>
+            </div>
+            <div className="text-[11px] text-ink-400 mt-1.5">Separar múltiples direcciones con comas.</div>
+          </div>
+
+          {/* Plantillas de email */}
           <div className="bg-white border border-line rounded-xl p-5">
             <div className="flex items-center justify-between mb-3">
               <div>
@@ -3123,254 +3134,192 @@ function Config() {
               </div>
             )}
           </div>
+        </div>
+      )}
 
-          {/* ── Modal editar plantilla ───────────────────── */}
-          {editingTpl && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center">
-              <div className="absolute inset-0 bg-ink-900/40 backdrop-blur-[2px]" onClick={() => setEditingTpl(null)}/>
-              <div className="relative bg-white rounded-2xl shadow-pop w-full max-w-lg mx-4 flex flex-col max-h-[90vh]">
-                <div className="px-5 py-4 border-b border-line flex items-center justify-between">
-                  <div className="text-[14px] font-bold text-ink-900">{editingTpl._isNew ? 'Nueva plantilla' : 'Editar plantilla'}</div>
-                  <button onClick={() => setEditingTpl(null)} className="w-8 h-8 rounded-lg hover:bg-surface flex items-center justify-center text-ink-500">
-                    <Icon name="x" size={15}/>
-                  </button>
+      {tab==='alertas' && (() => {
+        const toggleSys = async (key, current, setter) => {
+          const next = current === 'true' ? 'false' : 'true';
+          setter(prev => ({ ...prev, [key]: next }));
+          try {
+            await fetch('/api/settings', {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('crm_token')}` },
+              body: JSON.stringify({ [key]: next }),
+            });
+          } catch { setter(prev => ({ ...prev, [key]: current })); pushToast('Error al guardar', 'bad'); }
+        };
+        const Tog = ({ on, onClick, title }) => (
+          <button onClick={onClick} title={title}
+            className={cx('w-9 h-[18px] rounded-full relative transition-colors shrink-0', on ? 'bg-brand' : 'bg-ink-300')}>
+            <div className={cx('absolute top-[2px] w-[14px] h-[14px] rounded-full bg-white shadow transition-all', on ? 'left-[19px]' : 'left-[2px]')}/>
+          </button>
+        );
+        const icoClr = { blue:'text-blue-500 bg-blue-50', orange:'text-orange-500 bg-orange-50', red:'text-red-500 bg-red-50', purple:'text-purple-500 bg-purple-50', gray:'text-ink-400 bg-surface', green:'text-emerald-500 bg-emerald-50' };
+
+        const AlertRow = ({ icon, color, label, desc, inapp, mail, weekly, settings }) => (
+          <div className="flex items-start gap-3 px-5 py-3.5">
+            <div className={cx('w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5', icoClr[color] || icoClr.gray)}>
+              <Icon name={icon} size={14}/>
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-[13px] font-medium text-ink-800">{label}</div>
+              <div className="text-[11.5px] text-ink-400 mt-0.5 leading-relaxed">{desc}</div>
+              {settings && settings.length > 0 && (
+                <div className="flex items-center gap-4 mt-2 flex-wrap">
+                  {settings.map(s => (
+                    <div key={s.key} className="flex items-center gap-1.5">
+                      <span className="text-[11px] text-ink-500 font-medium">{s.label}:</span>
+                      <select className="inp text-[11px] py-0.5 px-2"
+                        value={s.value}
+                        onChange={e => saveAutoAlertSetting(s.key, e.target.value, s.setter)}>
+                        {s.options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                      </select>
+                    </div>
+                  ))}
                 </div>
-                <div className="flex-1 overflow-y-auto scroll-thin px-5 py-4 space-y-3">
-                  <div>
-                    <label className="text-[11px] font-semibold text-ink-600 uppercase tracking-wide mb-1 block">Nombre</label>
-                    <input className="inp w-full text-sm" placeholder="Ej: Presupuesto estándar"
-                      value={editingTpl.name} onChange={e => setEditingTpl(t => ({ ...t, name: e.target.value }))}/>
-                  </div>
-                  <div>
-                    <label className="text-[11px] font-semibold text-ink-600 uppercase tracking-wide mb-1 block">Asunto</label>
-                    <input className="inp w-full text-sm" placeholder="Presupuesto {codigo} - Myselec"
-                      value={editingTpl.subject} onChange={e => setEditingTpl(t => ({ ...t, subject: e.target.value }))}/>
-                  </div>
-                  <div>
-                    <label className="text-[11px] font-semibold text-ink-600 uppercase tracking-wide mb-1 block">Cuerpo</label>
-                    <textarea className="inp w-full text-sm resize-y" rows={8}
-                      placeholder="Estimado/a {cliente},&#10;&#10;Adjunto el presupuesto {codigo}...&#10;&#10;Saludos,&#10;{vendedor}"
-                      value={editingTpl.body} onChange={e => setEditingTpl(t => ({ ...t, body: e.target.value }))}/>
-                  </div>
+              )}
+            </div>
+            <div className="flex items-center gap-4 shrink-0 pt-1">
+              {inapp && (
+                <div className="flex items-center gap-1.5" title="Campanita (in-app)">
+                  <Icon name="bell" size={12} className="text-ink-400"/>
+                  <Tog on={sysNotifInapp[inapp] === 'true'}
+                    onClick={() => toggleSys(inapp, sysNotifInapp[inapp], setSysNotifInapp)}
+                    title="In-app"/>
                 </div>
-                <div className="px-5 py-3 border-t border-line bg-surface flex justify-end gap-2">
-                  <button className="btn-ghost" onClick={() => setEditingTpl(null)} disabled={tplSaving}>Cancelar</button>
-                  <button className="btn-primary" disabled={tplSaving || !editingTpl.name || !editingTpl.subject || !editingTpl.body}
-                    onClick={async () => {
-                      setTplSaving(true);
-                      try {
-                        const { _isNew, ...tplData } = editingTpl;
-                        const updated = _isNew ? [...emailTemplates, tplData] : emailTemplates.map(t => t.id === tplData.id ? tplData : t);
-                        await CrmApi.saveEmailTemplates({ templates: updated });
-                        setEmailTemplates(updated);
-                        setEditingTpl(null);
-                        pushToast(_isNew ? 'Plantilla creada' : 'Plantilla guardada');
-                      } catch (err) { pushToast(err.message || 'Error', 'bad'); }
-                      finally { setTplSaving(false); }
-                    }}>
-                    {tplSaving ? 'Guardando…' : 'Guardar'}
-                  </button>
+              )}
+              {mail && (
+                <div className="flex items-center gap-1.5" title="Email">
+                  <Icon name="mail" size={12} className="text-ink-400"/>
+                  <Tog on={sysNotifMail[mail] === 'true'}
+                    onClick={() => toggleSys(mail, sysNotifMail[mail], setSysNotifMail)}
+                    title="Email"/>
                 </div>
+              )}
+              {weekly && (
+                <div className="flex items-center gap-1.5" title="Email semanal">
+                  <Icon name="mail" size={12} className="text-ink-400"/>
+                  <Tog on={weeklyReportEnabled === 'true'}
+                    onClick={() => {
+                      const next = weeklyReportEnabled === 'true' ? 'false' : 'true';
+                      setWeeklyReportEnabled(next);
+                      saveAutoAlertSetting('weekly_report_enabled', next, () => {});
+                    }}
+                    title="Email"/>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+
+        const Section = ({ title, icon, color, children }) => (
+          <div className="bg-white border border-line rounded-xl overflow-hidden">
+            <div className="px-5 py-3 border-b border-line flex items-center gap-2">
+              <div className={cx('w-6 h-6 rounded-md flex items-center justify-center', icoClr[color])}>
+                <Icon name={icon} size={12}/>
+              </div>
+              <span className="text-[13px] font-semibold text-ink-800">{title}</span>
+              <div className="flex-1"/>
+              <div className="flex items-center gap-3 text-[10px] font-semibold text-ink-400 uppercase tracking-wider">
+                <span className="flex items-center gap-1"><Icon name="bell" size={10}/>In-app</span>
+                <span className="flex items-center gap-1"><Icon name="mail" size={10}/>Email</span>
               </div>
             </div>
-          )}
-        </div>
-      )}
+            <div className="divide-y divide-line">{children}</div>
+          </div>
+        );
 
-      {tab==='notifs' && (
-        <div className="p-6 space-y-5">
+        return (
+          <div className="p-6 space-y-4 max-w-4xl">
+            <div className="text-[12px] text-ink-500 bg-surface border border-line rounded-lg px-4 py-2.5 flex items-center gap-2">
+              <Icon name="info" size={13} className="text-ink-400 shrink-0"/>
+              Configurá qué alertas recibe cada rol. Los usuarios pueden personalizar las suyas desde su perfil.
+            </div>
 
-          {/* ── Notificaciones del sistema ──────────────────────────────────────── */}
-          {(() => {
-            const toggleSys = async (key, current, setter) => {
-              const next = current === 'true' ? 'false' : 'true';
-              setter(prev => ({ ...prev, [key]: next }));
-              try {
-                await fetch('/api/settings', {
-                  method: 'PATCH',
-                  headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('crm_token')}` },
-                  body: JSON.stringify({ [key]: next }),
-                });
-                pushToast(next === 'true' ? 'Notificación activada' : 'Notificación desactivada', next === 'true' ? 'ok' : 'warn');
-              } catch { setter(prev => ({ ...prev, [key]: current })); pushToast('Error al guardar', 'bad'); }
-            };
-            const Toggle = ({ value, onClick }) => (
-              <button onClick={onClick}
-                className={cx('w-10 h-5 rounded-full relative transition-colors shrink-0', value === 'true' ? 'bg-brand' : 'bg-ink-300')}>
-                <div className={cx('absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all', value === 'true' ? 'left-[22px]' : 'left-0.5')}/>
-              </button>
-            );
-            const mailRows = [
-              { key: 'notify_new_register',    icon: 'user-plus',    color: 'blue',   label: 'Nuevo registro pendiente',  desc: 'Mail a administradores cuando alguien solicita acceso al CRM.', role: 'Admin' },
-              { key: 'notify_unassigned_mail', icon: 'mail-question', color: 'orange', label: 'Mail sin cliente asignado', desc: 'Mails que llegaron al CRM sin matchear ningún cliente.', role: 'Configurable', extra: 'unassignedFreq' },
-              { key: 'notify_stage_alert',     icon: 'clock-alert',  color: 'red',    label: 'Tiempo de etapa excedido',  desc: 'Digest por vendedor cuando sus cotizaciones superan el tiempo máximo de etapa.', role: 'Vendedor', extra: 'stageCooldown' },
-              { key: 'weekly_report_enabled',  icon: 'bar-chart-2',  color: 'purple', label: 'Resumen semanal por mail',  desc: 'Resumen con KPIs y ranking de vendedores. Se envía todos los lunes a las 9:00 hs a los administradores.', role: 'Admin', isWeekly: true },
-            ];
-            const inappRows = [
-              { key: 'inapp_unassigned_quotes',    icon: 'user-x',         color: 'red',    label: 'Solicitudes sin asignar',          desc: 'Cotizaciones recibidas sin vendedor asignado.', role: 'Admin' },
-              { key: 'inapp_pending_users',        icon: 'user-check',     color: 'purple', label: 'Usuarios pendientes de aprobación', desc: 'Usuarios registrados esperando que un admin les dé acceso.', role: 'Admin' },
-              { key: 'inapp_unlinked_solicitudes', icon: 'file-question',  color: 'orange', label: 'Solicitudes sin presupuesto',       desc: 'Solicitudes sin presupuesto vinculado después de X días. Alerta accionable para no dejar caer leads.', role: 'Todos', extra: 'solSinPres' },
-              { key: 'inapp_overdue_stages',       icon: 'clock-alert',    color: 'red',    label: 'Tiempo de etapa excedido',         desc: 'Ítems cuyo tiempo en la etapa actual superó el máximo. Muestra desglose por etapa. Descartable.', role: 'Todos' },
-              { key: 'inapp_idle_quotes',          icon: 'clock',          color: 'gray',   label: 'Cotizaciones sin actividad',       desc: 'Cotizaciones sin movimiento en más de X días. Descartable por N días.', role: 'Todos', extra: 'idleInbox' },
-              { key: 'inapp_follow_up',            icon: 'calendar-clock', color: 'blue',   label: 'Seguimientos vencidos',            desc: 'Cotizaciones con fecha de seguimiento ya vencida.', role: 'Vendedor' },
-              { key: 'inapp_follow_up_upcoming',   icon: 'calendar',       color: 'blue',   label: 'Seguimientos próximos',            desc: 'Aviso anticipado antes de que venza un seguimiento. Permite prepararse antes de que sea urgente.', role: 'Vendedor', extra: 'followUpUpcoming' },
-              { key: 'inapp_no_response',          icon: 'mail-question',  color: 'orange', label: 'Presupuestos sin respuesta',        desc: 'Presupuestos enviados sin respuesta del cliente después de X días. Incluye botón para enviar recordatorio.', role: 'Vendedor', extra: 'noResponse' },
-            ];
-            const iconColor = { blue:'text-blue-500 bg-blue-50', orange:'text-orange-500 bg-orange-50', red:'text-red-500 bg-red-50', purple:'text-purple-500 bg-purple-50', gray:'text-ink-400 bg-surface' };
-            const RoleBadge = ({ r }) => {
-              const c = r === 'Admin' ? 'bg-purple-50 text-purple-700' : r === 'Vendedor' ? 'bg-blue-50 text-blue-700' : r === 'Todos' ? 'bg-green-50 text-green-700' : 'bg-surface text-ink-500';
-              return <span className={cx('px-1.5 py-0.5 rounded text-[10px] font-semibold shrink-0', c)}>{r}</span>;
-            };
-            return (
-              <div className="bg-white border border-line rounded-xl overflow-hidden">
-                <div className="px-5 py-3.5 border-b border-line">
-                  <div className="font-semibold text-[13px]">Notificaciones del sistema</div>
-                  <div className="text-[11.5px] text-ink-400 mt-0.5">
-                    Activá o desactivá cada tipo de notificación a nivel global. Cada usuario puede además personalizar las suyas desde su perfil.
-                  </div>
-                </div>
-                {/* Por mail */}
-                <div className="px-5 pt-4 pb-1">
-                  <div className="flex items-center gap-2 mb-3">
-                    <Icon name="mail" size={13} className="text-ink-400"/>
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-ink-400">Por mail</span>
-                  </div>
-                  <div className="divide-y divide-line border border-line rounded-lg overflow-hidden">
-                    {mailRows.map(row => (
-                      <div key={row.key} className="flex items-center gap-3 px-4 py-3">
-                        <div className={cx('w-8 h-8 rounded-lg flex items-center justify-center shrink-0', iconColor[row.color] || iconColor.gray)}>
-                          <Icon name={row.icon} size={14}/>
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="text-[13px] font-medium text-ink-800">{row.label}</span>
-                            <RoleBadge r={row.role}/>
-                          </div>
-                          <div className="text-[11.5px] text-ink-400 mt-0.5 leading-relaxed">{row.desc}</div>
-                          {row.extra === 'unassignedFreq' && (
-                            <div className="flex items-center gap-2 mt-1.5">
-                              <span className="text-[11.5px] text-ink-400">Frecuencia:</span>
-                              <select
-                                className="inp text-[12px] py-0.5 w-36"
-                                value={unassignedMailFreq}
-                                onChange={e => saveAutoAlertSetting('unassigned_mail_frequency', e.target.value, setUnassignedMailFreq)}
-                              >
-                                <option value="immediate">Por mail (inmediato)</option>
-                                <option value="daily">Resumen diario</option>
-                                <option value="2days">Cada 2 días</option>
-                                <option value="weekly">Semanal</option>
-                              </select>
-                            </div>
-                          )}
-                          {row.extra === 'stageCooldown' && (
-                            <div className="flex items-center gap-2 mt-1.5">
-                              <span className="text-[11.5px] text-ink-400">Cooldown entre alertas:</span>
-                              <select
-                                className="inp text-[12px] py-0.5 w-24"
-                                value={stageCooldownDays}
-                                onChange={e => saveAutoAlertSetting('stage_alert_cooldown_days', e.target.value, setStageCooldownDays)}
-                              >
-                                {[1,2,3,5,7].map(d => <option key={d} value={String(d)}>{d} día{d > 1 ? 's' : ''}</option>)}
-                              </select>
-                            </div>
-                          )}
-                        </div>
-                        {row.isWeekly
-                          ? <Toggle value={weeklyReportEnabled} onClick={() => {
-                              const next = weeklyReportEnabled === 'true' ? 'false' : 'true';
-                              setWeeklyReportEnabled(next);
-                              saveAutoAlertSetting('weekly_report_enabled', next, () => {});
-                              saveAutoAlertSetting('weekly_report_day',  '1', setWeeklyReportDay);
-                              saveAutoAlertSetting('weekly_report_hour', '9', setWeeklyReportHour);
-                            }}/>
-                          : <Toggle value={sysNotifMail[row.key]} onClick={() => toggleSys(row.key, sysNotifMail[row.key], setSysNotifMail)}/>
-                        }
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                {/* In-app */}
-                <div className="px-5 pt-4 pb-5">
-                  <div className="flex items-center gap-2 mb-3">
-                    <Icon name="bell" size={13} className="text-ink-400"/>
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-ink-400">In-app (campanita)</span>
-                  </div>
-                  <div className="divide-y divide-line border border-line rounded-lg overflow-hidden">
-                    {inappRows.map(row => (
-                      <div key={row.key} className="flex items-center gap-3 px-4 py-3">
-                        <div className={cx('w-8 h-8 rounded-lg flex items-center justify-center shrink-0', iconColor[row.color] || iconColor.gray)}>
-                          <Icon name={row.icon} size={14}/>
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="text-[13px] font-medium text-ink-800">{row.label}</span>
-                            <RoleBadge r={row.role}/>
-                          </div>
-                          <div className="text-[11.5px] text-ink-400 mt-0.5">{row.desc}</div>
-                          {row.extra === 'idleInbox' && (
-                            <div className="flex items-center gap-2 mt-1.5">
-                              <span className="text-[11.5px] text-ink-400">Días sin actividad:</span>
-                              <select
-                                className="inp text-[12px] py-0.5 w-24"
-                                value={idleInboxDays}
-                                onChange={e => saveAutoAlertSetting('idle_inbox_days', e.target.value, setIdleInboxDays)}
-                              >
-                                {[2,3,4,5,7,10,14,21].map(d => <option key={d} value={String(d)}>{d} días</option>)}
-                              </select>
-                            </div>
-                          )}
-                          {row.extra === 'solSinPres' && (
-                            <div className="flex items-center gap-2 mt-1.5">
-                              <span className="text-[11.5px] text-ink-400">Alertar después de:</span>
-                              <select
-                                className="inp text-[12px] py-0.5 w-24"
-                                value={solSinPresDays}
-                                onChange={e => saveAutoAlertSetting('solicitud_sin_pres_days', e.target.value, setSolSinPresDays)}
-                              >
-                                {[1,2,3,5,7].map(d => <option key={d} value={String(d)}>{d} día{d > 1 ? 's' : ''}</option>)}
-                              </select>
-                            </div>
-                          )}
-                          {row.extra === 'followUpUpcoming' && (
-                            <div className="flex items-center gap-2 mt-1.5">
-                              <span className="text-[11.5px] text-ink-400">Anticipación:</span>
-                              <select
-                                className="inp text-[12px] py-0.5 w-28"
-                                value={followUpUpcomingDays}
-                                onChange={e => saveAutoAlertSetting('follow_up_upcoming_days', e.target.value, setFollowUpUpcomingDays)}
-                              >
-                                <option value="0">Solo hoy</option>
-                                <option value="1">24 horas antes</option>
-                                <option value="2">2 días antes</option>
-                                <option value="3">3 días antes</option>
-                              </select>
-                            </div>
-                          )}
-                          {row.extra === 'noResponse' && (
-                            <div className="flex items-center gap-2 mt-1.5">
-                              <span className="text-[11.5px] text-ink-400">Alertar después de:</span>
-                              <select
-                                className="inp text-[12px] py-0.5 w-24"
-                                value={noResponseDays}
-                                onChange={e => saveAutoAlertSetting('no_response_days', e.target.value, setNoResponseDays)}
-                              >
-                                {[2,3,4,5,7,10,14].map(d => <option key={d} value={String(d)}>{d} días</option>)}
-                              </select>
-                            </div>
-                          )}
-                        </div>
-                        <Toggle value={sysNotifInapp[row.key]} onClick={() => toggleSys(row.key, sysNotifInapp[row.key], setSysNotifInapp)}/>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            );
-          })()}
+            {/* ── Administración ── */}
+            <Section title="Administración" icon="shield" color="purple">
+              <AlertRow icon="user-check" color="purple"
+                label="Usuarios pendientes de aprobación"
+                desc="Usuarios registrados esperando que un admin les dé acceso."
+                inapp="inapp_pending_users"/>
+              <AlertRow icon="user-x" color="red"
+                label="Solicitudes sin asignar"
+                desc="Cotizaciones recibidas sin vendedor asignado."
+                inapp="inapp_unassigned_quotes"/>
+              <AlertRow icon="user-plus" color="blue"
+                label="Nuevo registro pendiente"
+                desc="Aviso por mail cuando alguien solicita acceso al CRM."
+                mail="notify_new_register"/>
+              <AlertRow icon="bar-chart-2" color="purple"
+                label="Resumen semanal"
+                desc="KPIs y ranking de vendedores. Lunes 9:00 hs."
+                weekly/>
+            </Section>
 
+            {/* ── Ventas ── */}
+            <Section title="Ventas" icon="trending-up" color="blue">
+              <AlertRow icon="clock-alert" color="red"
+                label="Tiempo de etapa excedido"
+                desc="Cotizaciones que superaron el tiempo máximo configurado en su etapa."
+                inapp="inapp_overdue_stages"
+                mail="notify_stage_alert"
+                settings={[
+                  { label:'Cooldown entre alertas', key:'stage_alert_cooldown_days', value:stageCooldownDays, setter:setStageCooldownDays,
+                    options:[1,2,3,5,7].map(d => ({ value:String(d), label:`${d} día${d>1?'s':''}` })) },
+                ]}/>
+              <AlertRow icon="calendar-clock" color="blue"
+                label="Seguimientos vencidos"
+                desc="Cotizaciones con fecha de seguimiento ya pasada."
+                inapp="inapp_follow_up"/>
+              <AlertRow icon="calendar" color="blue"
+                label="Seguimientos próximos"
+                desc="Aviso anticipado antes de que venza un seguimiento."
+                inapp="inapp_follow_up_upcoming"
+                settings={[
+                  { label:'Anticipación', key:'follow_up_upcoming_days', value:followUpUpcomingDays, setter:setFollowUpUpcomingDays,
+                    options:[{value:'0',label:'Solo hoy'},{value:'1',label:'24 horas'},{value:'2',label:'2 días'},{value:'3',label:'3 días'}] },
+                ]}/>
+              <AlertRow icon="mail-question" color="orange"
+                label="Presupuestos sin respuesta"
+                desc="Presupuestos enviados sin respuesta del cliente. Incluye botón para enviar recordatorio."
+                inapp="inapp_no_response"
+                settings={[
+                  { label:'Alertar después de', key:'no_response_days', value:noResponseDays, setter:setNoResponseDays,
+                    options:[2,3,4,5,7,10,14].map(d => ({ value:String(d), label:`${d} días` })) },
+                ]}/>
+            </Section>
 
-        </div>
-      )}
+            {/* ── General ── */}
+            <Section title="General" icon="users" color="green">
+              <AlertRow icon="file-question" color="orange"
+                label="Solicitudes sin presupuesto"
+                desc="Solicitudes sin presupuesto vinculado. Alerta para no dejar caer leads."
+                inapp="inapp_unlinked_solicitudes"
+                settings={[
+                  { label:'Alertar después de', key:'solicitud_sin_pres_days', value:solSinPresDays, setter:setSolSinPresDays,
+                    options:[1,2,3,5,7].map(d => ({ value:String(d), label:`${d} día${d>1?'s':''}` })) },
+                ]}/>
+              <AlertRow icon="clock" color="gray"
+                label="Cotizaciones sin actividad"
+                desc="Cotizaciones sin movimiento. Descartable por N días."
+                inapp="inapp_idle_quotes"
+                settings={[
+                  { label:'Días sin actividad', key:'idle_inbox_days', value:idleInboxDays, setter:setIdleInboxDays,
+                    options:[2,3,4,5,7,10,14,21].map(d => ({ value:String(d), label:`${d} días` })) },
+                ]}/>
+              <AlertRow icon="mail-question" color="orange"
+                label="Mail sin cliente asignado"
+                desc="Mails que llegaron al CRM sin matchear ningún cliente."
+                mail="notify_unassigned_mail"
+                settings={[
+                  { label:'Frecuencia', key:'unassigned_mail_frequency', value:unassignedMailFreq, setter:setUnassignedMailFreq,
+                    options:[{value:'immediate',label:'Inmediato'},{value:'daily',label:'Diario'},{value:'2days',label:'Cada 2 días'},{value:'weekly',label:'Semanal'}] },
+                ]}/>
+            </Section>
+          </div>
+        );
+      })()}
 
       {tab==='articles' && <Articles/>}
 
@@ -3477,6 +3426,57 @@ function Config() {
 
       {tab==='logs' && <LoginLogs/>}
       {tab==='developer' && isDeveloper && <DeveloperSettings/>}
+
+      {/* ── Modal editar plantilla (global, fuera de tabs) ── */}
+      {editingTpl && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-ink-900/40 backdrop-blur-[2px]" onClick={() => setEditingTpl(null)}/>
+          <div className="relative bg-white rounded-2xl shadow-pop w-full max-w-lg mx-4 flex flex-col max-h-[90vh]">
+            <div className="px-5 py-4 border-b border-line flex items-center justify-between">
+              <div className="text-[14px] font-bold text-ink-900">{editingTpl._isNew ? 'Nueva plantilla' : 'Editar plantilla'}</div>
+              <button onClick={() => setEditingTpl(null)} className="w-8 h-8 rounded-lg hover:bg-surface flex items-center justify-center text-ink-500">
+                <Icon name="x" size={15}/>
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto scroll-thin px-5 py-4 space-y-3">
+              <div>
+                <label className="text-[11px] font-semibold text-ink-600 uppercase tracking-wide mb-1 block">Nombre</label>
+                <input className="inp w-full text-sm" placeholder="Ej: Presupuesto estándar"
+                  value={editingTpl.name} onChange={e => setEditingTpl(t => ({ ...t, name: e.target.value }))}/>
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-ink-600 uppercase tracking-wide mb-1 block">Asunto</label>
+                <input className="inp w-full text-sm" placeholder="Presupuesto {codigo} - Myselec"
+                  value={editingTpl.subject} onChange={e => setEditingTpl(t => ({ ...t, subject: e.target.value }))}/>
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-ink-600 uppercase tracking-wide mb-1 block">Cuerpo</label>
+                <textarea className="inp w-full text-sm resize-y" rows={8}
+                  placeholder="Estimado/a {cliente},&#10;&#10;Adjunto el presupuesto {codigo}...&#10;&#10;Saludos,&#10;{vendedor}"
+                  value={editingTpl.body} onChange={e => setEditingTpl(t => ({ ...t, body: e.target.value }))}/>
+              </div>
+            </div>
+            <div className="px-5 py-3 border-t border-line bg-surface flex justify-end gap-2">
+              <button className="btn-ghost" onClick={() => setEditingTpl(null)} disabled={tplSaving}>Cancelar</button>
+              <button className="btn-primary" disabled={tplSaving || !editingTpl.name || !editingTpl.subject || !editingTpl.body}
+                onClick={async () => {
+                  setTplSaving(true);
+                  try {
+                    const { _isNew, ...tplData } = editingTpl;
+                    const updated = _isNew ? [...emailTemplates, tplData] : emailTemplates.map(t => t.id === tplData.id ? tplData : t);
+                    await CrmApi.saveEmailTemplates({ templates: updated });
+                    setEmailTemplates(updated);
+                    setEditingTpl(null);
+                    pushToast(_isNew ? 'Plantilla creada' : 'Plantilla guardada');
+                  } catch (err) { pushToast(err.message || 'Error', 'bad'); }
+                  finally { setTplSaving(false); }
+                }}>
+                {tplSaving ? 'Guardando…' : 'Guardar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );
