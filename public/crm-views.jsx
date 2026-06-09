@@ -2211,6 +2211,7 @@ function Config() {
   const [newStage, setNewStage] = useState({ label: '', tone: 'gray', phase: null });
   const [dragOverId, setDragOverId] = useState(null);
   const dragItem = React.useRef(null);
+  const [activePhase, setActivePhase] = useState('COTIZACION');
 
   // Etapas de entrada por tipo de mail
   const [incomingStages, setIncomingStages] = useState({
@@ -2602,57 +2603,52 @@ function Config() {
     } catch { pushToast('Error al guardar', 'bad'); }
   };
 
-  const StageList = ({ stages, phase, title, entryKeys = [] }) => (
-    <div className="bg-white border border-line rounded-xl p-5">
-      <div className="flex items-center justify-between mb-3">
-        <div>
-          <div className="text-sm font-semibold">{title}</div>
-          {entryKeys.length > 0 && (
-            <div className="flex items-center gap-3 mt-1.5 flex-wrap">
-              {entryKeys.map(({ key, label }) => (
-                <div key={key} className="flex items-center gap-1.5">
-                  <span className="text-[11px] text-ink-500 font-medium">Entrada {label}:</span>
-                  <select
-                    value={incomingStages[key] || ''}
-                    onChange={e => saveEntryStage(key, e.target.value)}
-                    className="border border-line rounded-md px-1.5 py-0.5 text-[11px] bg-white focus:outline-none focus:ring-1 focus:ring-brand/30 text-ink-700"
-                  >
-                    {stages.map(s => (
-                      <option key={s.id} value={s.stageKey}>{s.label}</option>
-                    ))}
-                  </select>
-                </div>
-              ))}
+  /* ── Grid column template for stage rows ── */
+  const stageGridCols = 'grid-cols-[20px_20px_10px_1fr_auto_auto_auto_auto]';
+
+  const StageList = ({ stages, phase, entryKeys = [] }) => (
+    <div>
+      {/* Entrada por tipo de mail */}
+      {entryKeys.length > 0 && (
+        <div className="flex items-center gap-4 mb-4 flex-wrap">
+          {entryKeys.map(({ key, label }) => (
+            <div key={key} className="flex items-center gap-1.5">
+              <span className="text-[11.5px] text-ink-500 font-medium">Entrada {label}:</span>
+              <select
+                value={incomingStages[key] || ''}
+                onChange={e => saveEntryStage(key, e.target.value)}
+                className="border border-line rounded-md px-2 py-1 text-[12px] bg-white focus:outline-none focus:ring-1 focus:ring-brand/30 text-ink-700"
+              >
+                {stages.map(s => (
+                  <option key={s.id} value={s.stageKey}>{s.label}</option>
+                ))}
+              </select>
             </div>
-          )}
+          ))}
         </div>
-        <button onClick={() => setNewStage({ label: '', tone: 'gray', phase })}
-          className="btn-ghost text-[12px] flex items-center gap-1 text-brand shrink-0">
-          <Icon name="plus" size={13}/> Agregar etapa
-        </button>
-      </div>
+      )}
+
       {stagesLoading ? (
-        <div className="text-[13px] text-ink-400 py-6 text-center">Cargando etapas…</div>
+        <div className="text-[13px] text-ink-400 py-8 text-center">Cargando etapas…</div>
       ) : (<>
-        <div className="overflow-x-auto -mx-1 px-1">
-        <div className="min-w-[520px]">
-        {/* Header de columnas */}
-        <div className="flex items-center gap-2 px-2.5 mb-2 py-1.5 rounded-lg bg-surface select-none text-[10px] font-semibold uppercase tracking-wider text-ink-500">
-          <div className="w-5 shrink-0"/>
-          <div className="w-5 shrink-0"/>
-          <div className="w-2.5 shrink-0"/>
-          <div className="flex-1">Etapa</div>
-          <div className="w-[102px] text-center border-l-2 border-ink-400 flex items-center justify-center gap-1">
+        {/* Header de columnas — CSS Grid */}
+        <div className={cx('grid items-center gap-x-3 px-3 py-2 rounded-lg bg-surface select-none text-[10px] font-semibold uppercase tracking-wider text-ink-500', stageGridCols)}>
+          <div/><div/><div/>
+          <div>Etapa</div>
+          <div className="flex items-center justify-center gap-1 border-l-2 border-ink-400 pl-3 pr-2">
             <Icon name="check-circle" size={10} className="text-ink-500"/>Obligatoria
           </div>
-          <div className="w-[168px] text-center border-l-2 border-ink-400 flex items-center justify-center gap-1">
+          <div className="flex items-center justify-center gap-1 border-l-2 border-ink-400 pl-3 pr-1">
             <Icon name="clock" size={10} className="text-ink-500"/>Tiempo máx.
           </div>
-          <div className="w-[46px] text-center border-l-2 border-ink-400 flex items-center justify-center gap-1" title="Alerta por email al superar el tiempo máximo">
+          <div className="flex items-center justify-center border-l-2 border-ink-400 pl-3 pr-1" title="Alerta por email al superar el tiempo máximo">
             <Icon name="mail" size={10} className="text-ink-500"/>
           </div>
+          <div/>
         </div>
-        <ul className="space-y-1.5">
+
+        {/* Stage rows */}
+        <ul className="mt-1">
           {stages.map((s, i) => (
             <li key={s.id}
               draggable={editingId !== s.id}
@@ -2691,17 +2687,21 @@ function Config() {
                   <button onClick={() => setEditingId(null)} className="btn-ghost text-[12px] py-1 px-2">Cancelar</button>
                 </div>
               ) : (
-                <div className="group flex items-center gap-2 p-2.5 rounded-lg hover:bg-surface">
-                  {/* Handle de arrastre */}
-                  <div className="w-5 flex items-center justify-center cursor-grab active:cursor-grabbing text-ink-300 hover:text-ink-500 shrink-0 select-none"
+                <div className={cx('group grid items-center gap-x-3 px-3 py-2.5 rounded-lg hover:bg-surface/70', stageGridCols)}>
+                  {/* Grip */}
+                  <div className="flex items-center justify-center cursor-grab active:cursor-grabbing text-ink-300 hover:text-ink-500 select-none"
                     title="Arrastrar para reordenar">
                     <Icon name="grip-vertical" size={14}/>
                   </div>
-                  <span className="w-5 text-right mono text-[11px] text-ink-400 font-semibold">{i+1}.</span>
+                  {/* Number */}
+                  <span className="text-right mono text-[11px] text-ink-400 font-semibold">{i+1}.</span>
+                  {/* Dot */}
                   <StageDot tone={s.tone}/>
-                  <span className="flex-1 text-[13px] font-medium text-ink-900">{s.label}</span>
-                  {/* Columna Obligatoria — solo el toggle, centrado */}
-                  <div className="w-[102px] flex justify-center shrink-0 border-l-2 border-ink-400">
+                  {/* Name */}
+                  <span className="text-[13px] font-medium text-ink-900 truncate">{s.label}</span>
+
+                  {/* Obligatoria */}
+                  <div className="flex justify-center border-l-2 border-ink-400 pl-3 pr-2">
                     <button onClick={() => handleToggleMandatory(s)}
                       title={s.mandatory ? 'Quitar obligatoria' : 'Marcar como obligatoria'}
                       className={cx('w-8 h-4 rounded-full relative transition-colors',
@@ -2710,8 +2710,9 @@ function Config() {
                         s.mandatory ? 'left-[18px]' : 'left-0.5')}/>
                     </button>
                   </div>
-                  {/* Zona de tiempo máximo — ancho fijo para que nada se mueva */}
-                  <div className="flex items-center gap-1.5 shrink-0 w-[168px] border-l-2 border-ink-400 pl-2">
+
+                  {/* Tiempo máximo */}
+                  <div className="flex items-center gap-1.5 border-l-2 border-ink-400 pl-3 pr-1">
                     <button
                       title={s.maxHours ? 'Desactivar tiempo máximo' : 'Activar tiempo máximo'}
                       onClick={() => {
@@ -2760,8 +2761,9 @@ function Config() {
                       <option value="meses">meses</option>
                     </select>
                   </div>
-                  {/* Toggle alerta por mail — solo visible cuando hay tiempo máximo */}
-                  <div className={cx('flex items-center gap-1.5 shrink-0 transition-opacity border-l-2 border-ink-400 pl-2', !s.maxHours && 'opacity-30 pointer-events-none')}
+
+                  {/* Alerta mail */}
+                  <div className={cx('flex items-center gap-1.5 transition-opacity border-l-2 border-ink-400 pl-3 pr-1', !s.maxHours && 'opacity-30 pointer-events-none')}
                     title={s.maxHours ? (s.emailAlert ? 'Desactivar alerta por mail al vendedor' : 'Activar alerta por mail al vendedor cuando se supera el tiempo') : 'Configurá un tiempo máximo primero'}>
                     <Icon name="mail" size={12} className="text-ink-400"/>
                     <button
@@ -2772,6 +2774,8 @@ function Config() {
                         s.emailAlert && s.maxHours ? 'left-[14px]' : 'left-0.5')}/>
                     </button>
                   </div>
+
+                  {/* Actions */}
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button onClick={() => startEdit(s)} className="btn-ghost p-1" title="Editar">
                       <Icon name="pencil" size={13} className="text-ink-500"/>
@@ -2784,6 +2788,8 @@ function Config() {
               )}
             </li>
           ))}
+
+          {/* New stage row */}
           {newStage.phase === phase && (
             <li className="flex items-center gap-2 p-2.5 rounded-lg bg-surface border border-line border-dashed mt-2">
               <StageDot tone={newStage.tone}/>
@@ -2798,8 +2804,6 @@ function Config() {
             </li>
           )}
         </ul>
-        </div>{/* min-w */}
-        </div>{/* overflow-x-auto */}
       </>)}
     </div>
   );
@@ -2825,18 +2829,51 @@ function Config() {
 
       {tab==='pipeline' && (
         <div className="p-6 space-y-5">
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-            <StageList stages={f1} phase="COTIZACION" title="Fase 1 · Cotizaciones"
-              entryKeys={[
-                { key: 'default_stage_solicitud',   label: 'Solicitud' },
-                { key: 'default_stage_presupuesto', label: 'Presupuesto' },
-              ]}
-            />
-            <StageList stages={f2} phase="ORDEN_COMPRA" title="Fase 2 · Órdenes de Compra"
-              entryKeys={[
-                { key: 'default_stage_nota_pedido', label: 'Nota de Pedido' },
-              ]}
-            />
+          {/* Phase toggle + stage list */}
+          <div className="bg-white border border-line rounded-xl">
+            {/* Phase selector header */}
+            <div className="flex items-center justify-between px-5 py-3 border-b border-line">
+              <div className="flex items-center gap-1 bg-surface rounded-lg p-0.5">
+                <button
+                  onClick={() => setActivePhase('COTIZACION')}
+                  className={cx('px-3.5 py-1.5 rounded-md text-[12.5px] font-medium transition-all',
+                    activePhase === 'COTIZACION'
+                      ? 'bg-white text-ink-900 shadow-sm'
+                      : 'text-ink-500 hover:text-ink-700'
+                  )}
+                >Fase 1 · Cotizaciones</button>
+                <button
+                  onClick={() => setActivePhase('ORDEN_COMPRA')}
+                  className={cx('px-3.5 py-1.5 rounded-md text-[12.5px] font-medium transition-all',
+                    activePhase === 'ORDEN_COMPRA'
+                      ? 'bg-white text-ink-900 shadow-sm'
+                      : 'text-ink-500 hover:text-ink-700'
+                  )}
+                >Fase 2 · Órdenes de Compra</button>
+              </div>
+              <button onClick={() => setNewStage({ label: '', tone: 'gray', phase: activePhase })}
+                className="btn-ghost text-[12px] flex items-center gap-1 text-brand">
+                <Icon name="plus" size={13}/> Agregar etapa
+              </button>
+            </div>
+
+            {/* Active phase content */}
+            <div className="p-5">
+              {activePhase === 'COTIZACION' ? (
+                <StageList stages={f1} phase="COTIZACION"
+                  entryKeys={[
+                    { key: 'default_stage_solicitud',   label: 'Solicitud' },
+                    { key: 'default_stage_presupuesto', label: 'Presupuesto' },
+                  ]}
+                />
+              ) : (
+                <StageList stages={f2} phase="ORDEN_COMPRA"
+                  entryKeys={[
+                    { key: 'default_stage_nota_pedido', label: 'Nota de Pedido' },
+                  ]}
+                />
+              )}
+            </div>
           </div>
 
           <div className="bg-white border border-line rounded-xl overflow-hidden">
