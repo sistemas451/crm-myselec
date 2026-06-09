@@ -215,6 +215,7 @@ const CrmApi = {
     method: 'PATCH', body: JSON.stringify({ ids })
   }),
   getActivity: (limit = 20) => apiFetch(`/data/activity?limit=${limit}`),
+  sync: (since) => apiFetch(`/data/sync?since=${encodeURIComponent(since)}`),
   getDashboard:    (p) => apiFetch(`/data/dashboard${toQS(p)}`),
   getChartSellers:    (p) => apiFetch(`/data/charts/sellers${toQS(p)}`),
   getChartStages:     (p) => apiFetch(`/data/charts/stages${toQS(p)}`),

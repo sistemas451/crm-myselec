@@ -76,32 +76,21 @@ function AppProvider({ children }) {
   };
   const isSnoozed = (_id) => false; // ya no usamos localStorage para esto
 
-  // ── Carga de actividades ─────────────────────────────────────────────────────
+  // ── Carga inicial de actividades ──────────────────────────────────────────────
+  const mapActivity = (activities) => {
+    const readIds = getReadIds();
+    return activities.map(a => {
+      let kind = 'info';
+      if (a.action === 'STAGE_CHANGE') {
+        kind = a.detail?.includes('rechazada') ? 'bad' : a.detail?.includes('aceptada') ? 'ok' : 'info';
+      } else if (a.action === 'CREATED') kind = 'ok';
+      const ref = a.quoteCode ? { kind: 'quote', code: a.quoteCode }
+               : a.orderCode ? { kind: 'order', code: a.orderCode } : null;
+      return { id: a.id, kind, text: a.detail, at: a.createdAt, read: readIds.has(a.id), ref, userName: a.userName };
+    });
+  };
   useEff(() => {
-    CrmApi.getActivity(50).then(activities => {
-      const readIds = getReadIds();
-      const notifs = activities.map(a => {
-        let kind = 'info';
-        if (a.action === 'STAGE_CHANGE') {
-          if (a.detail?.includes('rechazada')) kind = 'bad';
-          else if (a.detail?.includes('aceptada')) kind = 'ok';
-          else kind = 'info';
-        } else if (a.action === 'CREATED') {
-          kind = 'ok';
-        } else if (a.action === 'NOTE_ADDED') {
-          kind = 'info';
-        } else if (a.action === 'ASSIGNED') {
-          kind = 'info';
-        }
-        const ref = a.quoteCode
-          ? { kind: 'quote', code: a.quoteCode }
-          : a.orderCode
-            ? { kind: 'order', code: a.orderCode }
-            : null;
-        return { id: a.id, kind, text: a.detail, at: a.createdAt, read: readIds.has(a.id), ref, userName: a.userName };
-      });
-      setNotifications(notifs);
-    }).catch(() => setNotifications([]));
+    CrmApi.getActivity(50).then(a => setNotifications(mapActivity(a))).catch(() => setNotifications([]));
   }, []);
 
   // ── Carga y polling de inbox alerts (cada 3 min) ─────────────────────────────
@@ -119,7 +108,6 @@ function AppProvider({ children }) {
 
   // ── Confirmar cotización asignada vista ("Listo ✓") ───────────────────────────
   const ackAssigned = useCallback(async (quoteId) => {
-    // Optimista: quitar el ítem de la lista inmediatamente
     setInboxAlerts(prev => prev.map(a => {
       if (a.type !== 'ASSIGNED_QUOTES') return a;
       const newItems = a.items.filter(i => i.id !== quoteId);
@@ -128,24 +116,102 @@ function AppProvider({ children }) {
     try { await CrmApi.ackAssignedQuote(quoteId); } catch (e) { console.warn('ack error:', e.message); }
   }, []);
 
-  // ── Auto-refresh de quotes y orders cada 60 segundos ─────────────────────────
-  const refreshData = useRef(null);
-  refreshData.current = async () => {
+  // ── Smart sync: polling inteligente cada 25s (activo) / 2min (oculto) ────────
+  const lastSyncTs  = useRef(new Date().toISOString());
+  const syncCounts  = useRef({ quotes: 0, orders: 0, clients: 0, users: 0 });
+  const POLL_ACTIVE = 25 * 1000;   // 25s con pestaña activa
+  const POLL_HIDDEN = 120 * 1000;  // 2min con pestaña oculta
+
+  // Helpers para mapear clients y users al formato del frontend
+  const mapClientsArr = (arr) => arr.map(c => ({
+    id: c.id, code: c.code, name: c.name, cuit: c.cuit || '',
+    city: c.city || '', prov: c.province || '', zone: c.zone || '',
+    activity: c.activity || '', seller: c.defaultSellerId || '',
+    sellerName: c.defaultSeller?.name || '', email: c.emailPrimary || c.email || '',
+    phone: c.phone || '', address: c.address || '',
+  }));
+  const roleMap = { DEVELOPER: 'Desarrollador', ADMIN: 'Administrador', VENDEDOR: 'Vendedor', LOGISTICA: 'Logística' };
+  const mapUsersArr = (arr) => arr.map(u => ({
+    id: u.id, name: u.name, email: u.email, role: roleMap[u.role] || u.role, zone: u.zone || '—',
+  }));
+
+  const doSync = useRef(null);
+  doSync.current = async () => {
     try {
-      const since = new Date(Date.now() - 365 * 86400 * 1000).toISOString().split('T')[0];
-      const [freshQuotes, freshOrders] = await Promise.all([
-        CrmApi.getQuotes({ since }),
-        CrmApi.getOrders({ since }),
-      ]);
-      setQuotes(freshQuotes);
-      setOrders(freshOrders);
+      const data = await CrmApi.sync(lastSyncTs.current);
+      lastSyncTs.current = data.ts;
+
+      // 1. Merge updated quotes (upsert by code, preserva los existentes)
+      if (data.quotes.length > 0) {
+        setQuotes(prev => {
+          const map = new Map(prev.map(q => [q.code, q]));
+          data.quotes.forEach(q => map.set(q.code, q));
+          return [...map.values()];
+        });
+      }
+
+      // 2. Merge updated orders (upsert by code)
+      if (data.orders.length > 0) {
+        setOrders(prev => {
+          const map = new Map(prev.map(o => [o.code, o]));
+          data.orders.forEach(o => map.set(o.code, o));
+          return [...map.values()];
+        });
+      }
+
+      // 3. Drift detection: si el count bajó, algo se eliminó → refresh completo
+      const prev = syncCounts.current;
+      if (prev.quotes > 0 && data.counts.quotes < prev.quotes) {
+        const since = new Date(Date.now() - 365 * 86400 * 1000).toISOString().split('T')[0];
+        CrmApi.getQuotes({ since }).then(fresh => setQuotes(fresh)).catch(() => {});
+      }
+      if (prev.orders > 0 && data.counts.orders < prev.orders) {
+        CrmApi.getOrders().then(fresh => setOrders(fresh)).catch(() => {});
+      }
+
+      // 4. Clients: si cambió el count → refetch completo
+      if (prev.clients > 0 && data.counts.clients !== prev.clients) {
+        CrmApi.getClients().then(fresh => setClients(mapClientsArr(fresh))).catch(() => {});
+      }
+
+      // 5. Users: si cambió el count → refetch completo
+      if (prev.users > 0 && data.counts.users !== prev.users) {
+        CrmApi.getUsers().then(fresh => setUsers(mapUsersArr(fresh))).catch(() => {});
+      }
+
+      // 6. Activity: actualizar el feed de notificaciones
+      if (data.activity.length > 0) {
+        setNotifications(mapActivity(data.activity));
+      }
+
+      // Guardar counts para la próxima comparación
+      syncCounts.current = data.counts;
     } catch (_) { /* silencioso — no interrumpir al usuario */ }
   };
+
   useEff(() => {
-    const t = setInterval(() => refreshData.current(), 60 * 1000);
-    const onVisible = () => { if (!document.hidden) refreshData.current(); };
+    // Inicializar counts desde el estado actual
+    syncCounts.current = {
+      quotes: QUOTES.length, orders: ORDERS.length,
+      clients: CLIENTS.length, users: USERS.length,
+    };
+
+    let timer = null;
+    const schedule = () => {
+      const interval = document.hidden ? POLL_HIDDEN : POLL_ACTIVE;
+      timer = setTimeout(() => { doSync.current(); schedule(); }, interval);
+    };
+    schedule();
+
+    // Al volver a la pestaña: sync inmediato + refresh de inbox alerts
+    const onVisible = () => {
+      if (!document.hidden) {
+        doSync.current();
+        loadInboxAlerts.current();
+      }
+    };
     document.addEventListener('visibilitychange', onVisible);
-    return () => { clearInterval(t); document.removeEventListener('visibilitychange', onVisible); };
+    return () => { clearTimeout(timer); document.removeEventListener('visibilitychange', onVisible); };
   }, []);
 
   // Quote-level filters (shared by board)

@@ -683,4 +683,171 @@ router.get('/comparativa', authMiddleware, async (req, res) => {
   }
 });
 
+// ─── GET /api/data/sync — Smart polling: delta changes since last sync ───
+router.get('/sync', authMiddleware, async (req, res) => {
+  try {
+    const since = req.query.since ? new Date(req.query.since) : null;
+    if (!since || isNaN(since.getTime())) {
+      return res.status(400).json({ error: 'Parámetro "since" requerido (ISO timestamp)' });
+    }
+    const ts = new Date().toISOString();
+
+    // ── Build RBAC filters ──
+    const isVendedor = req.user.role === 'VENDEDOR';
+
+    // Quotes (F1): exclude OC / NOTA_PEDIDO
+    const quoteMailFilter = { OR: [{ mailType: null }, { mailType: { notIn: ['OC', 'NOTA_PEDIDO'] } }] };
+    const quoteWhere = { updatedAt: { gte: since } };
+    if (isVendedor) {
+      quoteWhere.AND = [
+        quoteMailFilter,
+        { OR: [{ sellerId: req.user.id }, { sellerId: null, stage: 'recibida' }] },
+      ];
+    } else {
+      quoteWhere.AND = [quoteMailFilter];
+    }
+
+    // Orders (F2): manual Order model
+    const orderWhere = { updatedAt: { gte: since } };
+    if (isVendedor) orderWhere.sellerId = req.user.id;
+
+    // Orders (F2): email NOTA_PEDIDO
+    const npWhere = { mailType: 'NOTA_PEDIDO', updatedAt: { gte: since } };
+    if (isVendedor) npWhere.sellerId = req.user.id;
+
+    // Count filters (no date filter — total visible to this user)
+    const quoteCountWhere = isVendedor
+      ? { AND: [quoteMailFilter, { OR: [{ sellerId: req.user.id }, { sellerId: null, stage: 'recibida' }] }] }
+      : quoteMailFilter;
+    const orderCountWhere = isVendedor ? { sellerId: req.user.id } : {};
+    const npCountWhere = isVendedor
+      ? { mailType: 'NOTA_PEDIDO', sellerId: req.user.id }
+      : { mailType: 'NOTA_PEDIDO' };
+
+    // ── Parallel queries ──
+    const [quotes, orders, emailOCs, activity,
+           quoteTotal, orderTotal, npTotal, clientTotal, userTotal] = await Promise.all([
+      prisma.quote.findMany({
+        where: quoteWhere,
+        include: {
+          client: { select: { id: true, code: true, name: true, city: true, province: true, zone: true } },
+          seller: { select: { id: true, name: true, email: true, zone: true } },
+          linkedQuote: { select: { id: true, code: true, mailType: true, stage: true, flexxusCode: true } },
+          _count: { select: { notes: true, attachments: true } },
+        },
+        orderBy: { updatedAt: 'desc' },
+        take: 500,
+      }),
+      prisma.order.findMany({
+        where: orderWhere,
+        include: {
+          client: { select: { code: true, name: true, city: true, province: true } },
+          seller: { select: { id: true, name: true } },
+          fromQuote: { select: { code: true } },
+          _count: { select: { notes: true, attachments: true } },
+        },
+        orderBy: { updatedAt: 'desc' },
+        take: 500,
+      }),
+      prisma.quote.findMany({
+        where: npWhere,
+        include: {
+          client: { select: { code: true, name: true, city: true, province: true } },
+          seller: { select: { id: true, name: true } },
+          linkedQuote: { select: { code: true } },
+          _count: { select: { notes: true, attachments: true } },
+        },
+        orderBy: { updatedAt: 'desc' },
+      }),
+      prisma.activity.findMany({
+        take: 20,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          user:  { select: { id: true, name: true } },
+          quote: { select: { id: true, code: true } },
+          order: { select: { id: true, code: true } },
+        },
+      }),
+      prisma.quote.count({ where: quoteCountWhere }),
+      prisma.order.count({ where: orderCountWhere }),
+      prisma.quote.count({ where: npCountWhere }),
+      prisma.client.count({ where: { active: true } }),
+      prisma.user.count({ where: { active: true } }),
+    ]);
+
+    // ── Format (matches GET /quotes format) ──
+    const fmtQuotes = quotes.map(q => ({
+      id: q.id, code: q.code,
+      client: q.client?.code || '', clientName: q.client?.name || '',
+      clientCity: q.client?.city || '', clientProvince: q.client?.province || '',
+      seller: q.sellerId || '', sellerName: q.seller?.name || '',
+      stage: q.stage, source: q.source,
+      ingreso: q.createdAt.toISOString(),
+      dias: Math.floor((Date.now() - q.createdAt.getTime()) / (1000*60*60*24)),
+      monto: q.amount, currency: q.currency || 'USD',
+      adj: q._count.attachments, notas: q._count.notes,
+      flexxus: q.flexxusCode || '', isDraft: q.isDraft,
+      emailSubject: q.emailSubject, emailFrom: q.emailFrom,
+      emailMessageId: q.emailMessageId || null,
+      mailType: q.mailType || null,
+      followUpDate: q.followUpDate?.toISOString() || null,
+      rejectReason: q.rejectReason,
+      linkedQuoteId: q.linkedQuoteId || null,
+      linkedQuoteCode: q.linkedQuote?.code || null,
+      linkedQuoteType: q.linkedQuote?.mailType || null,
+      linkedQuoteStage: q.linkedQuote?.stage || null,
+      linkedQuoteFlexxus: q.linkedQuote?.flexxusCode || null,
+    }));
+
+    // ── Format orders (matches GET /orders format) ──
+    const fmtOrders = orders.map(o => ({
+      id: o.id, code: o.code,
+      client: o.client?.code || '', clientName: o.client?.name || '',
+      seller: o.sellerId || '', sellerName: o.seller?.name || '',
+      stage: o.stage, fromQuote: o.fromQuote?.code || '',
+      entrega: o.deliveryType || 'AMBA', transp: o.carrier || '—',
+      flexxus: o.flexxusCode || '', fecha: o.createdAt.toISOString(),
+      guia: o.trackingNumber || '',
+      invoiceIssued: o.invoiceIssued, waybillReceived: o.waybillReceived,
+      monto: null, _source: 'ORDER',
+    }));
+    const fmtNPs = emailOCs.map(q => ({
+      id: q.id, code: q.code,
+      client: q.client?.code || '', clientName: q.client?.name || q.emailSubject || 'Sin cliente',
+      seller: q.sellerId || '', sellerName: q.seller?.name || '',
+      stage: q.stage, fromQuote: q.linkedQuote?.code || '',
+      entrega: 'EMAIL', transp: '—',
+      flexxus: q.flexxusCode || '', fecha: q.createdAt.toISOString(),
+      guia: '', invoiceIssued: false, waybillReceived: false,
+      monto: q.amount || null, emailSubject: q.emailSubject || '',
+      _source: 'QUOTE',
+    }));
+
+    // ── Format activity ──
+    const fmtActivity = activity.map(a => ({
+      id: a.id, action: a.action, detail: a.detail,
+      userName: a.user?.name || 'Sistema', userId: a.userId,
+      quoteCode: a.quote?.code || null, orderCode: a.order?.code || null,
+      createdAt: a.createdAt, at: a.createdAt.toISOString(),
+      by: a.userId, byName: a.user?.name || 'Sistema', text: a.detail,
+    }));
+
+    res.json({
+      ts,
+      quotes: fmtQuotes,
+      orders: [...fmtOrders, ...fmtNPs],
+      activity: fmtActivity,
+      counts: {
+        quotes: quoteTotal,
+        orders: orderTotal + npTotal,
+        clients: clientTotal,
+        users: userTotal,
+      },
+    });
+  } catch (err) {
+    console.error('GET /data/sync error:', err);
+    res.status(500).json({ error: 'Error de sincronización' });
+  }
+});
+
 module.exports = router;
