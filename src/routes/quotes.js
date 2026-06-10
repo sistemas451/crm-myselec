@@ -4,10 +4,12 @@ const path = require('path');
 const {authMiddleware, isAdmin } = require('../middleware/auth');
 const { onStageChange } = require('../services/notifier');
 const { resyncQuoteEmail } = require('../services/mailReader');
+const multer = require('multer');
 const { parseFlexxusPDF } = require('../services/flexxusParser');
 const { sendQuoteEmail, getTemplates, saveTemplates, getDefaultCC, applyTemplate } = require('../services/mailSender');
 const prisma = require('../db');
 
+const memUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 const router = express.Router();
 
 async function nextCode(model, prefix, retries = 3) {
@@ -27,6 +29,47 @@ async function nextCode(model, prefix, retries = 3) {
   const ts = Date.now().toString(36).toUpperCase();
   return `${prefix}-X${ts}`;
 }
+
+// POST /api/quotes/parse-presupuesto — parsear PDF Flexxus sin crear nada
+router.post('/parse-presupuesto', authMiddleware, memUpload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No se recibió archivo' });
+    const data = await parseFlexxusPDF(req.file.buffer);
+
+    let client = null;
+    if (data.cuit) {
+      client = await prisma.client.findFirst({
+        where: { cuit: { equals: data.cuit, mode: 'insensitive' } },
+        select: { id: true, code: true, name: true, defaultSellerId: true },
+      });
+    }
+
+    let seller = null;
+    if (client?.defaultSellerId) {
+      seller = await prisma.user.findUnique({
+        where: { id: client.defaultSellerId },
+        select: { id: true, name: true },
+      });
+    }
+
+    res.json({
+      flexxusCode:       data.npCode,
+      cuit:              data.cuit,
+      clientName:        data.clientName,
+      seller:            data.seller,
+      total:             data.total,
+      subtotalNeto:      data.subtotalNeto,
+      ivaAmount:         data.ivaAmount,
+      totalPercepciones: data.totalPercepciones,
+      itemCount:         data.items?.length || 0,
+      client,
+      defaultSeller:     seller,
+    });
+  } catch (err) {
+    console.error('Error parseando presupuesto:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // GET /api/quotes - All quotes (admin sees all, seller sees own)
 router.get('/', authMiddleware, async (req, res) => {

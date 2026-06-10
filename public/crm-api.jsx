@@ -100,6 +100,13 @@ const CrmApi = {
 
   // Quotes
   getQuotes: (p) => apiFetch(`/quotes${toQS(p)}`),
+  parsePresupuesto: (file) => {
+    const token = CrmAuth.getToken();
+    const fd = new FormData(); fd.append('file', file);
+    return fetch(`${API_BASE}/quotes/parse-presupuesto`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd,
+    }).then(r => r.ok ? r.json() : r.json().then(b => Promise.reject(new Error(b.error || `Error ${r.status}`))));
+  },
   createQuote: (data) => apiFetch('/quotes', { method: 'POST', body: JSON.stringify(data) }),
   changeQuoteStage: (id, stage, extra = {}) => apiFetch(`/quotes/${id}/stage`, {
     method: 'PATCH', body: JSON.stringify({ stage, ...extra })

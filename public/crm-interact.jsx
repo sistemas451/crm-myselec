@@ -487,12 +487,42 @@ function NewQuoteModal({ defaultClient }) {
     currency: 'USD',
     origin: 'Mail',
     observaciones: '',
-    fileName: '',
-    fileObj: null,
   });
   const [saving, setSaving] = useS(false);
+  const [parsing, setParsing] = useS(false);
+  const [pdfFile, setPdfFile] = useS(null);
+  const [parseResult, setParseResult] = useS(null);
+  const fileRef = React.useRef();
   const set = (k,v) => setForm(f => ({...f, [k]: v}));
   const canSubmit = form.client && form.seller;
+
+  const handleFile = async (file) => {
+    if (!file) return;
+    setPdfFile(file);
+    setParseResult(null);
+    if (!file.name.toLowerCase().endsWith('.pdf')) return;
+    setParsing(true);
+    try {
+      const data = await CrmApi.parsePresupuesto(file);
+      setParseResult(data);
+      if (data.client) {
+        set('client', data.client.code);
+        if (data.defaultSeller) set('seller', data.defaultSeller.id);
+      }
+      if (data.total) set('monto', String(data.total));
+      pushToast(`PDF parseado: ${data.flexxusCode || '—'} · ${data.itemCount} ítem${data.itemCount !== 1 ? 's' : ''}`);
+    } catch (err) {
+      pushToast(err.message || 'No se pudo parsear el PDF', 'bad');
+    } finally {
+      setParsing(false);
+    }
+  };
+
+  const clearFile = () => {
+    setPdfFile(null);
+    setParseResult(null);
+    if (fileRef.current) fileRef.current.value = '';
+  };
 
   const submit = async () => {
     const client = clients.find(c => c.code === form.client);
@@ -508,10 +538,9 @@ function NewQuoteModal({ defaultClient }) {
         source,
         deadline: form.fechaLimite || null,
       });
-      // Upload attachment if one was selected
-      if (form.fileObj && created?.id) {
+      if (pdfFile && created?.id) {
         try {
-          await CrmApi.uploadAttachments(created.id, [form.fileObj]);
+          await CrmApi.uploadAttachments(created.id, [pdfFile]);
         } catch {
           pushToast('Cotización creada, pero falló la subida del archivo', 'bad');
         }
@@ -532,7 +561,8 @@ function NewQuoteModal({ defaultClient }) {
       footer={
         <>
           <button className="btn-ghost" onClick={closeModal} disabled={saving}>Cancelar</button>
-          <button className="btn-primary" disabled={!canSubmit || saving} onClick={submit} style={(!canSubmit || saving)?{opacity:.45, cursor:'not-allowed'}:{}}>
+          <button className="btn-primary" disabled={!canSubmit || saving || parsing} onClick={submit}
+            style={!canSubmit || saving || parsing ? {opacity:.45, cursor:'not-allowed'} : {}}>
             <Icon name={saving ? 'loader' : 'plus'} size={13}/>
             {saving ? 'Guardando…' : 'Crear cotización'}
           </button>
@@ -540,6 +570,64 @@ function NewQuoteModal({ defaultClient }) {
       }
     >
       <div className="grid grid-cols-2 gap-4">
+
+        {/* ── Upload PDF (primero) ── */}
+        <div className="col-span-2">
+          <label className="block text-[11px] font-semibold text-ink-500 uppercase tracking-wide mb-1.5">
+            Adjuntar PDF Flexxus <span className="font-normal text-ink-400 normal-case">(opcional — auto-completa los campos)</span>
+          </label>
+          <div
+            onClick={() => fileRef.current?.click()}
+            className={cx(
+              'flex items-center gap-3 px-4 py-3 rounded-lg border-2 border-dashed cursor-pointer transition-colors',
+              pdfFile ? 'border-brand bg-brandSoft/20' : 'border-line hover:border-brand/50 hover:bg-surface'
+            )}
+          >
+            <Icon name={parsing ? 'loader' : pdfFile ? 'file-check' : 'upload'} size={18}
+              className={cx(parsing ? 'animate-spin text-brand' : pdfFile ? 'text-brand' : 'text-ink-400')}/>
+            <div className="flex-1 min-w-0">
+              {parsing ? (
+                <span className="text-[13px] text-brand font-medium">Procesando PDF…</span>
+              ) : pdfFile ? (
+                <span className="text-[13px] text-ink-700 font-medium truncate">{pdfFile.name}</span>
+              ) : (
+                <span className="text-[13px] text-ink-400">Hacé clic para subir un PDF de presupuesto o solicitud</span>
+              )}
+            </div>
+            {pdfFile && !parsing && (
+              <button onClick={e => { e.stopPropagation(); clearFile(); }}
+                className="text-ink-400 hover:text-red-500 transition-colors">
+                <Icon name="x" size={14}/>
+              </button>
+            )}
+          </div>
+          <input ref={fileRef} type="file" accept=".pdf,.xlsx,.xls,.doc,.docx,.csv,.jpg,.jpeg,.png,.gif,.webp" className="hidden"
+            onChange={e => handleFile(e.target.files[0])}/>
+        </div>
+
+        {/* ── Resultado del parse ── */}
+        {parseResult && (
+          <div className="col-span-2 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2.5 text-[12px] text-emerald-800 space-y-0.5">
+            <div className="font-semibold flex items-center gap-1.5"><Icon name="check-circle" size={13}/>PDF procesado correctamente</div>
+            <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-emerald-700">
+              {parseResult.flexxusCode && <span>Código: <b>{parseResult.flexxusCode}</b></span>}
+              {parseResult.clientName && <span>Cliente: <b>{parseResult.clientName}</b></span>}
+              {parseResult.client && <span className="text-emerald-600">→ encontrado en CRM</span>}
+              {parseResult.total != null && <span>Total: <b>U$S {parseResult.total.toLocaleString('es-AR',{minimumFractionDigits:2})}</b></span>}
+              {parseResult.itemCount > 0 && <span>{parseResult.itemCount} ítems</span>}
+            </div>
+          </div>
+        )}
+
+        {/* ── Warning: cliente no encontrado ── */}
+        {parseResult && parseResult.cuit && !parseResult.client && (
+          <div className="col-span-2 flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-[12px] text-amber-800">
+            <Icon name="alert-triangle" size={13} className="text-amber-500 shrink-0"/>
+            Cliente <b className="mono">{parseResult.cuit}</b>{parseResult.clientName ? ` (${parseResult.clientName})` : ''} no encontrado en el CRM — seleccionalo manualmente abajo
+          </div>
+        )}
+
+        {/* ── Cliente ── */}
         <FormGroup label="Cliente" required cols={2}>
           <Select value={form.client} onChange={v=>set('client',v)} placeholder="Buscar cliente…"
             options={clients.map(c => ({ value:c.code, label:`${c.name} — ${c.city}, ${c.prov}` }))}/>
@@ -569,19 +657,6 @@ function NewQuoteModal({ defaultClient }) {
         <FormGroup label="Observaciones" cols={2}>
           <textarea rows="3" className="inp w-full resize-none" placeholder="Contexto del pedido, urgencia, condiciones particulares…"
             value={form.observaciones} onChange={e=>set('observaciones',e.target.value)}/>
-        </FormGroup>
-        <FormGroup label="Adjuntar archivo" cols={2}>
-          <label className="flex items-center gap-3 px-3 py-2.5 border-2 border-dashed border-line rounded-lg cursor-pointer hover:bg-surface">
-            <Icon name="paperclip" size={14} className="text-ink-500"/>
-            <span className="text-[12.5px] text-ink-700 flex-1">
-              {form.fileName || 'Seleccionar archivo (PDF, XLSX, imagen…)'}
-            </span>
-            <span className="btn-ghost text-xs py-1 px-2">Buscar</span>
-            <input type="file" className="hidden" onChange={e => {
-              const f = e.target.files[0];
-              setForm(prev => ({...prev, fileName: f?.name || '', fileObj: f || null}));
-            }}/>
-          </label>
         </FormGroup>
       </div>
     </Modal>
