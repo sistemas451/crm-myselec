@@ -256,24 +256,20 @@ async function syncAccount(account) {
         // Fuente 1: etiqueta CRM — TODOS (la etiqueta ya es filtro fuerte, dedup por messageId)
         const labelMails = await fetchRawFromFolder(imap, CRM_LABEL, ['ALL'], false);
 
-        // Fuente 2: All Mail por prefijo de asunto — DESACTIVADA (causa falsos positivos)
-        // const subjectMails = await fetchRawFromFolder(imap, GMAIL_ALL, [['SINCE', inboxSince], ['SUBJECT', 'crm']], true);
-
-        // Fuente 3: Enviados — desde lastSyncAt o lookbackDays
+        // Fuente 2: Enviados — presupuestos enviados por el vendedor
         const sentMails = await fetchRawFromFolder(imap, GMAIL_SENT, [['SINCE', sentSince]], false, true);
 
-        // Fuente 4: INBOX — para capturar NPs del cliente sin label CRM
-        // isInboxOnly=true: processEmail solo procesa mails con PDF Flexxus o NP (no crea SOLICITUDs)
-        const inboxMails = await fetchRawFromFolder(imap, 'INBOX', [['SINCE', inboxSince]], false);
+        // NOTA: el INBOX ya no se lee directamente. Todo mail relevante debe tener
+        // la etiqueta "crm" (via filtro de Gmail o manualmente). Ver instructivo de
+        // configuración para vendedores.
 
-        // ── Mejora 1: inyectar accountEmail en cada mailData ─────────────────
+        // ── Inyectar accountEmail en cada mailData ───────────────────────────
         const allMails = [
           ...labelMails.map(m => ({ ...m, accountEmail: account.user })),
           ...sentMails.map(m => ({ ...m, accountEmail: account.user })),
-          ...inboxMails.map(m => ({ ...m, accountEmail: account.user, isInboxOnly: true })),
         ];
 
-        console.log(`📧 [${tag}] Total: ${allMails.length} (label: ${labelMails.length}, enviados: ${sentMails.length}, inbox: ${inboxMails.length})`);
+        console.log(`📧 [${tag}] Total: ${allMails.length} (label: ${labelMails.length}, enviados: ${sentMails.length})`);
 
         // Procesar secuencialmente para evitar race condition en nextCode()
         const successfulMails = []; // mejora 6: mails que crearon quote → para etiquetar
@@ -1276,16 +1272,6 @@ async function processEmail(mailData, imap) {
     if (notaPedidoAtt) {
       console.log(`   📦 Nota de Pedido detectada en entrante: "${subject}"`);
       return await processNotaPedido(parsed, mailData, notaPedidoAtt, imap);
-    }
-
-    // ── Mail inbox-only (sin label CRM): solo procesar si tiene PDF Flexxus ─
-    // Evita crear SOLICITUDs falsas de mails genéricos del inbox
-    if (mailData.isInboxOnly) {
-      const hasFlexPdf = realAttachments.some(a => isFlexxusPDF(a));
-      if (!hasFlexPdf) {
-        console.log(`   ⏭️  Inbox sin PDF Flexxus/NP — ignorado: "${subject}"`);
-        return null;
-      }
     }
 
     // ── Detectar PDF Flexxus ──────────────────────────────────────────────
