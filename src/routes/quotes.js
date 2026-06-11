@@ -62,6 +62,7 @@ router.post('/parse-presupuesto', authMiddleware, memUpload.single('file'), asyn
       ivaAmount:         data.ivaAmount,
       totalPercepciones: data.totalPercepciones,
       itemCount:         data.items?.length || 0,
+      items:             data.items || [],
       client,
       defaultSeller:     seller,
     });

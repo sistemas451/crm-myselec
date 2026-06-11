@@ -69,31 +69,100 @@ function parseItems(lines) {
     } else if (isNC) {
       cleanDesc = 'NO COTIZA';
     } else {
-      // Muchas descripciones Flexxus terminan con " - {code}" y luego
-      // pdf-parse concatena la columna Código (el mismo valor) justo después.
-      // Buscamos el sufijo repetido más largo como código.
+      // Estrategia en cascada para extraer el código del texto concatenado:
+      //
+      // 1) Sufijo repetido: la desc termina con " - {code}" o ".{code}"
+      //    y luego pdf-parse concatena la columna Código (mismo valor).
+      // 2) Código contenido: el código aparece como palabra suelta en la desc
+      //    (ej: "TENSOR PKR-40 OJO HORQUILLA" + code "PKR-40")
+      // 3) Código con dash (letras+dígitos-dígitos): ej EN6978-000, 1893710-000
+      // 4) Código numérico puro (4+ dígitos): ej 89032, 626105
+      // 5) Código alfanumérico pegado (letras+dígitos sin espacio): ej SUBCU1X35
+
+      let found = false;
+
+      // 1) Sufijo repetido (más largo gana)
       let bestSku = null, bestDesc = null;
       for (let len = 2; len <= Math.min(20, Math.floor(text.length / 2)); len++) {
         const candidate = text.slice(-len);
         const before = text.slice(0, -len);
-        if (before.endsWith(candidate) ||
-            before.endsWith(' - ' + candidate) ||
-            before.endsWith('.' + candidate)) {
+        if (before.endsWith(' - ' + candidate)) {
           bestSku = candidate.trim();
-          bestDesc = before.trim();
+          bestDesc = before.slice(0, -(3 + candidate.length)).trim();
+        } else if (before.endsWith('.' + candidate)) {
+          bestSku = candidate.trim();
+          bestDesc = before.slice(0, -(1 + candidate.length)).trim();
+        } else if (before.endsWith(candidate)) {
+          bestSku = candidate.trim();
+          bestDesc = before.slice(0, -candidate.length).trim();
         }
       }
       if (bestSku) {
         sku = bestSku;
         cleanDesc = bestDesc;
-      } else {
-        // Código numérico puro al final (ej: 89032)
+        found = true;
+      }
+
+      // 2) Código contenido en otra posición de la descripción
+      if (!found) {
+        for (let len = 3; len <= Math.min(18, text.length - 3); len++) {
+          const candidate = text.slice(-len).trim();
+          if (!candidate || candidate.length < 3) continue;
+          const before = text.slice(0, -len).trim();
+          const re = new RegExp('(?:^|\\s)' + candidate.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?:\\s|$)');
+          if (re.test(before)) {
+            sku = candidate;
+            cleanDesc = before;
+            found = true;
+          }
+        }
+      }
+
+      // 3) Código con formato letras+dígitos-dígitos (ej: EN6978-000)
+      if (!found) {
+        const ldM = text.match(/^(.+?)([A-Z]{2,}\d{3,}-\d{2,})$/);
+        if (ldM) {
+          sku = ldM[2];
+          cleanDesc = ldM[1].trim();
+          found = true;
+        }
+      }
+      // 3b) Código puramente dígitos-dígitos (ej: 1893710-000)
+      if (!found) {
+        const ddM = text.match(/^(.+\D)(\d{4,}-\d{2,})$/);
+        if (ddM) {
+          sku = ddM[2];
+          cleanDesc = ddM[1].trim();
+          found = true;
+        }
+      }
+
+      // 4) Código numérico puro (ej: 89032)
+      if (!found) {
         const numM = text.match(/^(.+\D)(\d{4,})$/);
         if (numM) {
           sku = numM[2];
           cleanDesc = numM[1].trim();
+          found = true;
         }
       }
+
+      // 5) Código alfanumérico pegado al final: bloque que mezcla letras y
+      //    dígitos (o contiene / + -), precedido por un carácter que no es
+      //    letra (espacio, dígito, símbolo) marcando el fin de la descripción.
+      if (!found) {
+        const mixM = text.match(/^(.+[^A-Z])([A-Z][A-Z0-9]*\d[A-Z0-9/+\-]*)$/);
+        if (mixM && mixM[2].length >= 3) {
+          sku = mixM[2];
+          cleanDesc = mixM[1].trim();
+          found = true;
+        }
+      }
+    }
+
+    // Limpiar separadores sueltos del final de la descripción
+    if (sku) {
+      cleanDesc = cleanDesc.replace(/[\s.\-]+$/, '').trim();
     }
 
     items.push({
