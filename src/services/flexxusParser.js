@@ -33,41 +33,67 @@ function parseItems(lines) {
   const items = [];
 
   for (const line of lines) {
-    // Debe tener dos ocurrencias de U$S
     if ((line.match(/U\$S/g) || []).length < 2) continue;
 
-    // Extraer: (todo antes 1er U$S) | precio1 | precio2 | (marca + N°)
+    // pdf-parse extrae cada fila como:
+    //   {desc}{code}{qty}U$S {total}U$S {unitPrice}{brand}{itemNum}
+    // Usamos [\d.]+,\d{2} para precios (evita capturar dígitos de la marca)
     const m = line.match(
-      /^(.+?)U\$S\s+([\d,]+)\s*U\$S\s+([\d,]+)(.+?)(\d+)$/
+      /^(.+?)U\$S\s*([\d.]+,\d{2})\s*U\$S\s*([\d.]+,\d{2})(.+?)(\d+)$/
     );
     if (!m) continue;
 
-    const rawDesc  = m[1].trim();     // descripción+código+cant
+    const rawDesc  = m[1].trim();
     const total    = parseArFloat(m[2]);
     const unitPrice= parseArFloat(m[3]);
     const brand    = m[4].trim();
-    const sortOrder= parseInt(m[5], 10) - 1;  // 0-based
+    const sortOrder= parseInt(m[5], 10) - 1;
 
-    // "NO COTIZA" → accepted=false (ítem sin precio)
-    const isNC = rawDesc.toUpperCase().startsWith('NO COTIZA');
+    const isNC = /NO COTIZA/i.test(rawDesc);
 
-    // Extraer SKU (\d{6}-\d{3}) y descripción limpia de rawDesc.
-    // rawDesc = "{descripcion}{sku6-3}{cant}" — todo concatenado sin separadores.
-    // Ej: "ETA 0063 - TERMINAL TERMOC. 1KV 3X185/95 A 3X300/1893710-000200"
-    const skuMatches = [...rawDesc.matchAll(/(\d{6}-\d{3})/g)];
-    const skuMatch   = skuMatches[0] || null;
-    let sku       = null;
-    let cleanDesc = rawDesc;
-    let qty       = extractQty(rawDesc, total, unitPrice);
-    if (skuMatch) {
-      sku       = skuMatch[1];
-      cleanDesc = rawDesc
-        .slice(0, skuMatch.index)
-        .replace(/^\d+\s*/, '')   // quitar número de ítem del principio (ej: "1 ")
-        .trim();
-      const afterSku = rawDesc.slice(skuMatch.index + skuMatch[1].length);
-      const qtyM = afterSku.match(/^[\s]*(\d+)/);
-      if (qtyM) qty = parseInt(qtyM[1], 10);
+    // rawDesc = "{descripción}{código}{cantidad}" concatenado sin separadores.
+    // Estrategia: calcular qty por ratio de precios, stripear del final,
+    // luego extraer el código.
+    let qty = extractQty(rawDesc, total, unitPrice);
+    let text = rawDesc;
+    const qtyStr = String(qty);
+    if (qty > 0 && text.endsWith(qtyStr)) {
+      text = text.slice(0, -qtyStr.length);
+    }
+
+    let sku = null;
+    let cleanDesc = text;
+
+    if (text.endsWith('DETALLE')) {
+      cleanDesc = text.slice(0, -7).trim();
+    } else if (isNC) {
+      cleanDesc = 'NO COTIZA';
+    } else {
+      // Muchas descripciones Flexxus terminan con " - {code}" y luego
+      // pdf-parse concatena la columna Código (el mismo valor) justo después.
+      // Buscamos el sufijo repetido más largo como código.
+      let bestSku = null, bestDesc = null;
+      for (let len = 2; len <= Math.min(20, Math.floor(text.length / 2)); len++) {
+        const candidate = text.slice(-len);
+        const before = text.slice(0, -len);
+        if (before.endsWith(candidate) ||
+            before.endsWith(' - ' + candidate) ||
+            before.endsWith('.' + candidate)) {
+          bestSku = candidate.trim();
+          bestDesc = before.trim();
+        }
+      }
+      if (bestSku) {
+        sku = bestSku;
+        cleanDesc = bestDesc;
+      } else {
+        // Código numérico puro al final (ej: 89032)
+        const numM = text.match(/^(.+\D)(\d{4,})$/);
+        if (numM) {
+          sku = numM[2];
+          cleanDesc = numM[1].trim();
+        }
+      }
     }
 
     items.push({
