@@ -598,24 +598,37 @@ router.delete('/:id', authMiddleware, async (req, res) => {
 
     // ── Limpiar todas las referencias FK antes de eliminar ──────────────────
 
-    // 1. Quotes que apuntan a esta vía linkedQuoteId (solicitud, NP, etc.)
+    // 1. Si es PRESUPUESTO: revertir datos propagados a SOLICITUDes vinculadas
+    if (quote.mailType === 'PRESUPUESTO') {
+      const linkedSolicitudes = await prisma.quote.findMany({
+        where: { linkedQuoteId: req.params.id, mailType: 'SOLICITUD' },
+        select: { id: true, stage: true },
+      });
+      for (const sol of linkedSolicitudes) {
+        const revertData = { linkedQuoteId: null, flexxusCode: null };
+        if (sol.stage === 'aceptada' || sol.stage === 'rechazada') {
+          revertData.stage = 'asignada';
+          revertData.stageChangedAt = new Date();
+          revertData.rejectReason = null;
+          revertData.rejectNotes = null;
+        }
+        await prisma.quote.update({ where: { id: sol.id }, data: revertData });
+      }
+    }
+
+    // 2. Resto de quotes que apuntan a esta vía linkedQuoteId (NP, etc.)
     await prisma.quote.updateMany({
       where: { linkedQuoteId: req.params.id },
       data:  { linkedQuoteId: null },
     });
 
-    // 2. Orders que apuntan a esta vía fromQuoteId
+    // 3. Orders que apuntan a esta vía fromQuoteId
     await prisma.order.updateMany({
       where: { fromQuoteId: req.params.id },
       data:  { fromQuoteId: null },
     });
 
-    // 3. Si es PRESUPUESTO: si tiene NP Quotes vinculadas (linkedQuoteId → this), ya se limpiaron arriba.
-    //    Si tiene Order asociada, el fromQuoteId ya se limpió arriba.
-
-    // 4. Si es SOLICITUD: el presupuesto vinculado ya se limpió en paso 1.
-
-    // 5. Limpiar el propio linkedQuoteId (para no tener FK roto al borrar)
+    // 4. Limpiar el propio linkedQuoteId (para no tener FK roto al borrar)
     if (quote.linkedQuoteId) {
       await prisma.quote.update({
         where: { id: req.params.id },
