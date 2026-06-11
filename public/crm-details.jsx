@@ -1931,6 +1931,9 @@ function OrderDetail({ code, onClose, canReassign }) {
   const [npBreakdown, setNpBreakdown] = useState(null); // { subtotalNeto, ivaAmount, totalPercepciones, total }
   const [npCurrency, setNpCurrency]   = useState('USD'); // moneda de la NP/presupuesto
   const [emailModalOpen, setEmailModalOpen] = useState(false);
+  const [editField, setEditField]   = useState(null);
+  const [editVal, setEditVal]       = useState('');
+  const [savingField, setSavingField] = useState(false);
   const noteInputRef = React.useRef(null);
   const fileInputRef = React.useRef(null);
 
@@ -2396,208 +2399,198 @@ function OrderDetail({ code, onClose, canReassign }) {
         </div>
       )}
 
-      {tab === 'resumen' && (
-        <div className="p-6">
-          {/* ── NP por mail: mostrar ítems en formato presupuesto ── */}
-          {isQuoteSource && npItems.length > 0 ? (
-            <div className="grid grid-cols-3 gap-5">
-              {/* Tabla de ítems */}
-              <div className="col-span-2 bg-white border border-line rounded-xl p-5">
-                <div className="text-sm font-semibold mb-3 text-ink-900">{o.flexxus && o.flexxus !== '—' ? 'Nota de Pedido Flexxus' : 'Nota de Pedido'}</div>
-                <table className="w-full text-[12.5px]">
-                  <thead><tr className="text-left text-ink-500">
-                    <th className="font-semibold pb-2">SKU</th>
-                    <th className="font-semibold pb-2">Descripción</th>
-                    <th className="font-semibold pb-2 text-right">Cant.</th>
-                    <th className="font-semibold pb-2 text-right">P. Unit. ({npCurrency === 'ARS' ? 'AR$' : 'U$S'})</th>
-                    <th className="font-semibold pb-2 text-right">Total ({npCurrency === 'ARS' ? 'AR$' : 'U$S'})</th>
-                  </tr></thead>
-                  <tbody>
-                    {npItems.map((it, idx) => (
-                      <tr key={it.id || idx} className="border-t border-line group">
-                        <td className="py-2 mono text-ink-700">
-                          <CatalogBadge sku={it.sku} description={it.description}/>
-                        </td>
-                        <td className="py-2">{it.description}</td>
-                        <td className="py-2 mono text-right">{it.quantity}</td>
-                        <td className="py-2 mono text-right">{it.unitPrice != null ? it.unitPrice.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—'}</td>
-                        <td className="py-2 mono text-right font-semibold">{it.total != null ? it.total.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    {npBreakdown?.subtotalNeto != null && (
-                      <tr className="border-t border-line">
-                        <td colSpan="4" className="text-right py-1.5 text-[11px] text-ink-400">Subtotal neto</td>
-                        <td className="text-right py-1.5 mono text-[12px] text-ink-500">
-                          {fmtMoney(npBreakdown.subtotalNeto, npCurrency, 2)}
-                        </td>
-                      </tr>
-                    )}
-                    {npBreakdown?.ivaAmount != null && npBreakdown.ivaAmount > 0 && (
-                      <tr>
-                        <td colSpan="4" className="text-right py-1.5 text-[11px] text-ink-400">IVA 21%</td>
-                        <td className="text-right py-1.5 mono text-[12px] text-ink-500">
-                          {fmtMoney(npBreakdown.ivaAmount, npCurrency, 2)}
-                        </td>
-                      </tr>
-                    )}
-                    {npBreakdown?.totalPercepciones != null && npBreakdown.totalPercepciones > 0 && (
-                      <tr>
-                        <td colSpan="4" className="text-right py-1.5 text-[11px] text-ink-400">Percepciones</td>
-                        <td className="text-right py-1.5 mono text-[12px] text-ink-500">
-                          {fmtMoney(npBreakdown.totalPercepciones, npCurrency, 2)}
-                        </td>
-                      </tr>
-                    )}
-                    {npBreakdown?.total != null && (
-                      <tr className="border-t-2 border-ink-900">
-                        <td colSpan="4" className="text-right pt-3 font-bold">TOTAL</td>
-                        <td className="text-right pt-3 mono font-bold text-base">
-                          {fmtMoney(npBreakdown.total, npCurrency, 2)}
-                        </td>
-                      </tr>
-                    )}
-                    {!npBreakdown?.total && (
-                      <tr className="border-t border-line">
-                        <td colSpan="4" className="text-right pt-2 font-semibold text-[12px] text-ink-500">Total NP</td>
-                        <td className="text-right pt-2 mono font-bold text-[13px]">
-                          {fmtMoney(npItems.reduce((s,i) => s+(i.total||0),0), npCurrency, 2)}
-                        </td>
-                      </tr>
-                    )}
-                  </tfoot>
-                </table>
-              </div>
-              {/* Panel lateral */}
-              <div className="space-y-4">
-                <div className="bg-white border border-line rounded-xl p-4">
-                  <div className="text-[11px] uppercase tracking-wider text-ink-500 font-semibold mb-2">Resumen NP</div>
-                  <ul className="text-[12.5px] space-y-1.5">
-                    <li className="flex justify-between"><span className="text-ink-500">Cliente</span><span className="font-medium">{cli?.name || '—'}</span></li>
-                    {o.flexxus && o.flexxus !== '—' && <li className="flex justify-between"><span className="text-ink-500">NP Flexxus</span><span className="mono">{o.flexxus}</span></li>}
-                    {linkedPres && <li className="flex justify-between"><span className="text-ink-500">Presupuesto</span><button className="mono text-brand hover:underline font-semibold" onClick={()=>{ onClose(); setTimeout(()=>openModal('quoteDetail',{code:linkedPres.code}),80); }}>{linkedPres.code}</button></li>}
-                    {npBreakdown?.subtotalNeto != null && (
-                      <li className="flex justify-between"><span className="text-ink-500">Subtotal neto</span><span className="mono">{fmtMoney(npBreakdown.subtotalNeto, npCurrency, 2)}</span></li>
-                    )}
-                    {npBreakdown?.ivaAmount != null && npBreakdown.ivaAmount > 0 && (
-                      <li className="flex justify-between"><span className="text-ink-500">IVA 21%</span><span className="mono">{fmtMoney(npBreakdown.ivaAmount, npCurrency, 2)}</span></li>
-                    )}
-                    {npBreakdown?.totalPercepciones != null && npBreakdown.totalPercepciones > 0 && (
-                      <li className="flex justify-between"><span className="text-ink-500">Percepciones</span><span className="mono">{fmtMoney(npBreakdown.totalPercepciones, npCurrency, 2)}</span></li>
-                    )}
-                    <li className="flex justify-between border-t border-line pt-1.5 mt-0.5">
-                      <span className="font-semibold text-ink-800">Total</span>
-                      <span className="mono font-semibold">
-                        {fmtMoney(npBreakdown?.total ?? npItems.reduce((s,i)=>s+(i.total||0),0), npCurrency, 2)}
-                      </span>
-                    </li>
-                    <li className="flex justify-between"><span className="text-ink-500">Ítems</span><span>{npItems.length} en NP</span></li>
-                  </ul>
-                </div>
-                {/* Dirección de entrega */}
-                {cli && (
-                  <div className="bg-white border border-line rounded-xl p-4">
-                    <div className="text-[11px] uppercase tracking-wider text-ink-500 font-semibold mb-2">Dirección de entrega</div>
-                    <div className="text-[13px] text-ink-900">{cli.address || '—'}</div>
-                    <div className="text-[12px] text-ink-500 mt-0.5">{[cli.city, cli.prov].filter(Boolean).join(' — ') || '—'}</div>
-                  </div>
+      {tab === 'resumen' && (() => {
+        const monto = isQuoteSource
+          ? (npBreakdown?.total ?? npItems.reduce((s,i)=>s+(i.total||0),0))
+          : (orderDetail?.fromQuote?.amount || null);
+        const cur = isQuoteSource ? npCurrency : (orderDetail?.fromQuote?.currency || 'USD');
+        const createdDate = isQuoteSource ? new Date(o.fecha) : (orderDetail?.createdAt ? new Date(orderDetail.createdAt) : null);
+        const stageDate = isQuoteSource ? null : (orderDetail?.stageChangedAt ? new Date(orderDetail.stageChangedAt) : null);
+        const daysSince = (d) => d ? Math.max(0, Math.floor((Date.now() - d.getTime()) / 86400000)) : null;
+        const daysProcess = daysSince(createdDate);
+        const daysStage = daysSince(stageDate);
+        const estDate = !isQuoteSource && orderDetail?.estimatedDate ? new Date(orderDetail.estimatedDate) : null;
+        const daysUntilEst = estDate ? Math.ceil((estDate.getTime() - Date.now()) / 86400000) : null;
+
+        const od = orderDetail || {};
+        const canEdit = !isQuoteSource;
+
+        const startFieldEdit = (field, val) => { setEditField(field); setEditVal(val || ''); };
+        const saveField = async (field, value) => {
+          setSavingField(true);
+          try {
+            await CrmApi.updateOrder(o.id, { [field]: value || null });
+            setOrderDetail(prev => prev ? { ...prev, [field]: value || null } : prev);
+            const listMap = { trackingNumber: 'guia', carrier: 'transp', deliveryType: 'entrega' };
+            if (listMap[field]) setOrders(prev => prev.map(x => x.id === o.id ? { ...x, [listMap[field]]: value || '' } : x));
+          } catch (err) { pushToast(err.message || 'Error al guardar', 'bad'); }
+          setSavingField(false);
+          setEditField(null);
+        };
+        const toggleBool = async (field) => {
+          const newVal = !od[field];
+          const dateField = field === 'invoiceIssued' ? 'invoiceDate' : 'waybillDate';
+          const dateVal = newVal ? new Date().toISOString() : null;
+          try {
+            await CrmApi.updateOrder(o.id, { [field]: newVal, [dateField]: dateVal });
+            setOrderDetail(prev => prev ? { ...prev, [field]: newVal, [dateField]: dateVal } : prev);
+          } catch (err) { pushToast(err.message || 'Error al guardar', 'bad'); }
+        };
+
+        const EditRow = ({ label, field, value, type }) => {
+          if (!canEdit) return (
+            <div className="flex justify-between items-center py-2 border-b border-ink-100 last:border-b-0">
+              <span className="text-[12.5px] text-ink-500">{label}</span>
+              <span className="text-[12.5px] font-medium mono">{value || '—'}</span>
+            </div>
+          );
+          if (editField === field) return (
+            <div className="flex justify-between items-center py-1.5 border-b border-ink-100 last:border-b-0 gap-2">
+              <span className="text-[12.5px] text-ink-500 shrink-0">{label}</span>
+              {type === 'select' ? (
+                <select autoFocus className="text-[12.5px] border border-brand rounded-lg px-2 py-1 bg-white"
+                  value={editVal} onChange={e => saveField(field, e.target.value)}>
+                  <option value="AMBA">AMBA</option><option value="Interior">Interior</option>
+                </select>
+              ) : (
+                <input autoFocus type={type || 'text'}
+                  className="text-[12.5px] border border-brand rounded-lg px-2 py-1 w-40 text-right mono"
+                  value={editVal} onChange={e => setEditVal(e.target.value)}
+                  onBlur={() => saveField(field, editVal)}
+                  onKeyDown={e => { if (e.key === 'Enter') saveField(field, editVal); if (e.key === 'Escape') setEditField(null); }}/>
+              )}
+            </div>
+          );
+          return (
+            <div className="flex justify-between items-center py-2 border-b border-ink-100 last:border-b-0 group cursor-pointer hover:bg-surface/50 -mx-1 px-1 rounded"
+              onClick={() => startFieldEdit(field, type === 'date' && value ? new Date(value).toISOString().slice(0,10) : (value || ''))}>
+              <span className="text-[12.5px] text-ink-500">{label}</span>
+              <span className="text-[12.5px] font-medium mono flex items-center gap-1.5">
+                {type === 'date' && value ? fmtDate(value) : (value || '—')}
+                <Icon name="pencil" size={11} className="text-ink-300 opacity-0 group-hover:opacity-100"/>
+              </span>
+            </div>
+          );
+        };
+
+        const ToggleRow = ({ label, field, dateField }) => {
+          const isOn = !!od[field];
+          const dateVal = od[dateField];
+          return (
+            <div className="flex justify-between items-center py-2 border-b border-ink-100 last:border-b-0">
+              <span className="text-[12.5px] text-ink-500">{label}</span>
+              <div className="flex items-center gap-2">
+                {isOn && dateVal && <span className="text-[11px] text-ink-400 mono">{fmtDate(dateVal)}</span>}
+                {canEdit ? (
+                  <button onClick={() => toggleBool(field)}
+                    className={cx('w-9 h-5 rounded-full transition-colors relative', isOn ? 'bg-emerald-500' : 'bg-ink-200')}>
+                    <span className={cx('absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform',
+                      isOn ? 'translate-x-4' : 'translate-x-0.5')}/>
+                  </button>
+                ) : (
+                  <span className={cx('text-[12px] font-semibold', isOn ? 'text-emerald-600' : 'text-ink-400')}>
+                    {isOn ? 'Sí' : 'No'}
+                  </span>
                 )}
               </div>
             </div>
-          ) : (
-            /* ── NP manual (Order): checklist + ítems del presupuesto si hay ── */
-            <div className="space-y-4">
-              {/* Ítems del presupuesto vinculado */}
-              {presItems.length > 0 && (
-                <div className="bg-white border border-line rounded-xl p-5">
-                  <div className="text-sm font-semibold mb-3 text-ink-900">
-                    Ítems del presupuesto vinculado
-                    {orderDetail?.fromQuote?.code && (
-                      <span className="ml-2 text-[12px] font-normal text-ink-400 mono">({orderDetail.fromQuote.code})</span>
-                    )}
-                  </div>
-                  <table className="w-full text-[12.5px]">
-                    <thead><tr className="text-left text-ink-500">
-                      <th className="font-semibold pb-2">SKU</th>
-                      <th className="font-semibold pb-2">Descripción</th>
-                      <th className="font-semibold pb-2 text-right">Cant.</th>
-                      <th className="font-semibold pb-2 text-right">P. Unit. ({npCurrency === 'ARS' ? 'AR$' : 'U$S'})</th>
-                      <th className="font-semibold pb-2 text-right">Total ({npCurrency === 'ARS' ? 'AR$' : 'U$S'})</th>
-                    </tr></thead>
-                    <tbody>
-                      {presItems.filter(i => i.accepted !== false).map((it, idx) => (
-                        <tr key={it.id || idx} className="border-t border-line">
-                          <td className="py-2 mono text-ink-700"><CatalogBadge sku={it.sku} description={it.description}/></td>
-                          <td className="py-2">{it.description}</td>
-                          <td className="py-2 mono text-right">{it.quantity}</td>
-                          <td className="py-2 mono text-right">{it.unitPrice != null ? it.unitPrice.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—'}</td>
-                          <td className="py-2 mono text-right font-semibold">{it.total != null ? it.total.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                    <tfoot>
-                      <tr className="border-t border-line">
-                        <td colSpan="4" className="text-right pt-2 font-semibold text-[12px] text-ink-500">Total presupuesto</td>
-                        <td className="text-right pt-2 mono font-bold text-[13px]">
-                          {fmtMoney(presItems.filter(i=>i.accepted!==false).reduce((s,i)=>s+(i.total||0),0), npCurrency, 2)}
-                        </td>
-                      </tr>
-                    </tfoot>
-                  </table>
+          );
+        };
+
+        return (
+        <div className="p-6 space-y-5">
+          {/* ── KPI Cards ── */}
+          <div className="grid grid-cols-4 gap-4">
+            <div className="bg-white border border-line rounded-xl p-4 text-center">
+              <div className="text-[11px] uppercase tracking-wider text-ink-400 font-semibold mb-1">Monto</div>
+              <div className="text-lg font-bold text-ink-900 mono">{monto != null ? fmtMoney(monto, cur, 2) : '—'}</div>
+            </div>
+            <div className="bg-white border border-line rounded-xl p-4 text-center">
+              <div className="text-[11px] uppercase tracking-wider text-ink-400 font-semibold mb-1">Días en proceso</div>
+              <div className={cx('text-lg font-bold mono', daysProcess > 14 ? 'text-amber-600' : 'text-ink-900')}>
+                {daysProcess != null ? daysProcess : '—'}
+              </div>
+            </div>
+            <div className="bg-white border border-line rounded-xl p-4 text-center">
+              <div className="text-[11px] uppercase tracking-wider text-ink-400 font-semibold mb-1">Días en etapa</div>
+              <div className={cx('text-lg font-bold mono', daysStage > 7 ? 'text-amber-600' : 'text-ink-900')}>
+                {daysStage != null ? daysStage : '—'}
+              </div>
+            </div>
+            <div className="bg-white border border-line rounded-xl p-4 text-center">
+              <div className="text-[11px] uppercase tracking-wider text-ink-400 font-semibold mb-1">Entrega estimada</div>
+              {estDate ? (
+                <div className={cx('text-lg font-bold mono', daysUntilEst < 0 ? 'text-red-600' : daysUntilEst <= 3 ? 'text-amber-600' : 'text-emerald-700')}>
+                  {daysUntilEst < 0 ? `${Math.abs(daysUntilEst)}d atrás` : daysUntilEst === 0 ? 'Hoy' : `${daysUntilEst}d`}
                 </div>
-              )}
-              <div className="grid grid-cols-5 gap-4">
-                {/* Checklist */}
-                <div className="col-span-3 bg-white border border-line rounded-xl p-5">
-                  <div className="text-sm font-semibold mb-3">Checklist de entrega</div>
-                  <ul className="text-[13px] space-y-2">
-                    {checklistItems.map(([label, done]) => (
-                      <li key={label} className="flex items-center gap-2.5">
-                        <span className={cx('w-5 h-5 rounded-full inline-flex items-center justify-center shrink-0',
-                          done ? 'bg-emerald-500 text-white' : 'bg-ink-200')}>
-                          {done && <Icon name="check" size={11}/>}
-                        </span>
-                        <span className={done ? 'text-ink-900' : 'text-ink-400'}>{label}</span>
-                      </li>
-                    ))}
-                  </ul>
+              ) : <div className="text-lg font-bold text-ink-300">—</div>}
+            </div>
+          </div>
+
+          {/* ── Logística + Documentación ── */}
+          <div className="grid grid-cols-2 gap-5">
+            <div className="bg-white border border-line rounded-xl p-4">
+              <div className="text-[11px] uppercase tracking-wider text-ink-500 font-semibold mb-3 flex items-center gap-2">
+                <Icon name="truck" size={14} className="text-ink-400"/>Logística
+              </div>
+              <EditRow label="Tipo entrega" field="deliveryType" value={od.deliveryType || o.entrega} type="select"/>
+              <EditRow label="Transportista" field="carrier" value={od.carrier || ''}/>
+              <EditRow label="Nº Guía / Tracking" field="trackingNumber" value={od.trackingNumber || ''}/>
+              <EditRow label="Fecha estimada" field="estimatedDate" value={od.estimatedDate} type="date"/>
+            </div>
+            <div className="bg-white border border-line rounded-xl p-4">
+              <div className="text-[11px] uppercase tracking-wider text-ink-500 font-semibold mb-3 flex items-center gap-2">
+                <Icon name="file-text" size={14} className="text-ink-400"/>Documentación
+              </div>
+              <ToggleRow label="Factura emitida" field="invoiceIssued" dateField="invoiceDate"/>
+              <ToggleRow label="Remito conformado" field="waybillReceived" dateField="waybillDate"/>
+              <EditRow label="OC Cliente" field="clientOCCode" value={od.clientOCCode || ''}/>
+              <div className="flex justify-between items-center py-2 border-b border-ink-100 last:border-b-0">
+                <span className="text-[12.5px] text-ink-500">NP Flexxus</span>
+                <span className="text-[12.5px] font-medium mono">{o.flexxus && o.flexxus !== '—' ? o.flexxus : '—'}</span>
+              </div>
+              <div className="flex justify-between items-center py-2">
+                <span className="text-[12.5px] text-ink-500">Presupuesto</span>
+                {(() => {
+                  const pCode = isQuoteSource ? linkedPres?.code : (orderDetail?.fromQuote?.code || o.fromQuote);
+                  return pCode ? (
+                    <button className="text-[12.5px] mono text-brand hover:underline font-semibold"
+                      onClick={() => { onClose(); setTimeout(()=>openModal('quoteDetail',{code: pCode}),80); }}>{pCode}</button>
+                  ) : <span className="text-[12.5px] text-ink-400">—</span>;
+                })()}
+              </div>
+            </div>
+          </div>
+
+          {/* ── Dirección de entrega ── */}
+          {cli && (
+            <div className="bg-white border border-line rounded-xl p-4">
+              <div className="text-[11px] uppercase tracking-wider text-ink-500 font-semibold mb-3 flex items-center gap-2">
+                <Icon name="map-pin" size={14} className="text-ink-400"/>Dirección de entrega
+              </div>
+              <div className="grid grid-cols-3 gap-4 text-[12.5px]">
+                <div>
+                  <div className="text-ink-500 mb-0.5">Dirección</div>
+                  <div className="text-ink-900 font-medium">{cli.address || '—'}</div>
+                  <div className="text-ink-500 text-[11.5px] mt-0.5">{[cli.city, cli.prov].filter(Boolean).join(' — ') || '—'}</div>
                 </div>
-                {/* Dirección */}
-                <div className="col-span-2 bg-white border border-line rounded-xl p-4">
-                  <div className="text-[11px] uppercase tracking-wider text-ink-500 font-semibold mb-2">Dirección de entrega</div>
-                  {cli ? (
-                    <>
-                      <div className="text-[13px] text-ink-900">{cli.address || '—'}</div>
-                      <div className="text-[12px] text-ink-500 mt-0.5">
-                        {[cli.city, cli.prov].filter(Boolean).join(' — ') || '—'}
-                      </div>
-                      <div className="mt-3 pt-3 border-t border-line text-[12px] space-y-1.5">
-                        <div className="flex justify-between gap-2">
-                          <span className="text-ink-500">Teléfono</span>
-                          <span className="mono">{cli.phone || '—'}</span>
-                        </div>
-                        <div className="flex justify-between gap-2">
-                          <span className="text-ink-500">Email</span>
-                          <span className="truncate max-w-[140px]">{cli.email || '—'}</span>
-                        </div>
-                        {cli.zone && (
-                          <div className="flex justify-between gap-2">
-                            <span className="text-ink-500">Zona</span>
-                            <span>{cli.zone}</span>
-                          </div>
-                        )}
-                      </div>
-                    </>
-                  ) : (
-                    <div className="text-[13px] text-ink-400">Sin datos de cliente</div>
+                <div>
+                  <div className="text-ink-500 mb-0.5">Teléfono</div>
+                  <div className="text-ink-900 mono">{cli.phone || '—'}</div>
+                </div>
+                <div>
+                  <div className="text-ink-500 mb-0.5">Email</div>
+                  <div className="text-ink-900 truncate">{cli.email || '—'}</div>
+                  {cli.zone && (
+                    <div className="text-ink-500 text-[11.5px] mt-1">Zona: <span className="text-ink-700">{cli.zone}</span></div>
                   )}
                 </div>
               </div>
             </div>
           )}
         </div>
-      )}
+        );
+      })()}
 
       {/* ── Tab: Historial ── */}
       {tab === 'historial' && (

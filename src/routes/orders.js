@@ -310,15 +310,19 @@ router.patch('/:id', authMiddleware, async (req, res) => {
         return res.status(403).json({ error: 'Sin permiso sobre esta orden' });
       }
     }
-    const { carrier, trackingNumber, flexxusCode, clientOCCode, estimatedDate, invoiceIssued, waybillReceived } = req.body;
+    const { carrier, trackingNumber, flexxusCode, clientOCCode, estimatedDate,
+            invoiceIssued, invoiceDate, waybillReceived, waybillDate, deliveryType } = req.body;
     const data = {};
     if (carrier          !== undefined) data.carrier          = carrier || null;
     if (trackingNumber   !== undefined) data.trackingNumber   = trackingNumber || null;
     if (flexxusCode      !== undefined) data.flexxusCode      = flexxusCode || null;
     if (clientOCCode     !== undefined) data.clientOCCode     = clientOCCode || null;
+    if (deliveryType     !== undefined) data.deliveryType     = deliveryType || null;
     if (estimatedDate    !== undefined) data.estimatedDate    = estimatedDate ? new Date(estimatedDate) : null;
     if (invoiceIssued    !== undefined) data.invoiceIssued    = invoiceIssued;
+    if (invoiceDate      !== undefined) data.invoiceDate      = invoiceDate ? new Date(invoiceDate) : null;
     if (waybillReceived  !== undefined) data.waybillReceived  = waybillReceived;
+    if (waybillDate      !== undefined) data.waybillDate      = waybillDate ? new Date(waybillDate) : null;
 
     const updated = await prisma.order.update({ where: { id: req.params.id }, data });
     res.json(updated);
