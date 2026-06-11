@@ -14,6 +14,9 @@ const router = express.Router();
 
 // ─── Helper: filtros comunes ──────────────────────────────────────────────────
 
+// Excluir solicitudes vinculadas a presupuesto (evita contar doble en paquetes)
+const NO_PACKAGE_DUPES = { NOT: { mailType: 'SOLICITUD', linkedQuoteId: { not: null } } };
+
 function buildFilter({ sellerId, from, to } = {}) {
   const filter = {};
   if (sellerId) filter.sellerId = sellerId;
@@ -100,7 +103,7 @@ router.get('/rechazos', authMiddleware, async (req, res) => {
   try {
     const base = buildFilter(req.query);
     const quotes = await prisma.quote.findMany({
-      where: { ...base, stage: 'rechazada' },
+      where: { ...base, ...NO_PACKAGE_DUPES, stage: 'rechazada' },
       include: {
         client: { select: { name: true, code: true } },
         seller: { select: { name: true } },
@@ -205,7 +208,7 @@ router.post('/send', authMiddleware, async (req, res) => {
       filename = `cotizaciones_${new Date().toISOString().slice(0, 10)}.pdf`;
     } else if (type === 'rechazos') {
       const quotes = await prisma.quote.findMany({
-        where: { ...base, stage: 'rechazada' },
+        where: { ...base, ...NO_PACKAGE_DUPES, stage: 'rechazada' },
         include: { client: { select: { name: true } }, seller: { select: { name: true } } },
         orderBy: { updatedAt: 'desc' }, take: 500,
       });

@@ -71,6 +71,9 @@ router.get('/rejection-reasons', authMiddleware, async (req, res) => {
   res.json(reasons);
 });
 
+// Excluir solicitudes vinculadas a presupuesto (evita contar doble en paquetes)
+const NO_PACKAGE_DUPES = { NOT: { mailType: 'SOLICITUD', linkedQuoteId: { not: null } } };
+
 // ─── Helper: construir filtros de fecha y vendedor desde query params ────────
 function buildBaseFilter({ sellerId, from, to } = {}) {
   const filter = {};
@@ -428,11 +431,12 @@ router.get('/alerts', authMiddleware, async (req, res) => {
 router.get('/charts/funnel', authMiddleware, async (req, res) => {
   try {
     const base = buildBaseFilter(req.query);
+    const nb = { ...base, ...NO_PACKAGE_DUPES };
     const [total, enviado, aceptada, rechazada] = await Promise.all([
-      prisma.quote.count({ where: base }),
-      prisma.quote.count({ where: { ...base, stage: 'enviado' } }),
-      prisma.quote.count({ where: { ...base, stage: 'aceptada' } }),
-      prisma.quote.count({ where: { ...base, stage: 'rechazada' } }),
+      prisma.quote.count({ where: nb }),
+      prisma.quote.count({ where: { ...nb, stage: 'enviado' } }),
+      prisma.quote.count({ where: { ...nb, stage: 'aceptada' } }),
+      prisma.quote.count({ where: { ...nb, stage: 'rechazada' } }),
     ]);
     res.json([
       { label: 'Recibidas',  value: total,     color: '#004669' },
@@ -451,7 +455,7 @@ router.get('/charts/rejections', authMiddleware, async (req, res) => {
   try {
     const base = buildBaseFilter(req.query);
     const rejected = await prisma.quote.findMany({
-      where: { ...base, stage: 'rechazada' },
+      where: { ...base, ...NO_PACKAGE_DUPES, stage: 'rechazada' },
       select: { rejectReason: true },
     });
     const counts = {};
@@ -475,7 +479,7 @@ router.get('/rejections-detail', authMiddleware, async (req, res) => {
   try {
     const base = buildBaseFilter(req.query);
     const rejected = await prisma.quote.findMany({
-      where: { ...base, stage: 'rechazada' },
+      where: { ...base, ...NO_PACKAGE_DUPES, stage: 'rechazada' },
       include: {
         client: { select: { name: true, code: true, city: true, province: true } },
         seller: { select: { name: true, id: true } },
