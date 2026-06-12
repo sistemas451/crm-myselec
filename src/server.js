@@ -276,7 +276,6 @@ app.post('/api/orders/:id/attachments', authMiddleware, upload.array('files', 10
           const updateData = {};
           if (data.npCode)   updateData.flexxusCode  = data.npCode;
           if (data.ocNumber) updateData.clientOCCode = data.ocNumber;
-          if (data.total)    updateData.amount        = data.total;
 
           // Asignar cliente por CUIT si la orden no tiene cliente
           const order = await prisma.order.findUnique({ where: { id: req.params.id } });

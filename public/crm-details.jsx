@@ -2014,6 +2014,27 @@ function OrderDetail({ code, onClose, canReassign }) {
       const newAtts = Array.isArray(result) ? result : (result.attachments || []);
       setAtts(prev => [...prev, ...newAtts]);
       pushToast(`${newAtts.length} archivo${newAtts.length > 1 ? 's' : ''} subido${newAtts.length > 1 ? 's' : ''}`);
+      // Refrescar detalle para cargar NP parseada (si el PDF creó una Quote NOTA_PEDIDO)
+      if (!isQuoteSource && isNP) {
+        try {
+          const detail = await CrmApi.getOrderDetail(o.id);
+          setOrderDetail(detail);
+          if (detail.notaPedido) {
+            setNotaPedido(detail.notaPedido);
+            setNpItems(detail.notaPedido.items || []);
+            setNpCurrency(detail.notaPedido.currency || 'USD');
+            const np = detail.notaPedido;
+            if (np.subtotalNeto != null || np.ivaAmount != null || np.amount != null) {
+              setNpBreakdown({
+                subtotalNeto: np.subtotalNeto ?? null,
+                ivaAmount: np.ivaAmount ?? null,
+                totalPercepciones: np.totalPercepciones ?? null,
+                total: np.amount ?? null,
+              });
+            }
+          }
+        } catch (_) {}
+      }
     } catch (err) {
       pushToast(err.message || 'Error al subir archivo', 'bad');
     } finally {
