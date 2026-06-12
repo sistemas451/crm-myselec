@@ -236,6 +236,27 @@ Two email services coexist:
 - Railway blocks outbound SMTP — use API-based email providers only (Gmail API, Resend)
 - `.claude/launch.json` is untracked — do NOT commit
 
+### Nota de Pedido — Reestructuración (junio 2026)
+
+**Problema:** La vista de Nota de Pedido (NP) en OrderDetail mostraba el layout de OC (KPIs + Logística + Documentación) en lugar del layout tipo Presupuesto con la tabla parseada, breakdown de precios y card de resumen. Además, al subir un PDF de NP manualmente, la Quote NOTA_PEDIDO (que almacena los ítems parseados) nunca se creaba.
+
+**Causa raíz:** `server.js` (upload handler de orders) intentaba guardar `amount` en el modelo Order, que no tiene ese campo. Prisma lanzaba un error silencioso que abortaba toda la creación de la Quote NOTA_PEDIDO y sus ítems.
+
+**Solución (5 commits en `main`):**
+
+1. **`flexxusParser.js`** — Extraer `extractSkuFromText()` como función compartida entre `parseItems()` (presupuesto) y `parseNotaPedidoItems()` (NP). La NP ahora usa el cascade de 5 filtros SKU como fallback.
+
+2. **`mailReader.js`** — Fix bug `sku: null` → `item.sku || null` (línea 730). Los SKUs extraídos por el parser ahora se guardan para NPs ingresadas por email.
+
+3. **`server.js`** — Eliminar `updateData.amount = data.total` del upload handler de orders. El total se guarda en la Quote NOTA_PEDIDO, no en la Order.
+
+4. **`crm-details.jsx`** — Nuevo flag `isNP` que detecta NPs tanto por email (`_source === 'QUOTE'`) como manuales (stage empieza con `np` o flexxusCode empieza con `NP-`). El tab Resumen muestra layout tipo Presupuesto para todas las NPs. Después de subir archivos a una NP, refresca el detalle para cargar la notaPedido recién creada.
+
+**Flujo actual de parseo NP (idéntico para mail y manual):**
+- Parser: `parseNotaPedidoPDF()` → extrae npCode, cuit, clientName, ocNumber, presupuestoNP, breakdown, ítems
+- SKU: `parseNotaPedidoItems()` intenta patrones NP propios, luego fallback a `extractSkuFromText()` (5 filtros compartidos con presupuesto)
+- Resultado: Quote `mailType: 'NOTA_PEDIDO'` con ítems, montos y vinculación bidireccional al presupuesto
+
 ### Known issues / audit backlog
 
 - **A-1** (ALTO): GET detail endpoints don't enforce ownership for VENDEDORs
