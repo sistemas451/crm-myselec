@@ -1912,6 +1912,8 @@ function OrderDetail({ code, onClose, canReassign }) {
   const stg  = STAGES_F2.find(s=>s.id===o.stage);
   // For email-OC orders, the record lives in the Quote table → use quote endpoints
   const isQuoteSource = o._source === 'QUOTE';
+  // NP = nota de pedido (by email OR manual upload) — shows presupuesto-style layout
+  const isNP = isQuoteSource || (o.flexxus && o.flexxus.startsWith('NP-')) || (o.stage && o.stage.startsWith('np'));
 
   const [tab, setTab]             = useState('resumen');
   const [stageOpen, setStageOpen] = useState(false);
@@ -2042,7 +2044,7 @@ function OrderDetail({ code, onClose, canReassign }) {
   // ── Delete order / NP ──
   const [deleting, setDeleting] = useState(false);
   const handleDeleteOrder = async () => {
-    const label = isQuoteSource ? 'Nota de Pedido' : 'Orden de Compra';
+    const label = isNP ? 'Nota de Pedido' : 'Orden de Compra';
     const extra = (o.fromQuote || linkedPres?.code)
       ? `\n\nEl presupuesto ${o.fromQuote || linkedPres?.code} volverá a etapa "Enviado".`
       : '';
@@ -2182,7 +2184,7 @@ function OrderDetail({ code, onClose, canReassign }) {
       {/* ── Tarjeta de presupuesto vinculado (igual que solicitud↔presupuesto en QuoteDetail) ── */}
       {(() => {
         const linked = isQuoteSource ? linkedPres : (orderDetail?.fromQuote || null);
-        if (!linked) return null;
+        if (!linked || isNP) return null;
         return (
           <div className="mx-6 mb-4 px-4 py-3 bg-white border border-line rounded-xl flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-blue-50 text-blue-600">
@@ -2231,13 +2233,13 @@ function OrderDetail({ code, onClose, canReassign }) {
       })()}
 
       {tab === 'resumen' && (() => {
-        // NP por mail (quote-source) → layout tipo Presupuesto
-        // OC real (order-source) → KPIs + logística + documentación
+        // NP (quote-source O order-source con NP) → layout tipo Presupuesto
+        // OC real → KPIs + logística + documentación
         const npFlexxusCode = o.flexxus;
-        const linkedPresupuesto = linkedPres;
+        const linkedPresupuesto = isQuoteSource ? linkedPres : (orderDetail?.fromQuote || null);
         const curSymbol = npCurrency === 'ARS' ? 'AR$' : 'U$S';
 
-        if (isQuoteSource) return (
+        if (isNP) return (
           <div className="p-6">
             <div className="grid grid-cols-3 gap-5">
               {/* Columna izquierda: tabla parseada */}
@@ -2308,6 +2310,7 @@ function OrderDetail({ code, onClose, canReassign }) {
                   <ul className="text-[12.5px] space-y-1.5">
                     <li className="flex justify-between"><span className="text-ink-500">Cliente</span><span className="font-medium">{cli?.name || '—'}</span></li>
                     {npFlexxusCode && <li className="flex justify-between"><span className="text-ink-500">NP Flexxus</span><span className="mono">{npFlexxusCode}</span></li>}
+                    {!isQuoteSource && orderDetail?.clientOCCode && <li className="flex justify-between"><span className="text-ink-500">OC Cliente</span><span className="mono">{orderDetail.clientOCCode}</span></li>}
                     {npBreakdown?.subtotalNeto != null && (
                       <li className="flex justify-between"><span className="text-ink-500">Subtotal neto</span><span className="mono">{fmtMoney(npBreakdown.subtotalNeto, npCurrency, 2)}</span></li>
                     )}
