@@ -318,8 +318,9 @@ function AppProvider({ children }) {
       await CrmApi.changeQuoteStage(quote.id, stageId);
       pushToast(`Etapa actualizada a ${stg?.label}`);
       if (stageId === 'aceptada') {
-        const freshOrders = await CrmApi.getOrders();
+        const [freshOrders, freshQuotes] = await Promise.all([CrmApi.getOrders(), CrmApi.getQuotes()]);
         setOrders(freshOrders);
+        if (freshQuotes) setQuotes(freshQuotes);
       }
     } catch (err) {
       setQuotes(qs => qs.map(q => q.code === code ? { ...q, stage: prevStage } : q));
