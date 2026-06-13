@@ -480,6 +480,8 @@ function SendEmailModal({ quote, attachments, onClose, onSent }) {
   const [body, setBody]                 = React.useState('');
   const [sending, setSending] = React.useState(false);
 
+  const pdfAtt = (attachments || []).find(a => a.mimeType === 'application/pdf' || a.filename?.endsWith('.pdf'));
+
   // Cargar plantillas y CC default al abrir
   React.useEffect(() => {
     CrmApi.getEmailTemplates().then(({ templates: tpls, ccDefault }) => {
@@ -617,12 +619,20 @@ function SendEmailModal({ quote, attachments, onClose, onSent }) {
               value={body} onChange={e => setBody(e.target.value)}/>
           </div>
 
+          {/* Adjunto que se enviará */}
+          <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-[12px] ${pdfAtt ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
+            <Icon name={pdfAtt ? 'paperclip' : 'alert-circle'} size={13} className="shrink-0"/>
+            {pdfAtt
+              ? <span><strong>Adjunto:</strong> {pdfAtt.filename}</span>
+              : <span>Sin adjunto PDF — el presupuesto no tiene ningún PDF adjunto</span>
+            }
+          </div>
           {/* Nota informativa */}
           <div className="flex items-start gap-2 px-3 py-2.5 bg-blue-50 border border-blue-200 rounded-lg text-[12px] text-blue-800">
             <Icon name="info" size={13} className="shrink-0 mt-0.5 text-blue-500"/>
             <div>
-              <div><strong>Enviar:</strong> manda el mail desde <strong>iamyselec@gmail.com</strong> con el adjunto PDF incluido automáticamente.</div>
-              <div className="mt-1"><strong>Abrir en Gmail:</strong> abre un borrador en tu Gmail personal con el asunto y cuerpo precargados. El adjunto PDF hay que cargarlo a mano.</div>
+              <div><strong>Enviar:</strong> manda el mail desde <strong>iamyselec@gmail.com</strong>{pdfAtt ? ' con el adjunto indicado arriba.' : ' sin adjunto.'}</div>
+              <div className="mt-1"><strong>Abrir en Gmail:</strong> abre un borrador en tu Gmail personal con el asunto y cuerpo precargados. El adjunto hay que cargarlo a mano.</div>
             </div>
           </div>
         </div>
@@ -637,7 +647,6 @@ function SendEmailModal({ quote, attachments, onClose, onSent }) {
               if (!body.trim())    { pushToast('El cuerpo es requerido', 'bad'); return; }
               setSending(true);
               try {
-                const pdfAtt = (attachments || []).find(a => a.mimeType === 'application/pdf' || a.filename?.endsWith('.pdf'));
                 const result = await CrmApi.sendQuoteEmail(quote.id, {
                   to: to.trim(), cc: cc.trim(),
                   subject: subject.trim(), body: body.trim(),
