@@ -1084,11 +1084,17 @@ router.post('/:id/send-email', authMiddleware, async (req, res) => {
     }
 
     // Buscar adjunto si se especificó
+    const fs = require('fs');
     let attachmentPath = null;
     let attachmentName = null;
     if (attachmentId) {
       const att = await prisma.attachment.findUnique({ where: { id: attachmentId } });
       if (att) {
+        if (!fs.existsSync(att.path)) {
+          return res.status(400).json({
+            error: `El archivo "${att.filename}" ya no existe en el servidor (Railway reinició el contenedor). Por favor, volvé a subir el PDF desde el tab Adjuntos y reintentá.`,
+          });
+        }
         attachmentPath = att.path;
         attachmentName = att.filename;
         console.log(`📎 Adjunto: ${attachmentName} en ${attachmentPath}`);
