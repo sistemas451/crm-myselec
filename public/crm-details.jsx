@@ -714,6 +714,7 @@ function QuoteDetail({ code, onClose, canReassign }) {
   const [reminderSubject, setReminderSubject] = useState('');
   const [reminderBody, setReminderBody] = useState('');
   const [reminderSending, setReminderSending] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const [dupOpen, setDupOpen] = useState(false);
   const [dupClientId, setDupClientId] = useState('');
   const [dupClientSearch, setDupClientSearch] = useState('');
@@ -962,11 +963,6 @@ function QuoteDetail({ code, onClose, canReassign }) {
       width={960}
       headerExtras={
         <div className="flex items-center gap-2">
-          {['ADMIN','DEVELOPER'].includes(CrmAuth.getUser()?.role) && (
-            <button className="btn-ghost text-bad border-red-200 hover:bg-red-50" onClick={handleDelete}>
-              <Icon name="trash-2" size={13}/>Eliminar
-            </button>
-          )}
           <Badge tone={stg?.tone || 'gray'} dot>{stg?.label || q.stage}</Badge>
           {q.mailType && (
             <Badge tone={q.mailType==='SOLICITUD'?'sky':q.mailType==='PRESUPUESTO'?'blue':'purple'}>
@@ -980,48 +976,66 @@ function QuoteDetail({ code, onClose, canReassign }) {
             onClick={() => setEmailModalOpen(true)}>
             <Icon name="send" size={13}/>Enviar mail
           </button>
+          {/* Menú ⋯ con acciones secundarias */}
           <div className="relative">
-            <button className="btn-ghost text-ink-600 border-line hover:bg-surface"
-              onClick={() => setDupOpen(o => !o)}>
-              <Icon name="copy" size={13}/>Duplicar
+            <button className="btn-ghost text-ink-500 border-line hover:bg-surface px-2"
+              onClick={() => setMoreOpen(o => !o)} title="Más opciones">
+              <Icon name="more-horizontal" size={15}/>
             </button>
-            {dupOpen && (
+            {moreOpen && (
               <>
-                <div className="fixed inset-0 z-10" onClick={() => { setDupOpen(false); setDupClientSearch(''); setDupClientId(''); }}/>
-                <div className="absolute right-0 top-full mt-1 w-80 bg-white rounded-xl shadow-pop border border-line z-20 p-3 space-y-2">
-                  <div className="text-[12px] font-semibold text-ink-700">Duplicar para otro cliente</div>
-                  <div className="text-[11px] text-ink-400">Se copian todos los ítems a una nueva cotización</div>
-                  <input value={dupClientSearch} onChange={e => { setDupClientSearch(e.target.value); setDupClientId(''); }}
-                    placeholder="Buscar cliente por nombre o código…"
-                    className="inp w-full text-[13px]" autoFocus/>
-                  {dupClientSearch.length >= 2 && !dupClientId && (
-                    <div className="max-h-[140px] overflow-y-auto border border-line rounded-lg">
-                      {clients.filter(c => {
-                        const s = dupClientSearch.toLowerCase();
-                        return (c.name?.toLowerCase().includes(s) || c.code?.toLowerCase().includes(s))
-                          && c.code !== q.client;
-                      }).slice(0, 6).map(c => (
-                        <button key={c.id} onClick={() => { setDupClientId(c.id); setDupClientSearch(c.name); }}
-                          className="w-full text-left px-3 py-2 text-[13px] hover:bg-surface flex items-center gap-2 border-b border-line last:border-0">
-                          <Icon name="building-2" size={13} className="text-ink-400"/>
-                          <div className="min-w-0">
-                            <div className="font-medium truncate">{c.name}</div>
-                            <div className="text-[11px] text-ink-400">{c.code}{c.city ? ` · ${c.city}` : ''}</div>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {dupClientId && (
-                    <div className="flex items-center gap-2 px-2 py-1.5 bg-green-50 rounded-lg border border-green-200 text-[12px] text-green-800">
-                      <Icon name="check-circle" size={14}/> {dupClientSearch}
-                    </div>
-                  )}
-                  <button onClick={handleDuplicate} disabled={!dupClientId || dupSaving}
-                    className="btn-primary w-full justify-center text-[13px]"
-                    style={!dupClientId || dupSaving ? {opacity:.45, cursor:'not-allowed'} : {}}>
-                    {dupSaving ? 'Duplicando…' : 'Duplicar cotización'}
+                <div className="fixed inset-0 z-10" onClick={() => { setMoreOpen(false); setDupOpen(false); setDupClientSearch(''); setDupClientId(''); }}/>
+                <div className="absolute right-0 top-full mt-1 w-72 bg-white rounded-xl shadow-pop border border-line z-20 overflow-hidden">
+                  {/* Duplicar */}
+                  <button className="w-full text-left px-4 py-2.5 text-[13px] hover:bg-surface flex items-center gap-2 border-b border-line"
+                    onClick={() => setDupOpen(o => !o)}>
+                    <Icon name="copy" size={14} className="text-ink-400"/>
+                    <span>Duplicar cotización</span>
+                    <Icon name={dupOpen ? 'chevron-up' : 'chevron-down'} size={13} className="ml-auto text-ink-300"/>
                   </button>
+                  {dupOpen && (
+                    <div className="px-4 py-3 border-b border-line space-y-2 bg-surface/50">
+                      <div className="text-[11px] text-ink-400">Se copian todos los ítems a una nueva cotización</div>
+                      <input value={dupClientSearch} onChange={e => { setDupClientSearch(e.target.value); setDupClientId(''); }}
+                        placeholder="Buscar cliente…"
+                        className="inp w-full text-[13px]" autoFocus/>
+                      {dupClientSearch.length >= 2 && !dupClientId && (
+                        <div className="max-h-[140px] overflow-y-auto border border-line rounded-lg bg-white">
+                          {clients.filter(c => {
+                            const s = dupClientSearch.toLowerCase();
+                            return (c.name?.toLowerCase().includes(s) || c.code?.toLowerCase().includes(s))
+                              && c.code !== q.client;
+                          }).slice(0, 6).map(c => (
+                            <button key={c.id} onClick={() => { setDupClientId(c.id); setDupClientSearch(c.name); }}
+                              className="w-full text-left px-3 py-2 text-[13px] hover:bg-surface flex items-center gap-2 border-b border-line last:border-0">
+                              <Icon name="building-2" size={13} className="text-ink-400"/>
+                              <div className="min-w-0">
+                                <div className="font-medium truncate">{c.name}</div>
+                                <div className="text-[11px] text-ink-400">{c.code}{c.city ? ` · ${c.city}` : ''}</div>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {dupClientId && (
+                        <div className="flex items-center gap-2 px-2 py-1.5 bg-green-50 rounded-lg border border-green-200 text-[12px] text-green-800">
+                          <Icon name="check-circle" size={14}/> {dupClientSearch}
+                        </div>
+                      )}
+                      <button onClick={handleDuplicate} disabled={!dupClientId || dupSaving}
+                        className="btn-primary w-full justify-center text-[13px]"
+                        style={!dupClientId || dupSaving ? {opacity:.45, cursor:'not-allowed'} : {}}>
+                        {dupSaving ? 'Duplicando…' : 'Duplicar'}
+                      </button>
+                    </div>
+                  )}
+                  {/* Eliminar — solo ADMIN */}
+                  {['ADMIN','DEVELOPER'].includes(CrmAuth.getUser()?.role) && (
+                    <button className="w-full text-left px-4 py-2.5 text-[13px] hover:bg-red-50 text-bad flex items-center gap-2"
+                      onClick={() => { setMoreOpen(false); handleDelete(); }}>
+                      <Icon name="trash-2" size={14}/>Eliminar cotización
+                    </button>
+                  )}
                 </div>
               </>
             )}
