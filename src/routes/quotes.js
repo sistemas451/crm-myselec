@@ -331,11 +331,11 @@ router.patch('/:id/stage', authMiddleware, async (req, res) => {
         },
       });
 
-      // Si se acepta, crear OC dentro de la misma transacción
+      // Si se acepta, crear OC en espejo si no existe ya una en stage 'oc'
       if (stage === 'aceptada') {
-        const existingOrder = await tx.order.findFirst({ where: { fromQuoteId: quote.id } });
+        const existingOrder = await tx.order.findFirst({ where: { fromQuoteId: quote.id, stage: 'oc' } });
         if (existingOrder) {
-          console.log(`ℹ️  OC ya existe para ${quote.code}: ${existingOrder.code}`);
+          console.log(`ℹ️  OC en 'oc' ya existe para ${quote.code}: ${existingOrder.code}`);
         } else {
           const ocCode = await nextCode(prisma.order, 'OC-2026');
           await tx.order.create({
