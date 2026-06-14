@@ -83,7 +83,18 @@ app.use('/uploads', (req, res, next) => {
     req.headers.authorization = `Bearer ${req.query.token}`;
   }
   authMiddleware(req, res, next);
-}, express.static(path.join(__dirname, '..', 'uploads')));
+}, express.static(path.join(__dirname, '..', 'uploads'), {
+  setHeaders: (res, filePath) => {
+    // Archivos guardados como {uuid}-{timestamp}-{nombreOriginal}
+    // Extraemos el nombre original para mostrarlo en el visor PDF del browser
+    const base = require('path').basename(filePath);
+    const match = base.match(/^[0-9a-f-]{36}-\d{13}-(.+)$/i);
+    const displayName = match ? match[1] : base;
+    if (filePath.toLowerCase().endsWith('.pdf')) {
+      res.setHeader('Content-Disposition', `inline; filename="${displayName}"`);
+    }
+  }
+}));
 
 // API Routes
 app.use('/api/auth/login',          authLimiter);

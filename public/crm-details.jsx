@@ -1630,12 +1630,11 @@ function QuoteDetail({ code, onClose, canReassign }) {
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
                     {isPdf && (
-                      <button
-                        onClick={() => setPdfPreview({ url: fileUrl, filename: a.filename })}
-                        className="h-8 px-2.5 rounded-lg hover:bg-brandSoft text-brand text-[12px] font-medium flex items-center gap-1"
+                      <a href={fileUrl} target="_blank" rel="noreferrer"
+                        className="h-8 px-2.5 rounded-lg hover:bg-surface text-ink-500 text-[12px] font-medium flex items-center gap-1"
                         title="Ver PDF">
                         <Icon name="eye" size={13}/>Ver
-                      </button>
+                      </a>
                     )}
                     <a href={fileUrl} download={a.filename}
                       className="w-8 h-8 rounded-lg hover:bg-surface text-ink-500 flex items-center justify-center"
@@ -2925,10 +2924,9 @@ function OrderDetail({ code, onClose, canReassign }) {
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
                       {ext === 'pdf' && (
-                        <button className="btn-ghost text-xs py-1 px-2"
-                          onClick={() => setPdfPreview({ url: fileUrl, filename: a.filename })}>
+                        <a href={fileUrl} target="_blank" rel="noreferrer" className="btn-ghost text-xs py-1 px-2">
                           <Icon name="eye" size={12}/>Ver
-                        </button>
+                        </a>
                       )}
                       <a href={fileUrl} download={a.filename} className="btn-ghost text-xs py-1 px-2">
                         <Icon name="download" size={12}/>Descargar
