@@ -704,7 +704,7 @@ async function processNotaPedido(parsed, mailData, att, imap) {
   }
 
   // ── Crear Quote NOTA_PEDIDO ──────────────────────────────────────────────
-  const code = await nextCode(prisma.quote, 'COT-2026');
+  const code = await nextCode(prisma.quote, 'NP-2026');
   const npTotal = npData.total || (npData.items.reduce((s, i) => s + (i.total || 0), 0) || null);
 
   // Etapa de entrada configurable para NP

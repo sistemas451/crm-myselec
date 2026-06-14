@@ -340,13 +340,13 @@ app.post('/api/orders/:id/attachments', authMiddleware, upload.array('files', 10
                   : null;
 
                 // Código único para la NP Quote
-                const lastQ = await prisma.quote.findFirst({
-                  where:   { code: { startsWith: 'COT-2026' } },
+                const lastNP = await prisma.quote.findFirst({
+                  where:   { code: { startsWith: 'NP-2026' } },
                   orderBy: { code: 'desc' },
                   select:  { code: true },
                 });
-                const lastNum  = lastQ ? (parseInt(lastQ.code.split('-').pop()) || 0) : 0;
-                const npQCode  = `COT-2026-${String(lastNum + 1).padStart(3, '0')}`;
+                const lastNum  = lastNP ? (parseInt(lastNP.code.split('-').pop()) || 0) : 0;
+                const npQCode  = `NP-2026-${String(lastNum + 1).padStart(3, '0')}`;
 
                 npQuote = await prisma.quote.create({
                   data: {
