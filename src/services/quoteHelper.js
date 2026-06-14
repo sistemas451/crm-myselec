@@ -53,6 +53,15 @@ async function autoAcceptPresupuesto(presupuestoId) {
         data: { action: 'CREATED', detail: `OC ${ocCode} creada automáticamente al recibir NP vinculada a ${pres.code}`, orderId: newOrder.id },
       });
       console.log(`   ✅ OC ${ocCode} creada automáticamente para presupuesto ${pres.code}`);
+    } else if (existingOrder && existingOrder.stage !== 'oc') {
+      await tx.order.update({
+        where: { id: existingOrder.id },
+        data:  { stage: 'oc', stageChangedAt: new Date() },
+      });
+      await tx.activity.create({
+        data: { action: 'STAGE_CHANGE', detail: `Espejo a OC Recibida automáticamente al auto-aceptar ${pres.code} por NP vinculada`, orderId: existingOrder.id },
+      });
+      console.log(`   ✅ OC ${existingOrder.code} reseteada a OC Recibida (espejo)`);
     }
   });
 
