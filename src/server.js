@@ -322,13 +322,20 @@ app.post('/api/orders/:id/attachments', authMiddleware, upload.array('files', 10
           // Se crea siempre que haya ítems (igual que la ruta por mail)
           if (data.items?.length > 0) {
             try {
-              // ¿Ya existe una NP Quote vinculada al presupuesto?
+              // ¿Ya existe una NP Quote para este presupuesto o con el mismo código Flexxus?
               let npQuote = linkedPresId
                 ? await prisma.quote.findFirst({
                     where: { mailType: 'NOTA_PEDIDO', linkedQuoteId: linkedPresId },
                     include: { _count: { select: { items: true } } },
                   })
                 : null;
+              // Evitar duplicado si ya existe una NP Quote con el mismo código Flexxus (ej: llegó por mail)
+              if (!npQuote && data.npCode) {
+                npQuote = await prisma.quote.findFirst({
+                  where: { mailType: 'NOTA_PEDIDO', flexxusCode: data.npCode },
+                  include: { _count: { select: { items: true } } },
+                });
+              }
 
               if (!npQuote) {
                 // Obtener datos del presupuesto para heredar cliente/vendedor
