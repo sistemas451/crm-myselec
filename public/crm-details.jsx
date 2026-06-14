@@ -1277,7 +1277,8 @@ function QuoteDetail({ code, onClose, canReassign }) {
       {(() => {
         const solicitud   = linkedQuotes.linkedQuote?.mailType === 'SOLICITUD'   ? linkedQuotes.linkedQuote : linkedQuotes.linkedBy?.find(x => x.mailType === 'SOLICITUD');
         const presupuesto = linkedQuotes.linkedQuote?.mailType === 'PRESUPUESTO' ? linkedQuotes.linkedQuote : linkedQuotes.linkedBy?.find(x => x.mailType === 'PRESUPUESTO');
-        const npLink      = linkedQuotes.linkedBy?.find(x => x.mailType === 'NOTA_PEDIDO');
+        const npLink      = (linkedQuotes.linkedQuote?.mailType === 'NOTA_PEDIDO' ? linkedQuotes.linkedQuote : null)
+                         || linkedQuotes.linkedBy?.find(x => x.mailType === 'NOTA_PEDIDO');
 
         // Cards: siempre muestran el vínculo primario (con botón vincular si falta),
         // OC y NP solo aparecen cuando existen

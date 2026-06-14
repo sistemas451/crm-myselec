@@ -329,6 +329,27 @@ router.patch('/:id', authMiddleware, async (req, res) => {
     if (fromQuoteId      !== undefined) data.fromQuoteId      = fromQuoteId || null;
 
     const updated = await prisma.order.update({ where: { id: req.params.id }, data });
+
+    // Cuando se vincula un presupuesto manualmente: propagar link a la NP Quote y auto-aceptar
+    if (data.fromQuoteId && updated.flexxusCode) {
+      await prisma.quote.updateMany({
+        where: {
+          mailType:      'NOTA_PEDIDO',
+          flexxusCode:   updated.flexxusCode,
+          linkedQuoteId: null,
+        },
+        data: { linkedQuoteId: data.fromQuoteId },
+      }).catch(() => {});
+    }
+    if (data.fromQuoteId) {
+      try {
+        const { autoAcceptPresupuesto } = require('../services/quoteHelper');
+        await autoAcceptPresupuesto(data.fromQuoteId);
+      } catch (e) {
+        console.error('Error en auto-accept presupuesto (order link):', e.message);
+      }
+    }
+
     res.json(updated);
   } catch (err) {
     res.status(500).json({ error: 'Error al actualizar OC' });
