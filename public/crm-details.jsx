@@ -1068,61 +1068,6 @@ function QuoteDetail({ code, onClose, canReassign }) {
           )}
           <input ref={fileInputRef} type="file" multiple className="hidden"
             onChange={e => handleUploadFiles(e.target.files)}/>
-          {/* ── Vincular ─────────────────────────────────────── */}
-          {(() => {
-            const linked = linkedQuotes.linkedQuote || linkedQuotes.linkedBy?.[0];
-            if (linked) return (
-              <div className="flex items-center gap-1.5 text-[12px] text-ink-600 border border-line rounded-lg px-2.5 py-1.5">
-                <Icon name="link" size={12} className="text-brand shrink-0"/>
-                <span className="font-medium mono">{linked.code}</span>
-                <Badge tone={linked.mailType==='SOLICITUD'?'sky':linked.mailType==='PRESUPUESTO'?'blue':'gray'} className="text-[10px]">
-                  {linked.mailType||'—'}
-                </Badge>
-                <button onClick={handleUnlinkQuote} className="ml-1 text-ink-400 hover:text-bad" title="Desvincular">
-                  <Icon name="x" size={11}/>
-                </button>
-              </div>
-            );
-            return (
-              <div className="relative">
-                <button className="btn-ghost text-[12px]" onClick={() => setLinkDropOpen(o=>!o)}>
-                  <Icon name="link" size={13}/>{q.mailType === 'PRESUPUESTO' ? 'Vincular solicitud' : 'Vincular presupuesto'}
-                </button>
-                {linkDropOpen && (
-                  <>
-                    <div className="fixed inset-0 z-10" onClick={() => setLinkDropOpen(false)}/>
-                    <div className="absolute bottom-full mb-1 left-0 z-20 w-72 bg-white border border-line rounded-xl shadow-pop overflow-hidden">
-                      <div className="p-2 border-b border-line">
-                        <input autoFocus className="inp w-full text-xs" placeholder="Buscar por código…"
-                          value={linkSearch} onChange={e => setLinkSearch(e.target.value)}/>
-                      </div>
-                      <div className="max-h-48 overflow-y-auto scroll-thin">
-                        {quotes.filter(x =>
-                          x.id !== q.id &&
-                          x.mailType === (q.mailType === 'PRESUPUESTO' ? 'SOLICITUD' : 'PRESUPUESTO') &&
-                          !x.linkedQuoteId &&
-                          (!linkSearch || x.code.toLowerCase().includes(linkSearch.toLowerCase()) || (x.clientName||'').toLowerCase().includes(linkSearch.toLowerCase()))
-                        ).slice(0,15).map(x => (
-                          <button key={x.id} disabled={linkSaving}
-                            className="w-full text-left px-3 py-2 hover:bg-surface border-b border-line last:border-b-0 flex items-center gap-2"
-                            onClick={() => handleLinkQuote(x.id)}>
-                            <span className="mono text-[12px] font-semibold text-ink-900">{x.code}</span>
-                            <Badge tone={x.mailType==='SOLICITUD'?'sky':x.mailType==='PRESUPUESTO'?'blue':'gray'} className="text-[10px]">
-                              {x.mailType||'MANUAL'}
-                            </Badge>
-                            <span className="text-[11px] text-ink-500 truncate">{x.clientName||'sin cliente'}</span>
-                          </button>
-                        ))}
-                        {quotes.filter(x => x.id !== q.id && x.mailType === (q.mailType === 'PRESUPUESTO' ? 'SOLICITUD' : 'PRESUPUESTO') && !x.linkedQuoteId && (!linkSearch || x.code.toLowerCase().includes(linkSearch.toLowerCase()) || (x.clientName||'').toLowerCase().includes(linkSearch.toLowerCase()))).length === 0 && (
-                          <div className="px-3 py-3 text-[12px] text-ink-400 text-center">Sin resultados</div>
-                        )}
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>
-            );
-          })()}
           <div className="flex-1"/>
           {q.mailType !== 'SOLICITUD' && (<>
             <button className="btn-ghost text-bad border-red-200 hover:bg-red-50" onClick={() => setRejectPending(true)}>
@@ -1328,26 +1273,75 @@ function QuoteDetail({ code, onClose, canReassign }) {
         </div>
       )}
 
-      {/* ── Vinculaciones: Solicitud / OC / NP ── */}
+      {/* ── Vinculaciones: Solicitud / Presupuesto / OC / NP ── */}
       {(() => {
-        const solicitud = linkedQuotes.linkedQuote?.mailType === 'SOLICITUD'
-          ? linkedQuotes.linkedQuote
-          : linkedQuotes.linkedBy?.find(x => x.mailType === 'SOLICITUD');
-        const presupuesto = linkedQuotes.linkedQuote?.mailType === 'PRESUPUESTO'
-          ? linkedQuotes.linkedQuote
-          : linkedQuotes.linkedBy?.find(x => x.mailType === 'PRESUPUESTO');
-        const npLink = linkedQuotes.linkedBy?.find(x => x.mailType === 'NOTA_PEDIDO');
+        const solicitud   = linkedQuotes.linkedQuote?.mailType === 'SOLICITUD'   ? linkedQuotes.linkedQuote : linkedQuotes.linkedBy?.find(x => x.mailType === 'SOLICITUD');
+        const presupuesto = linkedQuotes.linkedQuote?.mailType === 'PRESUPUESTO' ? linkedQuotes.linkedQuote : linkedQuotes.linkedBy?.find(x => x.mailType === 'PRESUPUESTO');
+        const npLink      = linkedQuotes.linkedBy?.find(x => x.mailType === 'NOTA_PEDIDO');
 
+        // Cards: siempre muestran el vínculo primario (con botón vincular si falta),
+        // OC y NP solo aparecen cuando existen
         const vcards = [];
-        if (solicitud)   vcards.push({ label:'Solicitud origen',      icon:'inbox',          bg:'bg-sky-50 text-sky-600',    data: solicitud,                                modal:'quoteDetail' });
-        if (presupuesto) vcards.push({ label:'Presupuesto vinculado', icon:'file-text',      bg:'bg-blue-50 text-blue-600',  data: presupuesto,                              modal:'quoteDetail' });
-        if (linkedOrder) vcards.push({ label:'Orden de Compra',       icon:'package',        bg:'bg-purple-50 text-purple-600', data: { ...linkedOrder, mailType:'OC' },     modal:'orderDetail' });
-        if (npLink)      vcards.push({ label:'Nota de Pedido',        icon:'clipboard-list', bg:'bg-orange-50 text-orange-600', data: npLink,                                modal:'orderDetail' });
+        if (q.mailType === 'PRESUPUESTO') {
+          vcards.push({ label:'Solicitud origen',      icon:'inbox',          bg:'bg-sky-50 text-sky-600',       data: solicitud   || null, modal:'quoteDetail', vincularTarget:'SOLICITUD'   });
+        }
+        if (q.mailType === 'SOLICITUD') {
+          vcards.push({ label:'Presupuesto vinculado', icon:'file-text',      bg:'bg-blue-50 text-blue-600',     data: presupuesto || null, modal:'quoteDetail', vincularTarget:'PRESUPUESTO' });
+        }
+        if (linkedOrder) vcards.push({ label:'Orden de Compra',  icon:'package',        bg:'bg-purple-50 text-purple-600', data: { ...linkedOrder, mailType:'OC' }, modal:'orderDetail', vincularTarget: null });
+        if (npLink)      vcards.push({ label:'Nota de Pedido',   icon:'clipboard-list', bg:'bg-orange-50 text-orange-600', data: npLink,                            modal:'orderDetail', vincularTarget: null });
 
         if (!vcards.length) return null;
         return (
           <div className="mx-6 mb-3 space-y-2">
             {vcards.map((vc, i) => {
+              // Card sin vínculo: muestra botón Vincular
+              if (!vc.data) return (
+                <div key={i} className="px-4 py-3 bg-white border border-line rounded-xl flex items-center gap-3">
+                  <div className={cx('w-8 h-8 rounded-lg flex items-center justify-center shrink-0', vc.bg)}>
+                    <Icon name={vc.icon} size={15}/>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[11px] uppercase tracking-wider font-semibold text-ink-500 mb-0.5">{vc.label}</div>
+                    <div className="text-[12px] text-ink-400">Sin vincular</div>
+                  </div>
+                  <div className="relative shrink-0">
+                    <button className="btn-ghost text-[12px] py-1 px-2.5" onClick={() => setLinkDropOpen(o=>!o)}>
+                      <Icon name="link" size={13}/>Vincular
+                    </button>
+                    {linkDropOpen && (
+                      <>
+                        <div className="fixed inset-0 z-10" onClick={() => setLinkDropOpen(false)}/>
+                        <div className="absolute right-0 top-full mt-1 z-20 w-72 bg-white border border-line rounded-xl shadow-pop overflow-hidden">
+                          <div className="p-2 border-b border-line">
+                            <input autoFocus className="inp w-full text-xs" placeholder="Buscar por código…"
+                              value={linkSearch} onChange={e => setLinkSearch(e.target.value)}/>
+                          </div>
+                          <div className="max-h-48 overflow-y-auto scroll-thin">
+                            {quotes.filter(x =>
+                              x.id !== q.id && x.mailType === vc.vincularTarget && !x.linkedQuoteId &&
+                              (!linkSearch || x.code.toLowerCase().includes(linkSearch.toLowerCase()) || (x.clientName||'').toLowerCase().includes(linkSearch.toLowerCase()))
+                            ).slice(0,15).map(x => (
+                              <button key={x.id} disabled={linkSaving}
+                                className="w-full text-left px-3 py-2 hover:bg-surface border-b border-line last:border-b-0 flex items-center gap-2"
+                                onClick={() => handleLinkQuote(x.id)}>
+                                <span className="mono text-[12px] font-semibold text-ink-900">{x.code}</span>
+                                <Badge tone={x.mailType==='SOLICITUD'?'sky':'blue'} className="text-[10px]">{x.mailType}</Badge>
+                                <span className="text-[11px] text-ink-500 truncate">{x.clientName||'sin cliente'}</span>
+                              </button>
+                            ))}
+                            {quotes.filter(x => x.id !== q.id && x.mailType === vc.vincularTarget && !x.linkedQuoteId && (!linkSearch || x.code.toLowerCase().includes(linkSearch.toLowerCase()) || (x.clientName||'').toLowerCase().includes(linkSearch.toLowerCase()))).length === 0 && (
+                              <div className="px-3 py-3 text-[12px] text-ink-400 text-center">Sin resultados</div>
+                            )}
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              );
+
+              // Card con vínculo
               const stages = vc.modal === 'orderDetail' ? STAGES_F2 : STAGES_F1;
               const stg = stages.find(s => s.id === vc.data.stage);
               return (
@@ -1364,10 +1358,17 @@ function QuoteDetail({ code, onClose, canReassign }) {
                       {vc.data.amount != null && <span className="text-[12px] mono text-ink-500">{fmtMoney(vc.data.amount, vc.data.currency||'USD', 2)}</span>}
                     </div>
                   </div>
-                  <button className="btn-ghost text-[12px] py-1 px-2.5 shrink-0"
-                    onClick={() => openModal(vc.modal, { code: vc.data.code })}>
-                    Ver <Icon name="arrow-right" size={11}/>
-                  </button>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button className="btn-ghost text-[12px] py-1 px-2.5"
+                      onClick={() => openModal(vc.modal, { code: vc.data.code })}>
+                      Ver <Icon name="arrow-right" size={11}/>
+                    </button>
+                    {vc.vincularTarget && (
+                      <button onClick={handleUnlinkQuote} className="w-7 h-7 rounded-lg hover:bg-red-50 text-ink-400 hover:text-bad flex items-center justify-center" title="Desvincular">
+                        <Icon name="x" size={12}/>
+                      </button>
+                    )}
+                  </div>
                 </div>
               );
             })}
