@@ -36,8 +36,9 @@ async function autoAcceptPresupuesto(presupuestoId) {
       data: { action: 'STAGE_CHANGE', detail: `Movido a aceptada automáticamente al recibir NP vinculada`, quoteId: pres.id },
     });
 
-    const existingOrder = await tx.order.findFirst({ where: { fromQuoteId: pres.id } });
-    if (!existingOrder && pres.clientId) {
+    // Buscar OC ya en etapa 'oc' — si no existe, crear el espejo
+    const existingOCOrder = await tx.order.findFirst({ where: { fromQuoteId: pres.id, stage: 'oc' } });
+    if (!existingOCOrder && pres.clientId) {
       const ocCode = await nextOrderCode();
       const newOrder = await tx.order.create({
         data: {
@@ -53,15 +54,6 @@ async function autoAcceptPresupuesto(presupuestoId) {
         data: { action: 'CREATED', detail: `OC ${ocCode} creada automáticamente al recibir NP vinculada a ${pres.code}`, orderId: newOrder.id },
       });
       console.log(`   ✅ OC ${ocCode} creada automáticamente para presupuesto ${pres.code}`);
-    } else if (existingOrder && existingOrder.stage !== 'oc') {
-      await tx.order.update({
-        where: { id: existingOrder.id },
-        data:  { stage: 'oc', stageChangedAt: new Date() },
-      });
-      await tx.activity.create({
-        data: { action: 'STAGE_CHANGE', detail: `Espejo a OC Recibida automáticamente al auto-aceptar ${pres.code} por NP vinculada`, orderId: existingOrder.id },
-      });
-      console.log(`   ✅ OC ${existingOrder.code} reseteada a OC Recibida (espejo)`);
     }
   });
 
