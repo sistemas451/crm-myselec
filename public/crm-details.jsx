@@ -1630,11 +1630,12 @@ function QuoteDetail({ code, onClose, canReassign }) {
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
                     {isPdf && (
-                      <a href={fileUrl} target="_blank" rel="noreferrer"
+                      <button
+                        onClick={() => setPdfPreview({ url: fileUrl, filename: a.filename })}
                         className="h-8 px-2.5 rounded-lg hover:bg-surface text-ink-500 text-[12px] font-medium flex items-center gap-1"
                         title="Ver PDF">
                         <Icon name="eye" size={13}/>Ver
-                      </a>
+                      </button>
                     )}
                     <a href={fileUrl} download={a.filename}
                       className="w-8 h-8 rounded-lg hover:bg-surface text-ink-500 flex items-center justify-center"
@@ -1664,33 +1665,36 @@ function QuoteDetail({ code, onClose, canReassign }) {
       )}
 
       {/* Modal preview PDF */}
-      {pdfPreview && (
-        <div className="fixed inset-0 z-[200] flex flex-col bg-black/80" onClick={() => setPdfPreview(null)}>
-          <div className="flex items-center justify-between px-5 py-3 bg-navy-950 shrink-0" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center gap-3">
-              <div className="w-7 h-7 rounded bg-red-500 flex items-center justify-center text-white text-[10px] font-bold">PDF</div>
-              <span className="text-white text-sm font-medium truncate max-w-[500px]">{pdfPreview.filename}</span>
+      {pdfPreview && (() => {
+        const pdfDisplayName = (pdfPreview.filename || '').replace(/^[0-9a-f-]{36}-\d{13}-/i, '');
+        return (
+          <div className="fixed inset-0 z-[200] flex flex-col bg-black/80" onClick={() => setPdfPreview(null)}>
+            <div className="flex items-center justify-between px-5 py-3 shrink-0" style={{background:'#004669'}} onClick={e => e.stopPropagation()}>
+              <div className="flex items-center gap-3">
+                <div className="w-7 h-7 rounded bg-red-500 flex items-center justify-center text-white text-[10px] font-bold">PDF</div>
+                <span className="text-white text-sm font-medium truncate max-w-[500px]">{pdfDisplayName}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <a href={pdfPreview.url} download={pdfDisplayName}
+                  className="flex items-center gap-1.5 px-3 h-8 rounded-lg text-white text-[12px] font-medium hover:bg-white/10">
+                  <Icon name="download" size={13}/>Descargar
+                </a>
+                <button onClick={() => setPdfPreview(null)}
+                  className="w-8 h-8 rounded-lg hover:bg-white/10 flex items-center justify-center text-white/60 hover:text-white">
+                  <Icon name="x" size={16}/>
+                </button>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <a href={pdfPreview.url} download={pdfPreview.filename}
-                className="btn-ghost text-xs text-white border-white/20 hover:bg-white/10">
-                <Icon name="download" size={13}/>Descargar
-              </a>
-              <button onClick={() => setPdfPreview(null)}
-                className="w-8 h-8 rounded-lg hover:bg-white/10 flex items-center justify-center text-white/60 hover:text-white">
-                <Icon name="x" size={16}/>
-              </button>
+            <div className="flex-1 p-4 overflow-hidden" onClick={e => e.stopPropagation()}>
+              <iframe
+                src={pdfPreview.url}
+                className="w-full h-full rounded-lg bg-white"
+                title={pdfDisplayName}
+              />
             </div>
           </div>
-          <div className="flex-1 p-4 overflow-hidden" onClick={e => e.stopPropagation()}>
-            <iframe
-              src={pdfPreview.url}
-              className="w-full h-full rounded-lg bg-white"
-              title={pdfPreview.filename}
-            />
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       {tab === 'historial' && (
         <div className="p-6">
@@ -2924,9 +2928,10 @@ function OrderDetail({ code, onClose, canReassign }) {
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
                       {ext === 'pdf' && (
-                        <a href={fileUrl} target="_blank" rel="noreferrer" className="btn-ghost text-xs py-1 px-2">
+                        <button className="btn-ghost text-xs py-1 px-2"
+                          onClick={() => setPdfPreview({ url: fileUrl, filename: a.filename })}>
                           <Icon name="eye" size={12}/>Ver
-                        </a>
+                        </button>
                       )}
                       <a href={fileUrl} download={a.filename} className="btn-ghost text-xs py-1 px-2">
                         <Icon name="download" size={12}/>Descargar
@@ -2948,23 +2953,26 @@ function OrderDetail({ code, onClose, canReassign }) {
     </Drawer>
 
     {/* ── PDF Preview modal ── */}
-    {pdfPreview && (
-      <div className="fixed inset-0 z-50 flex flex-col" style={{background:'rgba(0,0,0,0.85)'}}>
-        <div className="flex items-center gap-3 px-4 py-3" style={{background:'#004669'}}>
-          <button onClick={() => setPdfPreview(null)} className="text-white/70 hover:text-white">
-            <Icon name="x" size={18}/>
-          </button>
-          <span className="text-white text-[13px] font-medium truncate flex-1">{pdfPreview.filename}</span>
-          <a href={pdfPreview.url} download={pdfPreview.filename}
-            className="text-white/70 hover:text-white flex items-center gap-1.5 text-[13px]">
-            <Icon name="download" size={15}/>Descargar
-          </a>
+    {pdfPreview && (() => {
+      const pdfDisplayName = (pdfPreview.filename || '').replace(/^[0-9a-f-]{36}-\d{13}-/i, '');
+      return (
+        <div className="fixed inset-0 z-50 flex flex-col" style={{background:'rgba(0,0,0,0.85)'}}>
+          <div className="flex items-center gap-3 px-4 py-3" style={{background:'#004669'}}>
+            <button onClick={() => setPdfPreview(null)} className="text-white/70 hover:text-white">
+              <Icon name="x" size={18}/>
+            </button>
+            <span className="text-white text-[13px] font-medium truncate flex-1">{pdfDisplayName}</span>
+            <a href={pdfPreview.url} download={pdfDisplayName}
+              className="text-white/70 hover:text-white flex items-center gap-1.5 text-[13px]">
+              <Icon name="download" size={15}/>Descargar
+            </a>
+          </div>
+          <div className="flex-1 min-h-0">
+            <iframe src={pdfPreview.url} className="w-full h-full border-0" title={pdfDisplayName}/>
+          </div>
         </div>
-        <div className="flex-1 min-h-0">
-          <iframe src={pdfPreview.url} className="w-full h-full border-0" title={pdfPreview.filename}/>
-        </div>
-      </div>
-    )}
+      );
+    })()}
     {emailModalOpen && (
       <SendEmailModal
         quote={{
