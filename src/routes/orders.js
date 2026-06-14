@@ -43,8 +43,8 @@ router.get('/', authMiddleware, async (req, res) => {
       take: 1000,
     });
 
-    // Solo Notas de Pedido ingresadas por email (OC por mail ya no se usa)
-    const quoteWhere = { mailType: 'NOTA_PEDIDO' };
+    // Solo Notas de Pedido ingresadas por email (source MANUAL = creadas por upload, no van al tablero)
+    const quoteWhere = { mailType: 'NOTA_PEDIDO', source: { not: 'MANUAL' } };
     if (req.user.role === 'VENDEDOR') quoteWhere.sellerId = req.user.id;
     const emailOCs = await prisma.quote.findMany({
       where: quoteWhere,
