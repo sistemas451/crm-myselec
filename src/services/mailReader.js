@@ -585,13 +585,14 @@ async function processNotaPedido(parsed, mailData, att, imap) {
 
   // ── Buscar presupuesto de referencia ────────────────────────────────────
   let presupuesto = null;
+  let presupuestoExactMatch = false;
 
   // 1. Por NP del presupuesto extraído del COMENTARIO (ej: "PR-18009")
   if (npData.presupuestoNP) {
     presupuesto = await prisma.quote.findFirst({
       where: { flexxusCode: npData.presupuestoNP, mailType: 'PRESUPUESTO' },
     });
-    if (presupuesto) console.log(`   🔗 Presupuesto encontrado por NP Flexxus: ${presupuesto.code} (${npData.presupuestoNP})`);
+    if (presupuesto) { presupuestoExactMatch = true; console.log(`   🔗 Presupuesto encontrado por NP Flexxus: ${presupuesto.code} (${npData.presupuestoNP})`); }
   }
 
   // 2. Fallback: por número raw (sin prefijo PR-) — por si el presupuesto quedó guardado distinto
@@ -600,10 +601,10 @@ async function processNotaPedido(parsed, mailData, att, imap) {
     presupuesto = await prisma.quote.findFirst({
       where: { flexxusCode: { contains: rawNum }, mailType: 'PRESUPUESTO' },
     });
-    if (presupuesto) console.log(`   🔗 Presupuesto encontrado por NP raw: ${presupuesto.code}`);
+    if (presupuesto) { presupuestoExactMatch = true; console.log(`   🔗 Presupuesto encontrado por NP raw: ${presupuesto.code}`); }
   }
 
-  // 3. Fallback: por CUIT del cliente + presupuesto aceptado reciente
+  // 3. Fallback: por CUIT del cliente + presupuesto aceptado reciente (no activa auto-accept)
   if (!presupuesto && npData.cuit) {
     const clientByCuit = await prisma.client.findFirst({ where: { cuit: { equals: npData.cuit, mode: 'insensitive' } } });
     if (clientByCuit) {
@@ -636,6 +637,16 @@ async function processNotaPedido(parsed, mailData, att, imap) {
       where: { id: presupuesto.clientId },
       include: { defaultSeller: true },
     });
+  }
+
+  // ── Auto-aceptar presupuesto si el match fue por código exacto ──────────
+  if (presupuesto && presupuestoExactMatch) {
+    try {
+      const { autoAcceptPresupuesto } = require('./quoteHelper');
+      await autoAcceptPresupuesto(presupuesto.id);
+    } catch (e) {
+      console.error('Error en auto-accept presupuesto:', e.message);
+    }
   }
 
   // ── Buscar o crear Order vinculada al presupuesto ────────────────────────

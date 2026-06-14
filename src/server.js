@@ -307,6 +307,16 @@ app.post('/api/orders/:id/attachments', authMiddleware, upload.array('files', 10
             await prisma.order.update({ where: { id: req.params.id }, data: updateData });
           }
 
+          // Auto-aceptar presupuesto si fue encontrado por código exacto
+          if (linkedPresId) {
+            try {
+              const { autoAcceptPresupuesto } = require('./services/quoteHelper');
+              await autoAcceptPresupuesto(linkedPresId);
+            } catch (e) {
+              console.error('Error en auto-accept presupuesto (upload):', e.message);
+            }
+          }
+
           // Crear/actualizar Quote NOTA_PEDIDO con los ítems del PDF
           // → necesario para que la vista comparativa (tab NP) tenga los datos
           // Se crea siempre que haya ítems (igual que la ruta por mail)

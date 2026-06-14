@@ -907,6 +907,17 @@ router.patch('/:id/link', authMiddleware, async (req, res) => {
       });
     }
 
+    // Auto-aceptar presupuesto cuando una NP se vincula manualmente a él
+    const npQuote = quote.mailType === 'NOTA_PEDIDO' ? quote : (target?.mailType === 'NOTA_PEDIDO' ? target : null);
+    if (npQuote && presupuesto && linkedQuoteId) {
+      try {
+        const { autoAcceptPresupuesto } = require('../services/quoteHelper');
+        await autoAcceptPresupuesto(presupuesto.id);
+      } catch (e) {
+        console.error('Error en auto-accept presupuesto (link):', e.message);
+      }
+    }
+
     res.json({ ok: true });
   } catch (err) {
     console.error('Error linking quotes:', err);
