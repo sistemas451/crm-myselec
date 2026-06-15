@@ -1135,7 +1135,10 @@ async function processEmail(mailData, imap) {
     // ── Ignorar mails de cuentas propias en entrantes ─────────────────────
     // Las respuestas del vendedor quedan en la carpeta crm (hilo) pero deben
     // procesarse desde Enviados como PRESUPUESTO, no como SOLICITUD entrante.
-    if (isOwnAddress(directFrom)) {
+    // También ignorar si el From: es la misma cuenta que se está sincronizando.
+    const isCurrentAccount = mailData.accountEmail &&
+      directFrom.toLowerCase() === mailData.accountEmail.toLowerCase().trim();
+    if (isOwnAddress(directFrom) || isCurrentAccount) {
       console.log(`   ⏭️  Ignorado en entrantes (cuenta propia): ${directFrom}`);
       return null;
     }
