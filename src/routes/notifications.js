@@ -489,6 +489,27 @@ async function _getOverdueItems(prisma, now, sellerId, lastInboxCheck) {
         stageCount++;
       }
     }
+
+    // También incluir órdenes de compra manuales en etapas con límite de tiempo
+    if (stageDef.phase === 'ORDEN_COMPRA') {
+      const orders = await prisma.order.findMany({
+        where: { stage: stageDef.stageKey, ...(sellerId ? { sellerId } : {}) },
+        select: { id: true, code: true, stageChangedAt: true, createdAt: true, client: { select: { name: true } } },
+        take: 20,
+      });
+      for (const o of orders) {
+        const changedAt = o.stageChangedAt || o.createdAt;
+        if (changedAt <= cutoff) {
+          items.push({
+            kind: 'order', code: o.code, id: o.id,
+            stage: stageDef.label, clientName: o.client?.name,
+            becameOverdueAt: changedAt,
+          });
+          stageCount++;
+        }
+      }
+    }
+
     if (stageCount > 0) byStage[stageDef.label] = stageCount;
   }
 

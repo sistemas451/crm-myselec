@@ -92,17 +92,19 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
   try {
     const base = buildBaseFilter(req.query);
 
-    const [totalQuotes, sentQuotes, activeOrders, deliveredOrders] = await Promise.all([
-      prisma.quote.count({ where: { ...base, stage: { notIn: ['aceptada', 'rechazada'] } } }),
+    const [totalQuotes, sentQuotes, activeOrders, deliveredOrders, activeNPs, deliveredNPs] = await Promise.all([
+      prisma.quote.count({ where: { ...base, ...NO_PACKAGE_DUPES, stage: { notIn: ['aceptada', 'rechazada'] } } }),
       prisma.quote.count({ where: { ...base, stage: 'enviado' } }),
       prisma.order.count({ where: { stage: { notIn: ['entregada'] } } }),
       prisma.order.count({ where: { stage: 'entregada' } }),
+      prisma.quote.count({ where: { mailType: 'NOTA_PEDIDO', stage: { notIn: ['entregada'] } } }),
+      prisma.quote.count({ where: { mailType: 'NOTA_PEDIDO', stage: 'entregada' } }),
     ]);
 
     const [totalAmount, montoConfirmado, totalAmountARS, montoConfirmadoARS] = await Promise.all([
       prisma.quote.aggregate({
         _sum:  { amount: true },
-        where: { ...base, amount: { not: null }, currency: { not: 'ARS' } },
+        where: { ...base, ...NO_PACKAGE_DUPES, amount: { not: null }, currency: { not: 'ARS' } },
       }),
       prisma.quote.aggregate({
         _sum:  { amount: true },
@@ -110,7 +112,7 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
       }),
       prisma.quote.aggregate({
         _sum:  { amount: true },
-        where: { ...base, amount: { not: null }, currency: 'ARS' },
+        where: { ...base, ...NO_PACKAGE_DUPES, amount: { not: null }, currency: 'ARS' },
       }),
       prisma.quote.aggregate({
         _sum:  { amount: true },
@@ -119,8 +121,8 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     ]);
 
     const [accepted, totalInPeriod] = await Promise.all([
-      prisma.quote.count({ where: { ...base, stage: 'aceptada' } }),
-      prisma.quote.count({ where: { ...base } }),
+      prisma.quote.count({ where: { ...base, ...NO_PACKAGE_DUPES, stage: 'aceptada' } }),
+      prisma.quote.count({ where: { ...base, ...NO_PACKAGE_DUPES } }),
     ]);
     const conversionRate = totalInPeriod > 0 ? Math.round((accepted / totalInPeriod) * 100) : 0;
 
@@ -154,8 +156,8 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     res.json({
       cotizacionesActivas:  totalQuotes,
       presupuestosEnviados: sentQuotes,
-      ocEnCurso:            activeOrders,
-      entregasEsteMes:      deliveredOrders,
+      ocEnCurso:            activeOrders + activeNPs,
+      entregasEsteMes:      deliveredOrders + deliveredNPs,
       montoTotalUSD:        totalAmount._sum.amount    || 0,
       montoConfirmadoUSD:   montoConfirmado._sum.amount || 0,
       montoTotalARS:        totalAmountARS._sum.amount    || 0,
@@ -378,7 +380,16 @@ router.get('/charts/monthly', authMiddleware, async (req, res) => {
       const end   = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59);
       const [recibidas, ganadas] = await Promise.all([
         prisma.quote.count({ where: { ...sellerFilter, createdAt: { gte: start, lte: end } } }),
-        prisma.quote.count({ where: { ...sellerFilter, stage: 'aceptada', createdAt: { gte: start, lte: end } } }),
+        prisma.quote.count({
+          where: {
+            ...sellerFilter,
+            stage: 'aceptada',
+            OR: [
+              { stageChangedAt: { gte: start, lte: end } },
+              { stageChangedAt: null, updatedAt: { gte: start, lte: end } },
+            ],
+          },
+        }),
       ]);
       months.push({ month: MONTHS_ES[d.getMonth()], recibidas, ganadas });
     }
