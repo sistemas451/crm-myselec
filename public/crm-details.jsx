@@ -1957,9 +1957,7 @@ function OrderDetail({ code, onClose, canReassign }) {
     req
       .then(detail => {
         setNotes(detail.notes || []);
-        setHistory(isQuoteSource
-          ? (detail.unifiedHistory || detail.activities || [])
-          : (detail.activities || []));
+        setHistory(detail.unifiedHistory || detail.activities || []);
         setAtts(detail.attachments || []);
         if (isQuoteSource) {
           // NP por mail: los ítems son de la quote misma, linkedQuote es el presupuesto

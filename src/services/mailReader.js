@@ -491,6 +491,7 @@ async function syncMails() {
     return { synced: 0, errors: ['Sync ya en progreso. Esperá que termine el anterior.'], mails: [] };
   }
   syncInProgress = true;
+  _articleCatalog = null; // refrescar catálogo de artículos en cada sync
   // Construir lista de cuentas: env vars + cuentas agregadas via UI (AppSetting)
   let accounts = [];
 

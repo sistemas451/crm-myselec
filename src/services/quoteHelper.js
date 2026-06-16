@@ -1,14 +1,19 @@
 const prisma = require('../db');
 
-async function nextOrderCode() {
+async function nextOrderCode(retries = 3) {
   const prefix = `OC-${new Date().getFullYear()}`;
-  const last = await prisma.order.findFirst({
-    where:   { code: { startsWith: prefix } },
-    orderBy: { code: 'desc' },
-    select:  { code: true },
-  });
-  const num = last ? (parseInt(last.code.split('-').pop()) || 0) : 0;
-  return `${prefix}-${String(num + 1).padStart(3, '0')}`;
+  for (let attempt = 0; attempt < retries; attempt++) {
+    const last = await prisma.order.findFirst({
+      where:   { code: { startsWith: prefix } },
+      orderBy: { code: 'desc' },
+      select:  { code: true },
+    });
+    const num  = last ? (parseInt(last.code.split('-').pop()) || 0) : 0;
+    const code = `${prefix}-${String(num + 1 + attempt).padStart(3, '0')}`;
+    const exists = await prisma.order.findFirst({ where: { code }, select: { code: true } });
+    if (!exists) return code;
+  }
+  return `${prefix}-X${Date.now().toString(36).toUpperCase()}`;
 }
 
 /**

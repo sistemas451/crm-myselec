@@ -71,15 +71,7 @@ async function getMailAccounts() {
 router.post('/sync', authMiddleware, adminOrDev, async (req, res) => {
   try {
     console.log('📧 Sync manual: todas las cuentas...');
-    const result = await syncMails();
-    const accounts = await getMailAccounts();
-    for (const acc of accounts) {
-      await prisma.emailIntegration.upsert({
-        where:  { accountEmail: acc.user },
-        update: { lastSyncAt: new Date() },
-        create: { accountEmail: acc.user, lastSyncAt: new Date(), isActive: true },
-      });
-    }
+    const result = await syncMails(); // syncMails ya actualiza lastSyncAt por cuenta internamente
     res.json(result);
   } catch (err) {
     console.error('Mail sync error:', err);

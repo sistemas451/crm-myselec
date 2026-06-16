@@ -204,6 +204,16 @@ router.post('/', authMiddleware, async (req, res) => {
       },
     });
 
+    // Auto-aceptar presupuesto vinculado al crear la OC/NP
+    if (fromQuoteId) {
+      try {
+        const { autoAcceptPresupuesto } = require('../services/quoteHelper');
+        await autoAcceptPresupuesto(fromQuoteId);
+      } catch (e) {
+        console.error('Error en auto-accept presupuesto (create order):', e.message);
+      }
+    }
+
     res.status(201).json(order);
   } catch (err) {
     console.error('Error creating order:', err);
@@ -223,6 +233,10 @@ router.get('/:id/detail', authMiddleware, async (req, res) => {
           select: {
             id: true, code: true, flexxusCode: true, amount: true, currency: true, stage: true,
             items: { orderBy: { sortOrder: 'asc' } },
+            activities: {
+              include: { user: { select: { name: true } } },
+              orderBy: { createdAt: 'asc' },
+            },
           },
         },
         notes: {
@@ -256,7 +270,15 @@ router.get('/:id/detail', authMiddleware, async (req, res) => {
       });
     }
 
-    res.json({ ...order, notaPedido });
+    // Historial unificado: actividades de la OC + actividades del presupuesto de origen
+    const ownActivities = (order.activities || []).map(a => ({ ...a, _fromCode: order.code, _fromType: 'ORDER' }));
+    const presActivities = (order.fromQuote?.activities || []).map(a => ({
+      ...a, _fromCode: order.fromQuote.code, _fromType: 'PRESUPUESTO',
+    }));
+    const unifiedHistory = [...ownActivities, ...presActivities]
+      .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+
+    res.json({ ...order, notaPedido, unifiedHistory });
   } catch (err) {
     console.error('Error en order detail:', err);
     res.status(500).json({ error: 'Error' });
@@ -371,7 +393,7 @@ router.patch('/:id/stage', authMiddleware, async (req, res) => {
       if (req.user.role === 'VENDEDOR' && emailOC.sellerId !== req.user.id) {
         return res.status(403).json({ error: 'Sin permiso sobre esta orden' });
       }
-      await prisma.quote.update({ where: { id: req.params.id }, data: { stage } });
+      await prisma.quote.update({ where: { id: req.params.id }, data: { stage, stageChangedAt: new Date() } });
       await prisma.activity.create({
         data: { action: 'STAGE_CHANGE', detail: `Etapa → ${stage}`, userId: req.user.id, quoteId: req.params.id },
       });
@@ -425,15 +447,34 @@ router.delete('/:id', authMiddleware, async (req, res) => {
       if (npQuote.linkedQuoteId) {
         const pres = await prisma.quote.findUnique({
           where: { id: npQuote.linkedQuoteId },
-          select: { id: true, linkedQuoteId: true },
+          select: { id: true, linkedQuoteId: true, sellerId: true },
         });
         if (pres) {
-          const updateData = { stage: 'enviado' };
-          // Si el presupuesto apunta a esta NP, limpiar el vínculo bidireccional
+          const updateData = { stage: 'enviado', stageChangedAt: new Date() };
           if (pres.linkedQuoteId === npQuote.id) {
             updateData.linkedQuoteId = null;
           }
           await prisma.quote.update({ where: { id: pres.id }, data: updateData });
+
+          // También revertir la SOLICITUD vinculada al presupuesto que estaba en 'aceptada'
+          const sol = await prisma.quote.findFirst({
+            where: { linkedQuoteId: pres.id, mailType: 'SOLICITUD', stage: 'aceptada' },
+            select: { id: true, code: true, sellerId: true },
+          });
+          if (sol) {
+            const revertStage = sol.sellerId ? 'asignada' : 'recibida';
+            await prisma.quote.update({
+              where: { id: sol.id },
+              data: { stage: revertStage, stageChangedAt: new Date() },
+            });
+            await prisma.activity.create({
+              data: {
+                action: 'STAGE_CHANGE',
+                detail: `Revertida a ${revertStage} al eliminar NP vinculada`,
+                quoteId: sol.id,
+              },
+            });
+          }
         }
       }
 
