@@ -53,7 +53,7 @@ function AppRoot() {
       background: 'linear-gradient(180deg, #00304D 0%, #004669 100%)',
     }}>
       <div className="flex flex-col items-center gap-8">
-        <img src="/Logo.png" alt="MySelec" style={{ width: 'auto', height: 56, objectFit: 'contain', imageRendering: 'auto' }}/>
+        {/* logo oculto temporalmente */}
         <div className="flex flex-col items-center gap-2">
           <div className="flex gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-white/40 animate-pulse-soft" style={{animationDelay:'0s'}}/>
@@ -819,7 +819,7 @@ function Login({ onLogin }) {
               justifyContent: 'center',
               boxShadow: '0 6px 20px rgba(0,70,105,0.28)',
             }}>
-              <img src="/Logo.png" alt="MySelec" style={{ height: 44, width: 'auto', objectFit: 'contain', display: 'block' }}/>
+              {/* logo oculto temporalmente */}
             </div>
           </div>
 
@@ -1014,11 +1014,7 @@ function Sidebar({ role, screen, setScreen, user, onProfileOpen, collapsed, onTo
       ) : (
         <div className="flex items-center justify-center border-b border-white/[0.06] px-5 cursor-pointer" style={{height:72}}
           onClick={() => setScreen(nav[0]?.id || 'dashboard')} title="Ir al inicio">
-          <img
-            src="/Logo.png"
-            alt="MySelec"
-            style={{ maxWidth: 130, maxHeight: 36, width: 'auto', height: 'auto', objectFit: 'contain', display: 'block' }}
-          />
+          {/* logo oculto temporalmente */}
         </div>
       )}
 
@@ -1203,9 +1199,7 @@ function Topbar({ user, roleKey, setRoleKey, setScreen }) {
   return (
     <header className="h-[56px] bg-white border-b border-line flex items-center gap-3 px-5 shrink-0 relative">
       <div className="flex items-center gap-2 text-sm flex-1 min-w-0">
-        <img src="/Logo-M.png" alt="MySelec" style={{height:24, width:'auto', objectFit:'contain', flexShrink:0, cursor: setScreen ? 'pointer' : 'default', opacity: 0.85}}
-          onClick={() => setScreen && setScreen(roleKey==='admin' ? 'dashboard' : roleKey==='seller' ? 'my-quotes' : 'ops')}
-          title="Ir al inicio"/>
+        {/* logo oculto temporalmente */}
         <span className="text-ink-300 text-xs">/</span>
         <span className="font-semibold text-ink-900 truncate text-[13.5px]" style={{letterSpacing: '-0.01em'}}>
           {(user?.name || loggedUser?.name)?.split(' ')?.[0] || 'MySelec CRM'}

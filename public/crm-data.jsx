@@ -34,26 +34,7 @@ function toPascal(k) {
 
 // ---------- Logo ----------
 function Logo({ size=28, tone='light' }) {
-  // En fondo claro (login) envolvemos la imagen en un contenedor oscuro
-  if (tone === 'dark') {
-    return (
-      <div style={{
-        width: size, height: size,
-        background: '#004669',
-        borderRadius: Math.round(size * 0.22),
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        overflow: 'hidden',
-        flexShrink: 0,
-      }}>
-        <img src="/Logo.png" alt="MySelec" style={{ width: size * 0.85, height: size * 0.85, objectFit: 'contain' }}/>
-      </div>
-    );
-  }
-  return (
-    <img src="/Logo.png" alt="MySelec"
-      style={{ width: size, height: size, objectFit: 'contain', flexShrink: 0 }}
-    />
-  );
+  return null;
 }
 
 // ---------- Avatar ----------
