@@ -3,26 +3,11 @@ const multer  = require('multer');
 const {authMiddleware, isAdmin } = require('../middleware/auth');
 const { parseNotaPedidoPDF } = require('../services/flexxusParser');
 const { onStageChange } = require('../services/notifier');
+const { nextCode } = require('../services/codeHelper');
 const prisma = require('../db');
 
 const router  = express.Router();
 const memUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
-
-async function nextCode(model, prefix, retries = 3) {
-  for (let attempt = 0; attempt < retries; attempt++) {
-    const last = await model.findFirst({
-      where:   { code: { startsWith: prefix } },
-      orderBy: { code: 'desc' },
-      select:  { code: true },
-    });
-    const num = last ? (parseInt(last.code.split('-').pop()) || 0) : 0;
-    const code = `${prefix}-${String(num + 1 + attempt).padStart(3, '0')}`;
-    const exists = await model.findFirst({ where: { code }, select: { code: true } });
-    if (!exists) return code;
-  }
-  const ts = Date.now().toString(36).toUpperCase();
-  return `${prefix}-X${ts}`;
-}
 
 // GET /api/orders
 router.get('/', authMiddleware, async (req, res) => {
