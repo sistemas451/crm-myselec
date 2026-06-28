@@ -179,13 +179,39 @@ function OrderCard({ o, onOpen, compact }) {
 
 // ---------- Boards ----------
 function KanbanBoard({ stages, items, kind, onOpen, title, subtitle, actions, logisticsActions }) {
-  const { moveOrderStage, moveQuoteStage, pushToast } = useApp();
+  const { moveOrderStage, moveQuoteStage, pushToast, setQuotes } = useApp();
 
   /* ── Drag & drop state ── */
   const [dragCode,  setDragCode]  = useS(null);   // code of card being dragged
   const [overStage, setOverStage] = useS(null);   // stageId being hovered
   const [justDropped, setJustDropped] = useS(null); // code that just landed (for animation)
   const enterCounters = React.useRef({});          // counter per column to prevent flicker
+
+  /* ── Reject modal (drag-to-rechazada) ── */
+  const [pendingRejectCode, setPendingRejectCode] = useS(null);
+  const [dragRejectReason, setDragRejectReason]   = useS('');
+  const [dragRejectNotes,  setDragRejectNotes]    = useS('');
+  const [dragRejectSaving, setDragRejectSaving]   = useS(false);
+
+  const submitDragReject = async () => {
+    if (!dragRejectReason || !pendingRejectCode) return;
+    const item = items.find(i => i.code === pendingRejectCode);
+    if (!item) return;
+    setDragRejectSaving(true);
+    try {
+      await CrmApi.changeQuoteStage(item.id, 'rechazada', { rejectReason: dragRejectReason, rejectNotes: dragRejectNotes });
+      const fresh = await CrmApi.getQuotes();
+      if (fresh) setQuotes(fresh);
+      pushToast('Cotización marcada como rechazada');
+    } catch (err) {
+      pushToast(err.message || 'Error al rechazar', 'bad');
+    } finally {
+      setDragRejectSaving(false);
+      setPendingRejectCode(null);
+      setDragRejectReason('');
+      setDragRejectNotes('');
+    }
+  };
 
   const onCardDragStart = (e, item) => {
     const el = e.currentTarget;
@@ -246,10 +272,17 @@ function KanbanBoard({ stages, items, kind, onOpen, title, subtitle, actions, lo
       if (data.kind !== kind) return;
       const item = items.find(i => i.code === data.code);
       if (item && item.stage !== targetStageId) {
-        if (kind === 'quote') moveQuoteStage(data.code, targetStageId);
-        else moveOrderStage(data.code, targetStageId);
-        setJustDropped(data.code);
-        setTimeout(() => setJustDropped(null), 400);
+        if (kind === 'quote' && targetStageId === 'rechazada') {
+          // Mostrar picker de motivo antes de rechazar
+          setPendingRejectCode(data.code);
+          setDragRejectReason('');
+          setDragRejectNotes('');
+        } else {
+          if (kind === 'quote') moveQuoteStage(data.code, targetStageId);
+          else moveOrderStage(data.code, targetStageId);
+          setJustDropped(data.code);
+          setTimeout(() => setJustDropped(null), 400);
+        }
       }
     } catch (ex) { /* ignore bad data */ }
     setDragCode(null);
@@ -366,13 +399,37 @@ function KanbanBoard({ stages, items, kind, onOpen, title, subtitle, actions, lo
           })}
         </div>
       </div>
+
+      {/* ── Modal de motivo de rechazo (drag-to-rechazada) ── */}
+      {pendingRejectCode && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
+          <div className="absolute inset-0 bg-ink-900/40" onClick={()=>{setPendingRejectCode(null);setDragRejectReason('');setDragRejectNotes('');}}/>
+          <div className="relative bg-white rounded-xl shadow-pop p-5 w-[380px]">
+            <div className="text-sm font-semibold mb-3">Motivo de rechazo</div>
+            <select value={dragRejectReason} onChange={e=>setDragRejectReason(e.target.value)} className="inp w-full mb-3">
+              <option value="">Seleccionar motivo…</option>
+              {REJECT_REASONS.map(r=><option key={r} value={r}>{r}</option>)}
+            </select>
+            <textarea rows="3" value={dragRejectNotes} onChange={e=>setDragRejectNotes(e.target.value)}
+              className="inp w-full resize-none mb-3" placeholder="Observaciones opcionales…"/>
+            <div className="flex gap-2 justify-end">
+              <button className="btn-ghost" onClick={()=>{setPendingRejectCode(null);setDragRejectReason('');setDragRejectNotes('');}}>Cancelar</button>
+              <button className="btn-ghost text-bad border-red-200 hover:bg-red-50"
+                disabled={!dragRejectReason || dragRejectSaving} onClick={submitDragReject}
+                style={!dragRejectReason?{opacity:.45,cursor:'not-allowed'}:{}}>
+                {dragRejectSaving ? 'Guardando…' : 'Marcar rechazada'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 // ---------- Quote filters toolbar ----------
 function QuoteFiltersBar() {
-  const { quoteFilters, setQuoteFilters, users } = useApp();
+  const { quoteFilters, setQuoteFilters, users, roleKey, currentUserId } = useApp();
   const [moreOpen, setMoreOpen] = useS(false);
   const active = countActiveFilters(quoteFilters);
 
@@ -389,17 +446,25 @@ function QuoteFiltersBar() {
     { value:'all', label:'Todo el histórico' },
   ];
   const activeSeller = users.find(u=>u.id===quoteFilters.seller);
+  const me = users.find(u=>u.id===currentUserId);
 
   return (
     <>
-      <PopoverButton icon="user"
-        label={activeSeller ? activeSeller.name.split(' ')[0] : 'Todos los vendedores'}
-        value={quoteFilters.seller}
-        active={!!quoteFilters.seller}
-        onChange={(v)=>setQuoteFilters(s=>({...s, seller:v}))}
-        onClear={()=>setQuoteFilters(s=>({...s, seller:''}))}
-        options={sellerOptions}
-      />
+      {roleKey === 'vendedor' ? (
+        <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-[12.5px] font-medium text-ink-700 bg-surface border border-line rounded-lg">
+          <Icon name="user" size={13} className="text-ink-500"/>
+          {me?.name?.split(' ')[0] || 'Mi vista'}
+        </div>
+      ) : (
+        <PopoverButton icon="user"
+          label={activeSeller ? activeSeller.name.split(' ')[0] : 'Todos los vendedores'}
+          value={quoteFilters.seller}
+          active={!!quoteFilters.seller}
+          onChange={(v)=>setQuoteFilters(s=>({...s, seller:v}))}
+          onClear={()=>setQuoteFilters(s=>({...s, seller:''}))}
+          options={sellerOptions}
+        />
+      )}
       <div className="relative">
         <Icon name="building-2" size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-400"/>
         <input className="inp pl-8 py-1.5 text-xs w-44" placeholder="Cliente…"

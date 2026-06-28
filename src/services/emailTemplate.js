@@ -1,5 +1,17 @@
 const APP_URL = () => process.env.APP_URL || `http://localhost:${process.env.PORT || 3000}`;
 
+// Logo embebido como base64 para que sea visible en cualquier cliente de email
+const LOGO_B64 = (() => {
+  try {
+    const path = require('path');
+    const fs = require('fs');
+    const buf = fs.readFileSync(path.join(__dirname, '../../public/Logo-M.png'));
+    return `data:image/png;base64,${buf.toString('base64')}`;
+  } catch (_) {
+    return null;
+  }
+})();
+
 const C = {
   brandDark:  '#004669',
   brand:      '#20759E',
@@ -13,7 +25,7 @@ const C = {
 
 function brandedEmail({ title, preheader, content, showLogo = true }) {
   const appUrl = APP_URL();
-  const logoUrl = `${appUrl}/Logo-M.png`;
+  const logoUrl = LOGO_B64 || `${appUrl}/Logo-M.png`;
   return `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
 ${preheader ? `<span style="display:none;max-height:0;overflow:hidden;mso-hide:all">${preheader}</span>` : ''}
 </head>

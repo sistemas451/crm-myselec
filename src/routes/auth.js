@@ -83,7 +83,7 @@ router.post('/login', async (req, res) => {
     }
     if (!user.active) {
       logLogin({ email, userId: user.id, success: false, req });
-      return res.status(401).json({ error: 'Credenciales inválidas' });
+      return res.status(401).json({ error: 'Cuenta desactivada. Contactá al administrador.' });
     }
 
     const valid = await bcrypt.compare(password, user.password);
@@ -133,8 +133,8 @@ router.post('/register', async (req, res) => {
   try {
     const { name, lastName, email, password, phone, dni, cuit } = req.body;
 
-    if (!name || !lastName || !email || !password || !phone || !dni) {
-      return res.status(400).json({ error: 'Nombre, apellido, email, contraseña, teléfono y DNI son requeridos' });
+    if (!name || !lastName || !email || !password) {
+      return res.status(400).json({ error: 'Nombre, apellido, email y contraseña son requeridos' });
     }
 
     // Validación de dominio/correo permitido

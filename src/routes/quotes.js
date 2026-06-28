@@ -822,6 +822,37 @@ async function copyPresupuestoItemsToOC(presupuestoId, ocId) {
   });
 }
 
+// PATCH /api/quotes/:id/amount — editar monto manualmente
+router.patch('/:id/amount', authMiddleware, async (req, res) => {
+  try {
+    const { amount } = req.body;
+    if (amount == null || isNaN(parseFloat(amount))) {
+      return res.status(400).json({ error: 'Monto inválido' });
+    }
+    const quote = await prisma.quote.findUnique({ where: { id: req.params.id } });
+    if (!quote) return res.status(404).json({ error: 'Cotización no encontrada' });
+    if (req.user.role === 'VENDEDOR' && quote.sellerId !== req.user.id) {
+      return res.status(403).json({ error: 'Sin permiso sobre esta cotización' });
+    }
+    const updated = await prisma.quote.update({
+      where: { id: req.params.id },
+      data: { amount: parseFloat(amount) },
+    });
+    await prisma.activity.create({
+      data: {
+        action: 'STAGE_CHANGE',
+        detail: `Monto actualizado a ${parseFloat(amount).toLocaleString('es-AR', { minimumFractionDigits: 2 })} ${quote.currency || 'USD'}`,
+        quoteId: quote.id,
+        userId: req.user.id,
+      },
+    });
+    res.json({ id: updated.id, amount: updated.amount });
+  } catch (err) {
+    console.error('Error updating amount:', err);
+    res.status(500).json({ error: 'Error al actualizar monto' });
+  }
+});
+
 // PATCH /api/quotes/:id/link — vincular quotes (SOLICITUD ↔ PRESUPUESTO ↔ OC)
 // body: { linkedQuoteId } — o null para desvincular
 router.patch('/:id/link', authMiddleware, async (req, res) => {

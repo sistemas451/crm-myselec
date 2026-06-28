@@ -243,6 +243,17 @@ app.post('/api/quotes/:id/attachments', authMiddleware, upload.array('files', 10
       }
     }
 
+    if (req.files?.length > 0) {
+      await prisma.activity.createMany({
+        data: req.files.map(f => ({
+          quoteId: req.params.id,
+          action: 'ATTACHMENT_UPLOADED',
+          detail: `Adjunto subido: ${f.originalname}`,
+          userId: req.user.id,
+        })),
+      });
+    }
+
     res.json({ attachments: created, flexxusParsed });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -432,6 +443,17 @@ app.post('/api/orders/:id/attachments', authMiddleware, upload.array('files', 10
       } catch (parseErr) {
         console.error('Auto-parseo NP falló:', parseErr.message);
       }
+    }
+
+    if (req.files?.length > 0) {
+      await prisma.activity.createMany({
+        data: req.files.map(f => ({
+          orderId: req.params.id,
+          action: 'ATTACHMENT_UPLOADED',
+          detail: `Adjunto subido: ${f.originalname}`,
+          userId: req.user.id,
+        })),
+      });
     }
 
     res.json({ attachments: created, npParsed });

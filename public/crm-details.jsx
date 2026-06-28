@@ -675,7 +675,7 @@ function SendEmailModal({ quote, attachments, onClose, onSent }) {
 }
 
 function QuoteDetail({ code, onClose, canReassign }) {
-  const { quotes, clients, users, moveQuoteStage, setQuotes, setOrders, pushToast, closeModal, openModal } = useApp();
+  const { quotes, clients, users, moveQuoteStage, setQuotes, setOrders, pushToast, closeModal, openModal, updateQuote } = useApp();
   const q = quotes.find(x => x.code === code);
   if (!q) return null;
   const cli = clients.find(c=>c.code===q.client);
@@ -727,6 +727,9 @@ function QuoteDetail({ code, onClose, canReassign }) {
   const [dupClientId, setDupClientId] = useState('');
   const [dupClientSearch, setDupClientSearch] = useState('');
   const [dupSaving, setDupSaving] = useState(false);
+  const [editingMonto, setEditingMonto] = useState(false);
+  const [montoVal, setMontoVal] = useState('');
+  const [montoSaving, setMontoSaving] = useState(false);
 
   const handleDuplicate = async () => {
     if (!dupClientId) return;
@@ -1252,7 +1255,39 @@ function QuoteDetail({ code, onClose, canReassign }) {
           <Field label="Ingreso">
             <span className="mono">{fmtDate(q.ingreso)} <span className="text-ink-500">· hace {q.dias}d</span></span>
           </Field>
-          <Field label="Total con IVA" mono value={q.monto != null ? fmtMoney(q.monto, q.currency) : '—'}/>
+          <Field label="Total con IVA" mono value={
+            editingMonto ? (
+              <span className="flex items-center gap-1.5">
+                <input autoFocus type="number" step="0.01" min="0"
+                  className="text-[12.5px] border border-brand rounded-lg px-2 py-0.5 w-36 mono"
+                  value={montoVal}
+                  onChange={e => setMontoVal(e.target.value)}
+                  onBlur={async () => {
+                    const v = parseFloat(montoVal);
+                    if (!isNaN(v) && v !== q.monto) {
+                      setMontoSaving(true);
+                      try {
+                        await CrmApi.updateQuoteAmount(q.id, v);
+                        updateQuote(q.code, { monto: v });
+                        pushToast('Monto actualizado');
+                      } catch (err) { pushToast(err.message || 'Error al guardar', 'bad'); }
+                      finally { setMontoSaving(false); }
+                    }
+                    setEditingMonto(false);
+                  }}
+                  onKeyDown={e => { if (e.key === 'Escape') setEditingMonto(false); }}
+                />
+                {montoSaving && <span className="text-[11px] text-ink-400">Guardando…</span>}
+              </span>
+            ) : (
+              <span className="group flex items-center gap-1 cursor-pointer hover:text-brand"
+                onClick={() => { setMontoVal(q.monto != null ? String(q.monto) : ''); setEditingMonto(true); }}
+                title="Clic para editar">
+                {q.monto != null ? fmtMoney(q.monto, q.currency) : '—'}
+                <Icon name="pencil" size={11} className="text-ink-300 opacity-0 group-hover:opacity-100 transition-opacity"/>
+              </span>
+            )
+          }/>
           <Field label="Cod. Flexxus NP" mono value={q.flexxus || '—'}/>
           <Field label="Zona de entrega" value={cli?.zone || '—'}/>
           <Field label="Contacto">
@@ -1695,11 +1730,13 @@ function QuoteDetail({ code, onClose, canReassign }) {
             <div className="space-y-0">
               {history.map((a, i) => {
                 const iconMap = {
-                  CREATED:      { name:'plus-circle',    cls:'text-emerald-600 bg-emerald-50' },
-                  STAGE_CHANGE: { name:'arrow-right',    cls:'text-brand bg-brandSoft' },
-                  NOTE_ADDED:   { name:'message-square', cls:'text-ink-500 bg-surface' },
-                  ASSIGNED:     { name:'user',           cls:'text-orange-600 bg-orange-50' },
-                  LINKED:       { name:'link',           cls:'text-violet-600 bg-violet-50' },
+                  CREATED:             { name:'plus-circle',    cls:'text-emerald-600 bg-emerald-50' },
+                  STAGE_CHANGE:        { name:'arrow-right',    cls:'text-brand bg-brandSoft' },
+                  NOTE_ADDED:          { name:'message-square', cls:'text-ink-500 bg-surface' },
+                  ASSIGNED:            { name:'user',           cls:'text-orange-600 bg-orange-50' },
+                  LINKED:              { name:'link',           cls:'text-violet-600 bg-violet-50' },
+                  ATTACHMENT_UPLOADED: { name:'paperclip',      cls:'text-sky-600 bg-sky-50' },
+                  REMINDER_SENT:       { name:'bell',           cls:'text-amber-600 bg-amber-50' },
                 };
                 const ic = iconMap[a.action] || { name:'activity', cls:'text-ink-500 bg-surface' };
                 const isLast = i === history.length - 1;

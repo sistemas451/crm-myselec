@@ -1995,7 +1995,7 @@ function Team() {
                 </div>
                 <table className="tbl w-full">
                   <thead><tr>
-                    <th>Usuario</th><th>Teléfono</th><th>DNI</th><th>CUIT</th><th>Fecha solicitud</th><th></th>
+                    <th>Usuario</th><th>Teléfono</th><th>DNI</th><th>Fecha solicitud</th><th></th>
                   </tr></thead>
                   <tbody>
                     {pending.map(u => (
@@ -2011,7 +2011,6 @@ function Team() {
                         </td>
                         <td className="text-[13px]">{u.phone || '—'}</td>
                         <td className="text-[13px] mono">{u.dni || '—'}</td>
-                        <td className="text-[13px] mono">{u.cuit || '—'}</td>
                         <td className="text-[12px] text-ink-500">{new Date(u.createdAt).toLocaleDateString('es-AR')}</td>
                         <td className="text-right">
                           <div className="flex items-center justify-end gap-1">

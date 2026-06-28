@@ -134,6 +134,9 @@ const CrmApi = {
   deleteQuoteItem: (quoteId, itemId) => apiFetch(`/quotes/${quoteId}/items/${itemId}`, {
     method: 'DELETE'
   }),
+  updateQuoteAmount: (id, amount) => apiFetch(`/quotes/${id}/amount`, {
+    method: 'PATCH', body: JSON.stringify({ amount })
+  }),
   linkQuote: (id, linkedQuoteId) => apiFetch(`/quotes/${id}/link`, {
     method: 'PATCH', body: JSON.stringify({ linkedQuoteId })
   }),

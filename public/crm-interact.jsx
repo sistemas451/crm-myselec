@@ -1495,7 +1495,7 @@ function SearchPaletteModal() {
 // --- Detail modal wrappers (route to existing drawers via registry) ---
 function QuoteDetailWrapper({ code }) {
   const { closeModal, roleKey } = useApp();
-  return <QuoteDetail code={code} onClose={closeModal} canReassign={roleKey==='admin'}/>;
+  return <QuoteDetail code={code} onClose={closeModal} canReassign={['admin','vendedor'].includes(roleKey)}/>;
 }
 function OrderDetailWrapper({ code }) {
   const { closeModal, roleKey } = useApp();
