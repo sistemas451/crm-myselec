@@ -266,7 +266,22 @@ async function syncAccount(account) {
         const labelMails = await fetchRawFromFolder(imap, CRM_LABEL, ['ALL'], false);
 
         // Fuente 2: Enviados — presupuestos enviados por el vendedor
-        const sentMails = await fetchRawFromFolder(imap, GMAIL_SENT, [['SINCE', sentSince]], false, true);
+        // Gmail usa distintos nombres según idioma de la cuenta; probar todos los conocidos
+        const SENT_FOLDER_CANDIDATES = [
+          GMAIL_SENT,
+          '[Gmail]/Enviados',
+          '[Gmail]/Correo enviado',
+          '[Gmail]/Sent Messages',
+        ].filter((v, i, a) => a.indexOf(v) === i);
+        let sentMails = [];
+        for (const candidate of SENT_FOLDER_CANDIDATES) {
+          const mails = await fetchRawFromFolder(imap, candidate, [['SINCE', sentSince]], false, true);
+          if (mails.length) {
+            if (candidate !== GMAIL_SENT) console.log(`📧 [${tag}] Sent Mail: usando "${candidate}" (${mails.length} emails)`);
+            sentMails = mails;
+            break;
+          }
+        }
 
         // NOTA: el INBOX ya no se lee directamente. Todo mail relevante debe tener
         // la etiqueta "crm" (via filtro de Gmail o manualmente). Ver instructivo de
@@ -293,6 +308,7 @@ async function syncAccount(account) {
               if (result.unassigned) unassignedItems.push(result);
             }
           } catch (err) {
+            console.error(`   ❌ Error procesando mail (uid ${m.uid}):`, err.message, err.stack?.split('\n')[1] || '');
             results.errors.push(err.message || 'Unknown error');
           }
         }
@@ -823,6 +839,8 @@ async function processSentMail(parsed, mailData, imap) {
   const notaPedidoAtt   = realAttachments.find(a => isNotaPedidoPDF(a));
   const flexxusAtt      = realAttachments.find(a => isFlexxusPDF(a));
 
+  console.log(`   📤 [enviado] Asunto: "${subject}" | adjuntos: ${realAttachments.length} (${realAttachments.map(a => a.filename || a.contentType || '?').join(', ')}) | flexxus: ${!!flexxusAtt} | NP: ${!!notaPedidoAtt}`);
+
   // ── Nota de Pedido → flujo separado ──────────────────────────────────────
   if (notaPedidoAtt) {
     return await processNotaPedido(parsed, mailData, notaPedidoAtt, imap);
@@ -1267,9 +1285,11 @@ async function processEmail(mailData, imap) {
 
       // Marcar como leído para no volver a procesar
       if (mailData.uid) {
-        imap.addFlags(mailData.uid, ['\\Seen'], (err) => {
-          if (err) console.error('Error marking as seen:', err.message);
-        });
+        try {
+          imap.addFlags(mailData.uid, ['\\Seen'], (err) => {
+            if (err) console.error('Error marking as seen:', err.message);
+          });
+        } catch (_) {}
       }
       console.log(`   ⏭️  Ya existente: ${existing.code} — datos actualizados`);
       return null;
@@ -1407,7 +1427,8 @@ async function processEmail(mailData, imap) {
     if (!sellerId) sellerId = client?.defaultSellerId || null;
 
     // ── Crear cotización ──────────────────────────────────────────────────
-    const code = await nextCode(prisma.quote, 'COT-2026');
+    const year = new Date().getFullYear();
+    const code = await nextCode(prisma.quote, mailType === 'PRESUPUESTO' ? `COT-${year}` : `SOL-${year}`);
 
     // Calcular monto total de ítems Flexxus (solo los aceptados)
     const itemsSubtotal = flexxusData?.items?.length
@@ -1584,9 +1605,11 @@ async function processEmail(mailData, imap) {
 
     // ── Marcar como leído en IMAP ─────────────────────────────────────────
     if (mailData.uid) {
-      imap.addFlags(mailData.uid, ['\\Seen'], (err) => {
-        if (err) console.error('Error marking as seen:', err.message);
-      });
+      try {
+        imap.addFlags(mailData.uid, ['\\Seen'], (err) => {
+          if (err) console.error('Error marking as seen:', err.message);
+        });
+      } catch (_) {}
     }
 
     console.log(`   ✅ Creada ${code} ← ${originalSender} → ${client?.name || 'sin cliente'}`);

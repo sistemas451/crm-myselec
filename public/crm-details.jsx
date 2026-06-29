@@ -983,10 +983,12 @@ function QuoteDetail({ code, onClose, canReassign }) {
           {q.flexxus && (
             <Badge tone="slate"><span className="mono">{q.flexxus}</span></Badge>
           )}
-          <button className="btn-ghost text-brand border-brand/30 hover:bg-brand/5"
-            onClick={() => setEmailModalOpen(true)}>
-            <Icon name="send" size={13}/>Enviar mail
-          </button>
+          {!isSolicitud && (
+            <button className="btn-ghost text-brand border-brand/30 hover:bg-brand/5"
+              onClick={() => setEmailModalOpen(true)}>
+              <Icon name="send" size={13}/>Enviar mail
+            </button>
+          )}
           {q.mailType === 'PRESUPUESTO' && q.stage === 'enviado' && cli?.email && (
             <button className="btn-ghost text-orange-600 border-orange-300 hover:bg-orange-50"
               onClick={() => setReminderOpen(true)}>
@@ -1255,7 +1257,7 @@ function QuoteDetail({ code, onClose, canReassign }) {
           <Field label="Ingreso">
             <span className="mono">{fmtDate(q.ingreso)} <span className="text-ink-500">· hace {q.dias}d</span></span>
           </Field>
-          <Field label="Total con IVA" mono value={
+          {!isSolicitud && <Field label="Total con IVA" mono value={
             editingMonto ? (
               <span className="flex items-center gap-1.5">
                 <input autoFocus type="number" step="0.01" min="0"
@@ -1287,9 +1289,9 @@ function QuoteDetail({ code, onClose, canReassign }) {
                 <Icon name="pencil" size={11} className="text-ink-300 opacity-0 group-hover:opacity-100 transition-opacity"/>
               </span>
             )
-          }/>
-          <Field label="Cod. Flexxus NP" mono value={q.flexxus || '—'}/>
-          <Field label="Zona de entrega" value={cli?.zone || '—'}/>
+          }/>}
+          {!isSolicitud && <Field label="Cod. Flexxus PR" mono value={q.flexxus || '—'}/>}
+          {!isSolicitud && <Field label="Zona de entrega" value={cli?.zone || '—'}/>}
           <Field label="Contacto">
             {cli?.email
               ? <a href={`mailto:${cli.email}`} className="text-brand hover:underline text-[12.5px] truncate block">{cli.email}</a>
@@ -1586,7 +1588,7 @@ function QuoteDetail({ code, onClose, canReassign }) {
                   <div className="text-[11px] uppercase tracking-wider text-ink-500 font-semibold mb-2">Resumen</div>
                   <ul className="text-[12.5px] space-y-1.5">
                     <li className="flex justify-between"><span className="text-ink-500">Cliente</span><span className="font-medium">{cli?.name || '—'}</span></li>
-                    {q.flexxus && <li className="flex justify-between"><span className="text-ink-500">NP Flexxus</span><span className="mono">{q.flexxus}</span></li>}
+                    {q.flexxus && <li className="flex justify-between"><span className="text-ink-500">Pres. Flexxus</span><span className="mono">{q.flexxus}</span></li>}
                     {priceBreakdown?.subtotalNeto != null && (
                       <li className="flex justify-between"><span className="text-ink-500">Subtotal neto</span><span className="mono">{fmtMoney(priceBreakdown.subtotalNeto, q.currency, 2)}</span></li>
                     )}

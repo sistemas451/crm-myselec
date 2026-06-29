@@ -296,6 +296,8 @@ const CrmApi = {
   getFeedbackNotifyUsers: ()      => apiFetch('/settings/feedback-notify-users'),
   saveFeedbackNotifyUsers: (ids)  => apiFetch('/settings/feedback-notify-users', { method: 'PUT', body: JSON.stringify({ ids }) }),
   getFeedbackPost:    (id)         => apiFetch(`/feedback/${id}`),
+  editFeedbackPost:   (id, data)   => apiFetch(`/feedback/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteFeedbackPost: (id)         => apiFetch(`/feedback/${id}`, { method: 'DELETE' }),
 
   uploadFeedbackImage: (file) => {
     const fd = new FormData();

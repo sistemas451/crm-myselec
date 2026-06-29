@@ -2373,7 +2373,8 @@ function Config() {
         pushToast(`Sync completo · sin novedades`);
       }
       if (data.errors?.length) {
-        setTimeout(() => pushToast(`⚠️ ${data.errors[0]}`, 'bad'), 600);
+        const toastType = data.synced > 0 ? 'warn' : 'bad';
+        setTimeout(() => pushToast(`⚠️ ${data.errors[0]}`, toastType), 600);
       }
       const accounts = await fetch('/api/mail/accounts', { headers: { Authorization: `Bearer ${localStorage.getItem('crm_token')}` } }).then(r => r.json());
       setMailAccounts(Array.isArray(accounts) ? accounts : []);
@@ -2389,14 +2390,14 @@ function Config() {
         headers: { Authorization: `Bearer ${localStorage.getItem('crm_token')}` },
       });
       const data = await res.json();
-      // Mostrar éxito aunque haya errores menores (etiqueta, etc.)
       if (data.synced > 0) {
         pushToast(`✅ ${data.synced} mail(s) procesado(s)`);
       } else {
         pushToast(`Sync completo · sin novedades`);
       }
       if (data.errors?.length) {
-        setTimeout(() => pushToast(`⚠️ ${data.errors[0]}`, 'bad'), 600);
+        const toastType = data.synced > 0 ? 'warn' : 'bad';
+        setTimeout(() => pushToast(`⚠️ ${data.errors[0]}`, toastType), 600);
       }
       const accounts = await fetch('/api/mail/accounts', { headers: { Authorization: `Bearer ${localStorage.getItem('crm_token')}` } }).then(r => r.json());
       setMailAccounts(Array.isArray(accounts) ? accounts : []);
@@ -4941,7 +4942,7 @@ function FeedbackListView({ onNew, onOpen, posts, loading, isAdmin, currentUserI
         {isAdmin && (
           <div className="max-w-4xl mx-auto mt-3 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-[12px] text-amber-800 flex items-center gap-2">
             <Icon name="shield-check" size={13} className="text-amber-500 shrink-0"/>
-            Estás viendo el foro como <strong>administrador</strong> — podés responder casos y cambiar su estado.
+            Estás viendo el foro como <strong>desarrollador</strong> — podés responder casos, cambiar su estado y eliminar publicaciones.
           </div>
         )}
       </div>
@@ -4959,7 +4960,7 @@ function FeedbackListView({ onNew, onOpen, posts, loading, isAdmin, currentUserI
         {/* Chips tipo + estado */}
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Tipo:</span>
-          {[['ALL','Todos'],['BUG','🐛 Errores'],['QUESTION','❓ Preguntas']].map(([k,lbl]) => (
+          {[['ALL','Todos'],['BUG','Errores'],['QUESTION','Preguntas']].map(([k,lbl]) => (
             <button key={k} onClick={() => setTypeFilter(k)}
               className={cx('px-2.5 py-1 rounded-full text-[11px] font-medium border transition-all',
                 typeFilter === k ? 'bg-brand text-white border-brand' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50')}>
@@ -5208,6 +5209,11 @@ function FeedbackDetailView({ postId, onBack, onUpdate, isAdmin, currentUserId }
   const [replyStatus,   setReplyStatus]   = useState('');
   const [sending,       setSending]       = useState(false);
   const [votingLoading, setVotingLoading] = useState(false);
+  const [editing,       setEditing]       = useState(false);
+  const [editTitle,     setEditTitle]     = useState('');
+  const [editBody,      setEditBody]      = useState('');
+  const [editSaving,    setEditSaving]    = useState(false);
+  const [deleting,      setDeleting]      = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -5259,6 +5265,34 @@ function FeedbackDetailView({ postId, onBack, onUpdate, isAdmin, currentUserId }
     } catch (_) {}
   }
 
+  function startEdit() {
+    setEditTitle(post.title);
+    setEditBody(post.body);
+    setEditing(true);
+  }
+
+  async function handleEdit() {
+    if (!editTitle.trim() || !editBody.trim()) return;
+    setEditSaving(true);
+    try {
+      const updated = await CrmApi.editFeedbackPost(post.id, { title: editTitle, body: editBody });
+      setPost(prev => ({ ...prev, title: updated.title, body: updated.body }));
+      setEditing(false);
+      onUpdate && onUpdate();
+    } catch (e) { alert(e.message || 'Error al guardar.'); }
+    setEditSaving(false);
+  }
+
+  async function handleDelete() {
+    if (!confirm('¿Eliminar esta publicación? Esta acción no se puede deshacer.')) return;
+    setDeleting(true);
+    try {
+      await CrmApi.deleteFeedbackPost(post.id);
+      onUpdate && onUpdate();
+      onBack();
+    } catch (e) { alert(e.message || 'Error al eliminar.'); setDeleting(false); }
+  }
+
   if (loading) return (
     <div className="flex items-center justify-center min-h-screen bg-slate-50">
       <Icon name="loader" size={24} className="animate-spin text-slate-400"/>
@@ -5299,32 +5333,54 @@ function FeedbackDetailView({ postId, onBack, onUpdate, isAdmin, currentUserId }
               <FbTypeBadge type={post.type}/>
               <FbStatusBadge status={post.status}/>
               <span className="text-[11px] font-mono text-slate-400">{post.code}</span>
-              {isNew && <span className="text-[10px] text-slate-400 ml-auto">Recién publicado, sin revisar.</span>}
+              {isNew && <span className="text-[10px] text-slate-400">Recién publicado, sin revisar.</span>}
+              <div className="ml-auto flex items-center gap-1.5">
+                {isOwn && !editing && (
+                  <button onClick={startEdit}
+                    className="flex items-center gap-1 px-2.5 py-1 text-[11px] text-slate-500 border border-slate-200 rounded-lg hover:bg-slate-50 transition-all">
+                    <Icon name="pencil" size={11}/>Editar
+                  </button>
+                )}
+                {(isOwn || isAdmin) && (
+                  <button onClick={handleDelete} disabled={deleting}
+                    className="flex items-center gap-1 px-2.5 py-1 text-[11px] text-red-500 border border-red-200 rounded-lg hover:bg-red-50 transition-all disabled:opacity-50">
+                    <Icon name="trash-2" size={11}/>{deleting ? 'Eliminando…' : 'Eliminar'}
+                  </button>
+                )}
+              </div>
             </div>
-            <h1 className="text-lg font-bold text-slate-800 leading-snug">{post.title}</h1>
+            {editing ? (
+              <input value={editTitle} onChange={e => setEditTitle(e.target.value)}
+                className="w-full text-lg font-bold text-slate-800 border border-brand rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand/30"/>
+            ) : (
+              <h1 className="text-lg font-bold text-slate-800 leading-snug">{post.title}</h1>
+            )}
           </div>
 
           {/* Cuerpo + voto */}
-          <div className="px-5 py-4 flex gap-4">
-            {/* Caja de voto */}
-            <div className="shrink-0 flex flex-col items-center gap-1">
+          <div className="px-5 py-4 flex flex-col gap-3">
+            {/* Botón "me pasa" */}
+            {!isOwn && (
               <button
                 onClick={handleVote}
-                disabled={isOwn || votingLoading}
-                title={isOwn ? 'No podés votar tu propio reporte' : iVoted ? 'Quitar — ya reporté este problema' : 'Yo también tengo este problema'}
+                disabled={votingLoading}
                 className={cx(
-                  'flex flex-col items-center justify-center w-12 h-14 rounded-xl border-2 transition-all',
-                  isOwn ? 'cursor-default opacity-40 border-slate-200 bg-slate-50' :
-                  iVoted ? 'border-brand bg-brand/5 text-brand hover:bg-brand/10' :
-                           'border-slate-200 bg-slate-50 text-slate-400 hover:border-brand/40 hover:text-brand hover:bg-brand/5'
+                  'self-start flex items-center gap-2 px-4 py-2 rounded-xl border-2 font-semibold text-sm transition-all',
+                  iVoted
+                    ? 'border-brand bg-brand/5 text-brand hover:bg-brand/10'
+                    : 'border-orange-300 bg-orange-50 text-orange-600 hover:bg-orange-100 hover:border-orange-400'
                 )}>
-                <Icon name="chevron-up" size={16}/>
-                <span className="text-sm font-bold leading-none">{totalReporters}</span>
+                <Icon name="chevron-up" size={15}/>
+                {iVoted ? `Me pasa a mí también · ${totalReporters}` : `Me pasa a mí también · ${totalReporters}`}
               </button>
-              <span className="text-[9px] text-slate-400 text-center leading-tight">{iVoted ? 'reportado' : 'me pasa'}</span>
-            </div>
-
-            <div className="flex-1 min-w-0">
+            )}
+            {isOwn && totalReporters > 1 && (
+              <div className="self-start flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-200 bg-slate-50 text-slate-500 text-sm">
+                <Icon name="chevron-up" size={15}/>
+                <span>{totalReporters} personas con este problema</span>
+              </div>
+            )}
+            <div className="min-w-0">
               {/* Autor */}
               <div className="flex items-center gap-2 mb-3 text-[12px] text-slate-500">
                 <div className="w-5 h-5 rounded-full bg-brand/10 flex items-center justify-center text-[9px] font-bold text-brand">
@@ -5337,7 +5393,24 @@ function FeedbackDetailView({ postId, onBack, onUpdate, isAdmin, currentUserId }
               </div>
 
               {/* Cuerpo */}
-              <div className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{post.body}</div>
+              {editing ? (
+                <div className="space-y-3">
+                  <textarea value={editBody} onChange={e => setEditBody(e.target.value)} rows={6}
+                    className="w-full border border-brand rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand/30 resize-none"/>
+                  <div className="flex gap-2">
+                    <button onClick={() => setEditing(false)}
+                      className="px-3 py-1.5 border border-slate-200 text-slate-600 rounded-lg text-sm hover:bg-slate-50">
+                      Cancelar
+                    </button>
+                    <button onClick={handleEdit} disabled={editSaving || !editTitle.trim() || !editBody.trim()}
+                      className="px-4 py-1.5 bg-brand text-white rounded-lg text-sm font-medium hover:bg-brand/90 disabled:opacity-50 flex items-center gap-2">
+                      {editSaving ? <><Icon name="loader" size={13} className="animate-spin"/>Guardando…</> : 'Guardar cambios'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{post.body}</div>
+              )}
 
               {/* Imagen adjunta */}
               {post.imageUrl && (
@@ -5370,7 +5443,7 @@ function FeedbackDetailView({ postId, onBack, onUpdate, isAdmin, currentUserId }
                   <div className="flex-1">
                     <div className="text-[11px] text-slate-400 mb-1.5 flex items-center gap-1.5">
                       <span className="font-semibold text-slate-600">{r.user.name}</span>
-                      <span className="px-1.5 py-0.5 bg-brand/10 text-brand rounded text-[9px] font-bold">Admin</span>
+                      <span className="px-1.5 py-0.5 bg-brand/10 text-brand rounded text-[9px] font-bold">Dev</span>
                       <span>·</span>
                       {fmtDate(r.createdAt)}
                     </div>
@@ -5479,7 +5552,7 @@ function FeedbackDetailView({ postId, onBack, onUpdate, isAdmin, currentUserId }
               <Icon name="shield-check" size={13} className="text-white"/>
             </div>
             <div className="flex-1 min-w-0">
-              <span className="text-sm font-semibold">Modo administrador</span>
+              <span className="text-sm font-semibold">Modo desarrollador</span>
               <span className="text-slate-400 text-xs ml-2">Respondé con plantillas y actualizá el estado del caso.</span>
             </div>
             <button onClick={() => setRespondOpen(v => !v)}

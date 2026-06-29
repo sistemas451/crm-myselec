@@ -148,14 +148,14 @@ function OrderCard({ o, onOpen, compact }) {
   const { clients, users } = useApp();
   const cli = clients.find(c=>c.code===o.client);
   const sel = users.find(u=>u.id===o.seller);
-  const isEmailOC = o._source === 'QUOTE';
   const displayName = cli?.name || o.clientName || o.emailSubject || 'Sin cliente';
   return (
     <div onClick={onOpen} className="kcard bg-white border border-line/80 rounded-xl p-3.5 cursor-pointer">
       <div className="flex items-start justify-between gap-2">
         <div className="mono text-[11px] font-semibold text-navy-900">{o.code}</div>
         <div className="flex items-center gap-1">
-          {isEmailOC && <Badge tone="purple">EMAIL</Badge>}
+          {o.entrega === 'EMAIL'  && <Badge tone="purple">EMAIL</Badge>}
+          {o.entrega === 'UPLOAD' && <Badge tone="sky">MANUAL</Badge>}
           {o.flexxus && <Badge tone="slate">{o.flexxus}</Badge>}
         </div>
       </div>

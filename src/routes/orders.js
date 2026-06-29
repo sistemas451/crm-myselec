@@ -72,7 +72,7 @@ router.get('/', authMiddleware, async (req, res) => {
       sellerName: q.seller?.name || '',
       stage: q.stage,
       fromQuote: q.linkedQuote?.code || '',
-      entrega: 'EMAIL',
+      entrega: q.source || 'EMAIL',
       transp: '—',
       flexxus: q.flexxusCode || '',
       fecha: q.createdAt.toISOString(),

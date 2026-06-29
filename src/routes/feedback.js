@@ -106,7 +106,7 @@ async function nextCode() {
   return `MYS-${String(count + 1).padStart(4, '0')}`;
 }
 
-const TYPE_LABEL = { BUG: '🐛 Error', QUESTION: '❓ Pregunta' };
+const TYPE_LABEL = { BUG: 'Error', QUESTION: 'Pregunta' };
 
 const POST_INCLUDE = {
   user: { select: { id: true, name: true, email: true, avatar: true, role: true } },
@@ -281,6 +281,48 @@ router.patch('/:id/status', async (req, res) => {
     if (!VALID_STATUSES.includes(status)) return res.status(400).json({ error: 'Estado inválido.' });
     const post = await prisma.feedbackPost.update({ where: { id: req.params.id }, data: { status } });
     res.json(post);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── PATCH /:id — editar post (autor) ─────────────────────────────────────────
+router.patch('/:id', async (req, res) => {
+  try {
+    const post = await prisma.feedbackPost.findUnique({ where: { id: req.params.id } });
+    if (!post) return res.status(404).json({ error: 'Post no encontrado.' });
+    if (post.userId !== req.user.id) return res.status(403).json({ error: 'Solo el autor puede editar su publicación.' });
+
+    const { type, module: mod, title, body } = req.body;
+    if (type && !['BUG','QUESTION'].includes(type)) return res.status(400).json({ error: 'Tipo inválido.' });
+    if (title !== undefined && !title?.trim()) return res.status(400).json({ error: 'El título no puede estar vacío.' });
+    if (body  !== undefined && !body?.trim())  return res.status(400).json({ error: 'La descripción no puede estar vacía.' });
+
+    const updated = await prisma.feedbackPost.update({
+      where: { id: post.id },
+      data: {
+        ...(type  !== undefined && { type }),
+        ...(mod   !== undefined && { module: mod || null }),
+        ...(title !== undefined && { title: title.trim() }),
+        ...(body  !== undefined && { body: body.trim() }),
+      },
+      include: POST_INCLUDE,
+    });
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── DELETE /:id — eliminar post (autor o developer) ───────────────────────────
+router.delete('/:id', async (req, res) => {
+  try {
+    const post = await prisma.feedbackPost.findUnique({ where: { id: req.params.id } });
+    if (!post) return res.status(404).json({ error: 'Post no encontrado.' });
+    if (post.userId !== req.user.id && !isDeveloper(req.user)) return res.status(403).json({ error: 'Sin permiso para eliminar esta publicación.' });
+
+    await prisma.feedbackPost.delete({ where: { id: post.id } });
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -35,6 +35,17 @@ function extractSkuFromText(text, catalog) {
   let cleanDesc = text;
   let found = false;
 
+  // 0) SKU al comienzo: "{SKU} - {descripción}" (sin espacios, con dígitos)
+  // Ej: "102L048/S - CAPUCHON TERMOC. C/ADH. 1KV 75/32 MM..."
+  if (!found) {
+    const prefixM = text.match(/^([A-Z0-9][A-Z0-9\/\-\.\(\)]{2,24}) - (.+)$/i);
+    if (prefixM && /\d/.test(prefixM[1]) && !/\s/.test(prefixM[1])) {
+      sku = prefixM[1].trim();
+      cleanDesc = prefixM[2].trim();
+      found = true;
+    }
+  }
+
   // 1) Sufijo repetido (más largo gana)
   let bestSku = null, bestDesc = null;
   for (let len = 2; len <= Math.min(20, Math.floor(text.length / 2)); len++) {
