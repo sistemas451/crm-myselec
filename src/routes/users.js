@@ -267,13 +267,13 @@ router.put('/:id', authMiddleware, adminOnly, async (req, res) => {
   try {
     const { name, email, role, zone, password } = req.body;
 
-    // Protección: no degradar al último admin activo
-    if (role && role !== 'ADMIN') {
+    // Protección: no degradar al último admin/developer activo
+    if (role && !['ADMIN', 'DEVELOPER'].includes(role)) {
       const target = await prisma.user.findUnique({ where: { id: req.params.id } });
       if (target && target.role === 'ADMIN' && target.active) {
-        const activeAdmins = await prisma.user.count({ where: { role: 'ADMIN', active: true } });
-        if (activeAdmins <= 1) {
-          return res.status(400).json({ error: 'Debe haber al menos un administrador activo' });
+        const activePrivileged = await prisma.user.count({ where: { role: { in: ['ADMIN', 'DEVELOPER'] }, active: true } });
+        if (activePrivileged <= 1) {
+          return res.status(400).json({ error: 'Debe haber al menos un administrador o desarrollador activo' });
         }
       }
     }
@@ -338,11 +338,11 @@ router.patch('/:id/toggle', authMiddleware, adminOnly, async (req, res) => {
     if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
     if (user.id === req.user.id) return res.status(400).json({ error: 'No podés desactivarte a vos mismo' });
 
-    // Protección: no dejar sin admins activos
-    if (user.role === 'ADMIN' && user.active) {
-      const activeAdmins = await prisma.user.count({ where: { role: 'ADMIN', active: true } });
-      if (activeAdmins <= 1) {
-        return res.status(400).json({ error: 'Debe haber al menos un administrador activo' });
+    // Protección: no dejar sin admins ni developers activos
+    if (['ADMIN', 'DEVELOPER'].includes(user.role) && user.active) {
+      const activePrivileged = await prisma.user.count({ where: { role: { in: ['ADMIN', 'DEVELOPER'] }, active: true } });
+      if (activePrivileged <= 1) {
+        return res.status(400).json({ error: 'Debe haber al menos un administrador o desarrollador activo' });
       }
     }
 
