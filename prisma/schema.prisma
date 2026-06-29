@@ -155,6 +155,7 @@ model Quote {
   emailBody      String?   @db.Text         // Cuerpo del mail
   mailType       String?                    // SOLICITUD | PRESUPUESTO | OC
   inReplyTo      String?                    // Header In-Reply-To del mail (threading)
+  clientOCCode   String?                    // Número de OC del cliente (para NPs manuales)
   followUpDate   DateTime?                  // Alerta a los 4 días del paso 2
   stageChangedAt DateTime?                  // Cuándo cambió de etapa por última vez
   linkedQuoteId  String?                    // Vinculación SOLICITUD ↔ PRESUPUESTO

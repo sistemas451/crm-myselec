@@ -137,6 +137,14 @@ const CrmApi = {
   updateQuoteAmount: (id, amount) => apiFetch(`/quotes/${id}/amount`, {
     method: 'PATCH', body: JSON.stringify({ amount })
   }),
+  createNP: (formData) => {
+    const token = CrmAuth.getToken();
+    return fetch(`${API_BASE}/quotes/create-np`, {
+      method: 'POST',
+      headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+      body: formData,
+    }).then(r => r.ok ? r.json() : r.json().then(b => Promise.reject(new Error(b.error || `Error ${r.status}`))));
+  },
   linkQuote: (id, linkedQuoteId) => apiFetch(`/quotes/${id}/link`, {
     method: 'PATCH', body: JSON.stringify({ linkedQuoteId })
   }),

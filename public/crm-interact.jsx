@@ -711,19 +711,14 @@ function NewOrderModal() {
   const submit = async () => {
     setSaving(true);
     try {
-      const payload = {
-        fromQuoteId:  q?.id || null,
-        clientId:     form.clientId || null,
-        clientOCCode: form.ocCliente,
-        flexxusCode:  form.flexxus  || null,
-        estimatedDate: form.fecha || null,
-      };
-      const order = await CrmApi.createOrder(payload);
+      const fd = new FormData();
+      if (q?.id)        fd.append('fromQuoteId',  q.id);
+      if (form.clientId) fd.append('clientId',     form.clientId);
+      if (form.ocCliente) fd.append('clientOCCode', form.ocCliente);
+      if (form.flexxus)  fd.append('flexxusCode',  form.flexxus);
+      if (npFile)        fd.append('file', npFile);
 
-      // Si hay PDF, subirlo como adjunto (el servidor lo re-parsea y vincula)
-      if (npFile) {
-        try { await CrmApi.uploadOrderAttachments(order.id, [npFile]); } catch (_) {}
-      }
+      await CrmApi.createNP(fd);
 
       const freshOrders = await CrmApi.getOrders();
       setOrders(freshOrders);

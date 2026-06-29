@@ -5,7 +5,7 @@ const {authMiddleware, isAdmin } = require('../middleware/auth');
 const { onStageChange } = require('../services/notifier');
 const { resyncQuoteEmail } = require('../services/mailReader');
 const multer = require('multer');
-const { parseFlexxusPDF } = require('../services/flexxusParser');
+const { parseFlexxusPDF, parseNotaPedidoPDF } = require('../services/flexxusParser');
 const { sendQuoteEmail, getTemplates, saveTemplates, getDefaultCC, applyTemplate } = require('../services/mailSender');
 const prisma = require('../db');
 const { nextCode } = require('../services/codeHelper');
@@ -51,6 +51,113 @@ router.post('/parse-presupuesto', authMiddleware, memUpload.single('file'), asyn
     });
   } catch (err) {
     console.error('Error parseando presupuesto:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/quotes/create-np — crear Nota de Pedido manualmente (Quote NOTA_PEDIDO)
+const UPLOADS_DIR_NP = path.join(__dirname, '../../uploads/attachments');
+router.post('/create-np', authMiddleware, memUpload.single('file'), async (req, res) => {
+  try {
+    const { fromQuoteId, clientId: directClientId, clientOCCode, flexxusCode } = req.body;
+
+    // Parse PDF si vino adjunto
+    let npData = null;
+    if (req.file) {
+      const catalog = await prisma.article.findMany({ select: { code: true, description: true } });
+      npData = await parseNotaPedidoPDF(req.file.buffer, { catalog });
+    }
+
+    // Resolver presupuesto, cliente y vendedor
+    let presupuesto = null;
+    if (fromQuoteId) {
+      presupuesto = await prisma.quote.findUnique({ where: { id: fromQuoteId } });
+      if (!presupuesto) return res.status(404).json({ error: 'Presupuesto no encontrado' });
+    }
+    const resolvedClientId = directClientId || presupuesto?.clientId || null;
+    const resolvedSellerId = presupuesto?.sellerId || req.user.id;
+
+    // Generar código NP-YYYY-NNN
+    const year = new Date().getFullYear();
+    const code = await nextCode(prisma.quote, `NP-${year}`);
+
+    // Crear Quote NOTA_PEDIDO
+    const quote = await prisma.quote.create({
+      data: {
+        code,
+        mailType:           'NOTA_PEDIDO',
+        source:             'UPLOAD',
+        stage:              'oc',
+        clientId:           resolvedClientId,
+        sellerId:           resolvedSellerId,
+        flexxusCode:        flexxusCode || npData?.npCode || null,
+        clientOCCode:       clientOCCode || npData?.ocNumber || null,
+        amount:             npData?.total ?? null,
+        currency:           'USD',
+        subtotalNeto:       npData?.subtotalNeto       ?? null,
+        ivaAmount:          npData?.ivaAmount          ?? null,
+        totalPercepciones:  npData?.totalPercepciones  ?? null,
+        emailSubject:       (flexxusCode || npData?.npCode || `NP ${clientOCCode || 'manual'}`).substring(0, 500),
+        linkedQuoteId:      fromQuoteId || null,
+      },
+    });
+
+    // Vínculo bidireccional: presupuesto → NP
+    if (presupuesto && !presupuesto.linkedQuoteId) {
+      await prisma.quote.update({ where: { id: presupuesto.id }, data: { linkedQuoteId: quote.id } });
+    }
+
+    // Crear ítems del PDF
+    if (npData?.items?.length) {
+      await prisma.quoteItem.createMany({
+        data: npData.items.map((item, i) => ({
+          quoteId:     quote.id,
+          sku:         item.sku || null,
+          description: (item.description || '').substring(0, 500),
+          quantity:    item.quantity || 0,
+          unit:        item.unit || null,
+          unitPrice:   item.unitPrice || null,
+          total:       item.total || null,
+          accepted:    true,
+          sortOrder:   i,
+        })),
+      });
+    }
+
+    // Guardar PDF como adjunto
+    if (req.file) {
+      if (!fs.existsSync(UPLOADS_DIR_NP)) fs.mkdirSync(UPLOADS_DIR_NP, { recursive: true });
+      const safe = req.file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const filename = `${quote.id}-${Date.now()}-${safe}`;
+      const filepath = path.join(UPLOADS_DIR_NP, filename);
+      fs.writeFileSync(filepath, req.file.buffer);
+      await prisma.attachment.create({
+        data: { filename, path: filepath, size: req.file.size, mimeType: req.file.mimetype, quoteId: quote.id },
+      });
+    }
+
+    // Auto-aceptar presupuesto vinculado
+    if (fromQuoteId) {
+      try {
+        const { autoAcceptPresupuesto } = require('../services/quoteHelper');
+        await autoAcceptPresupuesto(fromQuoteId);
+      } catch (e) {
+        console.error('Error en auto-accept presupuesto (create-np):', e.message);
+      }
+    }
+
+    await prisma.activity.create({
+      data: {
+        action:  'CREATED',
+        detail:  `Nota de Pedido ${code} cargada manualmente${presupuesto ? ` | Pres. ${presupuesto.code}` : ''}`,
+        quoteId: quote.id,
+        userId:  req.user.id,
+      },
+    });
+
+    res.status(201).json({ id: quote.id, code: quote.code });
+  } catch (err) {
+    console.error('Error creando NP manual:', err);
     res.status(500).json({ error: err.message });
   }
 });
