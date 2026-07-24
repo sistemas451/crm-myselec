@@ -1269,22 +1269,25 @@ router.post('/:id/send-email', authMiddleware, async (req, res) => {
     if (_gmailOnly) {
       // Fetch quote first — valida existencia y permite check de ownership
       const STAGES_TO_ADVANCE = ['asignada', 'armado', 'revision', 'presupuestado', 'recibida', 'oferta', 'proveedor'];
-      const quote = await prisma.quote.findUnique({ where: { id: req.params.id }, select: { stage: true, sellerId: true } });
-      if (!quote) return res.status(404).json({ error: 'Presupuesto no encontrado' });
+      const quote = await prisma.quote.findUnique({ where: { id: req.params.id }, select: { stage: true, sellerId: true, mailType: true } });
+      if (!quote) return res.status(404).json({ error: 'Cotización no encontrada' });
       if (req.user.role === 'VENDEDOR' && quote.sellerId !== req.user.id) {
-        return res.status(403).json({ error: 'Sin permiso para este presupuesto' });
+        return res.status(403).json({ error: 'Sin permiso para esta cotización' });
       }
+      // En Solicitudes, "Abrir en Gmail" se usa para el acuse de recibo (no para mandar
+      // el presupuesto en sí) — nunca debe avanzar la etapa, sea cual sea la etapa actual.
+      const isSolicitud = quote.mailType === 'SOLICITUD';
 
       await prisma.activity.create({
         data: {
           action:  'EMAIL_SENT',
-          detail:  `Presupuesto abierto en Gmail para ${to}${cc ? ` (CC: ${cc})` : ''} · Asunto: "${subject}"`,
+          detail:  `${isSolicitud ? 'Acuse de recibo de solicitud' : 'Presupuesto'} abierto en Gmail para ${to}${cc ? ` (CC: ${cc})` : ''} · Asunto: "${subject}"`,
           userId:  req.user.id,
           quoteId: req.params.id,
         },
       });
       let stageAdvanced = false;
-      if (STAGES_TO_ADVANCE.includes(quote.stage)) {
+      if (!isSolicitud && STAGES_TO_ADVANCE.includes(quote.stage)) {
         const fudSetting = await prisma.appSetting.findUnique({ where: { key: 'follow_up_days' } });
         const fudDays    = Math.max(1, parseInt(fudSetting?.value || '4'));
         const followUpDate = new Date();
@@ -1357,9 +1360,9 @@ router.post('/:id/send-email', authMiddleware, async (req, res) => {
     });
 
     const STAGES_TO_ADVANCE = ['asignada', 'armado', 'revision', 'presupuestado', 'recibida', 'oferta', 'proveedor'];
-    const quoteForStage = await prisma.quote.findUnique({ where: { id: req.params.id }, select: { stage: true } });
+    const quoteForStage = await prisma.quote.findUnique({ where: { id: req.params.id }, select: { stage: true, mailType: true } });
     let stageAdvanced = false;
-    if (quoteForStage && STAGES_TO_ADVANCE.includes(quoteForStage.stage)) {
+    if (quoteForStage && quoteForStage.mailType !== 'SOLICITUD' && STAGES_TO_ADVANCE.includes(quoteForStage.stage)) {
       const fudSetting = await prisma.appSetting.findUnique({ where: { key: 'follow_up_days' } });
       const fudDays = Math.max(1, parseInt(fudSetting?.value || '4'));
       const followUpDate = new Date();

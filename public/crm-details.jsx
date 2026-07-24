@@ -473,7 +473,7 @@ function ReminderFromSelector({ quoteId }) {
 }
 
 // ─── Modal: Enviar presupuesto por email ─────────────────────────────────────
-function SendEmailModal({ quote, attachments, onClose, onSent }) {
+function SendEmailModal({ quote, attachments, onClose, onSent, isSolicitud }) {
   const { pushToast } = useApp();
   const [templates, setTemplates]       = React.useState([]);
   const [selTemplate, setSelTemplate]   = React.useState('');
@@ -485,12 +485,14 @@ function SendEmailModal({ quote, attachments, onClose, onSent }) {
 
   const pdfAtt = (attachments || []).find(a => a.mimeType === 'application/pdf' || a.filename?.endsWith('.pdf'));
 
-  // Cargar plantillas y CC default al abrir
+  // Cargar plantillas y CC default al abrir — solo las que aplican a este tipo de mail
   React.useEffect(() => {
     CrmApi.getEmailTemplates().then(({ templates: tpls, ccDefault }) => {
-      setTemplates(tpls || []);
+      const wanted = isSolicitud ? 'SOLICITUD' : 'PRESUPUESTO';
+      const filtered = (tpls || []).filter(t => !t.appliesTo || t.appliesTo === wanted || t.appliesTo === 'ALL');
+      setTemplates(filtered);
       setCc(ccDefault || '');
-      if (tpls && tpls.length > 0) applyTpl(tpls[0], tpls);
+      if (filtered.length > 0) applyTpl(filtered[0], filtered);
     }).catch(() => {});
     // Pre-fill destinatario con email del cliente
     if (quote.clientEmail) setTo(quote.clientEmail);
@@ -574,7 +576,9 @@ function SendEmailModal({ quote, attachments, onClose, onSent }) {
         {/* Header */}
         <div className="px-5 py-4 border-b border-line flex items-center justify-between">
           <div>
-            <div className="text-[11px] uppercase tracking-wider text-ink-500 font-semibold">Enviar presupuesto</div>
+            <div className="text-[11px] uppercase tracking-wider text-ink-500 font-semibold">
+              {isSolicitud ? 'Acuse de recibo' : 'Enviar presupuesto'}
+            </div>
             <h3 className="text-[15px] font-bold text-ink-900 mt-0.5">{quote.code}</h3>
           </div>
           <button onClick={onClose} className="w-8 h-8 rounded-lg hover:bg-surface flex items-center justify-center text-ink-500">
@@ -622,19 +626,25 @@ function SendEmailModal({ quote, attachments, onClose, onSent }) {
               value={body} onChange={e => setBody(e.target.value)}/>
           </div>
 
-          {/* Adjunto que se enviará */}
-          <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-[12px] ${pdfAtt ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
-            <Icon name={pdfAtt ? 'paperclip' : 'alert-circle'} size={13} className="shrink-0"/>
-            {pdfAtt
-              ? <span><strong>Adjunto:</strong> {pdfAtt.originalName || pdfAtt.filename.replace(/^[0-9a-f-]{36}-(\d{13}-)?/i, '')}</span>
-              : <span>Sin adjunto PDF — el presupuesto no tiene ningún PDF adjunto</span>
-            }
-          </div>
+          {/* Adjunto que se enviará — no aplica a Solicitudes, ese flujo no lleva adjunto */}
+          {!isSolicitud && (
+            <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-[12px] ${pdfAtt ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
+              <Icon name={pdfAtt ? 'paperclip' : 'alert-circle'} size={13} className="shrink-0"/>
+              {pdfAtt
+                ? <span><strong>Adjunto:</strong> {pdfAtt.originalName || pdfAtt.filename.replace(/^[0-9a-f-]{36}-(\d{13}-)?/i, '')}</span>
+                : <span>Sin adjunto PDF — el presupuesto no tiene ningún PDF adjunto</span>
+              }
+            </div>
+          )}
           {/* Nota informativa */}
           <div className="flex items-start gap-2 px-3 py-2.5 bg-blue-50 border border-blue-200 rounded-lg text-[12px] text-blue-800">
             <Icon name="info" size={13} className="shrink-0 mt-0.5 text-blue-500"/>
             <div>
-              <div><strong>Enviar:</strong> manda el mail desde <strong>iamyselec@gmail.com</strong>{pdfAtt ? ' con el adjunto indicado arriba.' : ' sin adjunto.'}</div>
+              {isSolicitud ? (
+                <div><strong>Enviar</strong> todavía no está disponible para Solicitudes — se habilita cuando se configuren las cuentas de Ventas para envío directo. Por ahora usá <strong>Abrir en Gmail</strong>.</div>
+              ) : (
+                <div><strong>Enviar:</strong> manda el mail desde <strong>iamyselec@gmail.com</strong>{pdfAtt ? ' con el adjunto indicado arriba.' : ' sin adjunto.'}</div>
+              )}
               <div className="mt-1"><strong>Abrir en Gmail:</strong> abre un borrador en tu Gmail personal con el asunto y cuerpo precargados. El adjunto hay que cargarlo a mano.</div>
             </div>
           </div>
@@ -644,7 +654,9 @@ function SendEmailModal({ quote, attachments, onClose, onSent }) {
         <div className="px-5 py-3 border-t border-line bg-surface flex items-center justify-between gap-2">
           <button className="btn-ghost" onClick={onClose} disabled={sending}>Cancelar</button>
           <div className="flex items-center gap-2">
-            <button className="btn-primary" onClick={async () => {
+            <button className={cx('btn-primary', isSolicitud && 'opacity-40 grayscale cursor-not-allowed hover:opacity-40')}
+              title={isSolicitud ? 'Disponible cuando se configuren las cuentas de Ventas para envío directo' : undefined}
+              onClick={async () => {
               if (!to.trim())      { pushToast('El destinatario (Para) es requerido', 'bad'); return; }
               if (!subject.trim()) { pushToast('El asunto es requerido', 'bad'); return; }
               if (!body.trim())    { pushToast('El cuerpo es requerido', 'bad'); return; }
@@ -661,7 +673,7 @@ function SendEmailModal({ quote, attachments, onClose, onSent }) {
               } catch (err) {
                 pushToast('Error al enviar: ' + err.message, 'bad');
               } finally { setSending(false); }
-            }} disabled={sending}>
+            }} disabled={sending || isSolicitud}>
               {sending
                 ? <><span className="inline-block w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin mr-1.5"/>Enviando...</>
                 : <><Icon name="send" size={13}/>Enviar</>
@@ -989,12 +1001,10 @@ function QuoteDetail({ code, onClose, canReassign }) {
           {q.flexxus && (
             <Badge tone="slate"><span className="mono">{q.flexxus}</span></Badge>
           )}
-          {!isSolicitud && (
-            <button className="btn-ghost text-brand border-brand/30 hover:bg-brand/5"
-              onClick={() => setEmailModalOpen(true)}>
-              <Icon name="send" size={13}/>Enviar mail
-            </button>
-          )}
+          <button className="btn-ghost text-brand border-brand/30 hover:bg-brand/5"
+            onClick={() => setEmailModalOpen(true)}>
+            <Icon name="send" size={13}/>Enviar mail
+          </button>
           {q.mailType === 'PRESUPUESTO' && q.stage === 'enviado' && cli?.email && (
             <button className="btn-ghost text-orange-600 border-orange-300 hover:bg-orange-50"
               onClick={() => setReminderOpen(true)}>
@@ -1906,6 +1916,7 @@ function QuoteDetail({ code, onClose, canReassign }) {
           flexxus:     q.flexxus  || '',
         }}
         attachments={detailAttachments}
+        isSolicitud={isSolicitud}
         onClose={() => setEmailModalOpen(false)}
         onSent={async () => {
           // Refrescar quote para actualizar etapa si avanzó

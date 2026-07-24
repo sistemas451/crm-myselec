@@ -120,40 +120,84 @@ async function createTransport() {
 
 // ─── Plantillas ───────────────────────────────────────────────────────────────
 
+// appliesTo: 'PRESUPUESTO' | 'SOLICITUD' | 'ALL' — determina en qué modal de envío
+// aparece cada plantilla (ver SendEmailModal). Las 3 originales son de Presupuesto.
 const DEFAULT_TEMPLATES = [
   {
     id:      'estandar',
     name:    'Presupuesto estándar',
+    appliesTo: 'PRESUPUESTO',
     subject: 'Presupuesto {codigo} - Myselec',
     body:    `Estimado/a {cliente},\n\nAdjunto encontrará el presupuesto N° {codigo}{np_line} solicitado.\n\nQuedamos a su disposición para cualquier consulta.\n\nSaludos cordiales,\n{vendedor}\nMyselec`,
   },
   {
     id:      'reply',
     name:    'Re: solicitud del cliente',
+    appliesTo: 'PRESUPUESTO',
     subject: 'Re: {asunto_original}',
     body:    `Estimado/a {cliente},\n\nEn respuesta a su consulta, adjunto el presupuesto N° {codigo}{np_line}.\n\nEstamos a su disposición para cualquier aclaración.\n\nSaludos cordiales,\n{vendedor}\nMyselec`,
   },
   {
     id:      'seguimiento',
     name:    'Seguimiento de presupuesto',
+    appliesTo: 'PRESUPUESTO',
     subject: 'Seguimiento - Presupuesto {codigo}',
     body:    `Estimado/a {cliente},\n\nNos contactamos para hacer seguimiento del presupuesto N° {codigo}{np_line} enviado el {fecha}.\n\n¿Ha tenido la oportunidad de revisarlo? Quedamos disponibles para responder cualquier consulta.\n\nSaludos cordiales,\n{vendedor}\nMyselec`,
   },
 ];
 
+// Acuse de recibo para Solicitudes de Cotización recién ingresadas — se auto-agregan
+// la primera vez que se leen las plantillas si todavía no existen (ver getTemplates).
+const SOLICITUD_DEFAULT_TEMPLATES = [
+  {
+    id:      'sol_recibida_24h',
+    name:    'Solicitud recibida - 24hs',
+    appliesTo: 'SOLICITUD',
+    subject: 'Confirmación de recepción - Solicitud {codigo}',
+    body:    `Estimado/a {cliente},\n\nLe confirmamos la correcta recepción de su solicitud de cotización.\n\nNuestro equipo de ventas ya se encuentra trabajando en la elaboración de su presupuesto, y le haremos llegar una respuesta dentro de las próximas 24 horas hábiles.\n\nAnte cualquier consulta adicional, quedamos a su disposición.\n\nSaludos cordiales,\n{vendedor}\nMyselec`,
+  },
+  {
+    id:      'sol_recibida_48h',
+    name:    'Solicitud recibida - 48hs',
+    appliesTo: 'SOLICITUD',
+    subject: 'Confirmación de recepción - Solicitud {codigo}',
+    body:    `Estimado/a {cliente},\n\nLe confirmamos la correcta recepción de su solicitud de cotización.\n\nNuestro equipo de ventas ya se encuentra trabajando en la elaboración de su presupuesto, y le haremos llegar una respuesta dentro de las próximas 48 horas hábiles.\n\nAnte cualquier consulta adicional, quedamos a su disposición.\n\nSaludos cordiales,\n{vendedor}\nMyselec`,
+  },
+  {
+    id:      'sol_recibida_72h',
+    name:    'Solicitud recibida - 72hs',
+    appliesTo: 'SOLICITUD',
+    subject: 'Confirmación de recepción - Solicitud {codigo}',
+    body:    `Estimado/a {cliente},\n\nLe confirmamos la correcta recepción de su solicitud de cotización.\n\nNuestro equipo de ventas ya se encuentra trabajando en la elaboración de su presupuesto, y le haremos llegar una respuesta dentro de las próximas 72 horas hábiles.\n\nAnte cualquier consulta adicional, quedamos a su disposición.\n\nSaludos cordiales,\n{vendedor}\nMyselec`,
+  },
+];
+
 /**
  * Carga las plantillas desde la DB (AppSetting key='email_templates').
- * Si no existen, devuelve las plantillas por defecto.
+ * Si no existen, devuelve las plantillas por defecto. De paso:
+ * - Etiqueta con appliesTo='PRESUPUESTO' las plantillas viejas guardadas antes de
+ *   que existiera ese campo (compatibilidad hacia atrás).
+ * - Agrega las plantillas de acuse de recibo de Solicitud si todavía no están.
  */
 async function getTemplates() {
   try {
     const setting = await prisma.appSetting.findUnique({ where: { key: 'email_templates' } });
     if (setting?.value) {
-      const templates = JSON.parse(setting.value);
-      if (Array.isArray(templates) && templates.length > 0) return templates;
+      let templates = JSON.parse(setting.value);
+      if (Array.isArray(templates) && templates.length > 0) {
+        let changed = false;
+        templates = templates.map(t => {
+          if (!t.appliesTo) { changed = true; return { ...t, appliesTo: 'PRESUPUESTO' }; }
+          return t;
+        });
+        const missingSol = SOLICITUD_DEFAULT_TEMPLATES.filter(d => !templates.some(t => t.id === d.id));
+        if (missingSol.length > 0) { templates = [...templates, ...missingSol]; changed = true; }
+        if (changed) { try { await saveTemplates(templates); } catch (_) {} }
+        return templates;
+      }
     }
   } catch (_) {}
-  return DEFAULT_TEMPLATES;
+  return [...DEFAULT_TEMPLATES, ...SOLICITUD_DEFAULT_TEMPLATES];
 }
 
 /**
