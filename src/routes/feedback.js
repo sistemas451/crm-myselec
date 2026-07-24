@@ -156,7 +156,25 @@ router.get('/meta', async (req, res) => {
         ? `Con gusto coordinamos una reunión de 10 minutos para resolver tu consulta.\nReservá un espacio acá: ${meetingLink}`
         : 'Con gusto coordinamos una reunión de 10 minutos para resolver tu consulta. Te enviamos el link para agendar.';
     }
-    res.json({ meetingLink, templates: tpls });
+    const userFull = await prisma.user.findUnique({ where: { id: req.user.id }, select: { notificationPrefs: true } });
+    const lastForoCheck = userFull?.notificationPrefs?.lastForoCheck || null;
+
+    res.json({ meetingLink, templates: tpls, lastForoCheck });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /mark-seen — actualiza lastForoCheck del usuario (limpia el badge del sidebar) ───
+router.post('/mark-seen', async (req, res) => {
+  try {
+    const userFull = await prisma.user.findUnique({ where: { id: req.user.id }, select: { notificationPrefs: true } });
+    const prefs = userFull?.notificationPrefs || {};
+    await prisma.user.update({
+      where: { id: req.user.id },
+      data: { notificationPrefs: { ...prefs, lastForoCheck: new Date().toISOString() } },
+    });
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

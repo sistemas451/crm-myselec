@@ -134,14 +134,16 @@ function App() {
     if (roleKey === 'logistics') setScreen('ops');
   }, [roleKey]);
 
-  // Badge: presupuestos sin vincular (solo admin)
+  // Badges del sidebar: presupuestos sin vincular (solo admin) + Foro sin leer (todos)
   const [adminBadges, setAdminBadges] = useState({});
   useEffect(() => {
-    if (roleKey !== 'admin') return;
     const fetchBadges = () => {
       fetch('/api/notifications/counts', { headers: { Authorization: `Bearer ${localStorage.getItem('crm_token')}` } })
         .then(r => r.ok ? r.json() : {})
-        .then(d => setAdminBadges({ quotes: d.unlinkedPresupuestos > 0 ? d.unlinkedPresupuestos : 0 }))
+        .then(d => setAdminBadges({
+          quotes:   d.unlinkedPresupuestos > 0 ? d.unlinkedPresupuestos : 0,
+          feedback: d.foroUnread > 0 ? d.foroUnread : 0,
+        }))
         .catch(() => {});
     };
     fetchBadges();

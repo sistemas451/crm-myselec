@@ -5282,14 +5282,25 @@ function FbTypeBadge({ type }) {
 }
 
 // ── Vista lista ───────────────────────────────────────────────────────────────
-function FeedbackListView({ onNew, onOpen, posts, loading, isAdmin, currentUserId }) {
+function FeedbackListView({ onNew, onOpen, posts, loading, isAdmin, currentUserId, lastForoCheck }) {
   const [search,     setSearch]     = useState('');
   const [typeFilter, setTypeFilter] = useState('ALL');
-  const [stFilter,   setStFilter]   = useState('ALL');
+  // Para el developer, arranca mostrando solo lo que necesita atención (menos ruido al triar).
+  // El resto de los roles arranca en "Todos", como siempre.
+  const [stFilter,   setStFilter]   = useState(isAdmin ? 'NEEDS_ATTENTION' : 'ALL');
+
+  const NEEDS_ATTENTION_STATUSES = ['OPEN', 'REVIEWING'];
+  const foroCheckCutoff = lastForoCheck ? new Date(lastForoCheck) : null;
+  const hasNewActivity = (post) => {
+    if (!foroCheckCutoff) return false; // primera visita — no marcar todo como "nuevo"
+    return (post.responses || []).some(r => r.user?.id !== currentUserId && new Date(r.createdAt) > foroCheckCutoff);
+  };
 
   const filtered = posts.filter(p => {
     if (typeFilter !== 'ALL' && p.type !== typeFilter) return false;
-    if (stFilter   !== 'ALL' && p.status !== stFilter) return false;
+    if (stFilter === 'NEEDS_ATTENTION') {
+      if (!NEEDS_ATTENTION_STATUSES.includes(p.status)) return false;
+    } else if (stFilter !== 'ALL' && p.status !== stFilter) return false;
     if (search.trim()) {
       const q = search.toLowerCase();
       if (!p.title.toLowerCase().includes(q) && !p.code.toLowerCase().includes(q) && !p.user.name.toLowerCase().includes(q)) return false;
@@ -5305,6 +5316,7 @@ function FeedbackListView({ onNew, onOpen, posts, loading, isAdmin, currentUserI
 
   const ST_FILTERS = [
     { k: 'ALL',             label: 'Todos' },
+    ...(isAdmin ? [{ k: 'NEEDS_ATTENTION', label: 'Necesita atención' }] : []),
     { k: 'OPEN',            label: 'Abierto' },
     { k: 'REVIEWING',       label: 'En revisión' },
     { k: 'PENDING_FIX',     label: 'Pendiente de corrección' },
@@ -5392,9 +5404,11 @@ function FeedbackListView({ onNew, onOpen, posts, loading, isAdmin, currentUserI
           const voteCount      = (post.voters || []).length;
           const totalReporters = voteCount + 1;
           const iVoted         = (post.voters || []).includes(currentUserId);
+          const isNew          = isAdmin && hasNewActivity(post);
           return (
             <button key={post.id} onClick={() => onOpen(post.id)}
-              className="w-full text-left bg-white border border-slate-200 rounded-xl px-4 py-3.5 hover:border-brand/40 hover:shadow-sm transition-all flex gap-3 items-start">
+              className={cx('w-full text-left bg-white border rounded-xl px-4 py-3.5 hover:border-brand/40 hover:shadow-sm transition-all flex gap-3 items-start',
+                isNew ? 'border-brand/40 ring-1 ring-brand/10' : 'border-slate-200')}>
 
               {/* Contador votos */}
               <div className={cx('shrink-0 flex flex-col items-center justify-center w-10 h-10 rounded-lg border text-center',
@@ -5413,7 +5427,10 @@ function FeedbackListView({ onNew, onOpen, posts, loading, isAdmin, currentUserI
                 </div>
 
                 {/* Título */}
-                <div className="font-semibold text-sm text-slate-800 leading-snug truncate">{post.title}</div>
+                <div className="font-semibold text-sm text-slate-800 leading-snug truncate flex items-center gap-1.5">
+                  {isNew && <span className="w-1.5 h-1.5 rounded-full bg-brand shrink-0" title="Actividad nueva"/>}
+                  {post.title}
+                </div>
 
                 {/* Meta */}
                 <div className="flex items-center gap-1.5 mt-1 flex-wrap">
@@ -6068,7 +6085,9 @@ function FeedbackView() {
     setLoading(false);
   }
 
-  useEffect(() => { loadPosts(); }, []);
+  useEffect(() => {
+    loadPosts().then(() => { CrmApi.markFeedbackSeen().catch(() => {}); });
+  }, []);
 
   if (view === 'new') {
     return <FeedbackNewView
@@ -6090,6 +6109,7 @@ function FeedbackView() {
     loading={loading}
     isAdmin={isAdmin}
     currentUserId={currentUserId}
+    lastForoCheck={meta.lastForoCheck}
     onNew={() => setView('new')}
     onOpen={(id) => { setPostId(id); setView('detail'); }}
   />;

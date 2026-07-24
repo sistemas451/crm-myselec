@@ -306,6 +306,7 @@ const CrmApi = {
 
   // ── Feedback / Foro ────────────────────────────────────────────────────────
   getFeedbackMeta:    ()           => apiFetch('/feedback/meta'),
+  markFeedbackSeen:   ()           => apiFetch('/feedback/mark-seen', { method: 'POST' }),
   getFeedbackPosts:   ()           => apiFetch('/feedback'),
   createFeedbackPost: (data)       => apiFetch('/feedback', { method: 'POST', body: JSON.stringify(data) }),
   respondFeedback:    (id, body, status) => apiFetch(`/feedback/${id}/respond`, { method: 'POST', body: JSON.stringify({ body, status }) }),

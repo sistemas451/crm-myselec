@@ -628,17 +628,39 @@ function _formatByStage(byStage) {
     .join(' · ');
 }
 
-// GET /api/notifications/counts — conteos ligeros para badges del sidebar (solo admin)
+// GET /api/notifications/counts — conteos ligeros para badges del sidebar
 router.get('/counts', authMiddleware, async (req, res) => {
   try {
-    if (!isAdmin(req.user)) return res.json({ unlinkedPresupuestos: 0 });
-    const unlinkedPresupuestos = await prisma.quote.count({
-      where: { mailType: 'PRESUPUESTO', linkedQuoteId: null, stage: { notIn: ['rechazada'] } },
+    let unlinkedPresupuestos = 0;
+    if (isAdmin(req.user)) {
+      unlinkedPresupuestos = await prisma.quote.count({
+        where: { mailType: 'PRESUPUESTO', linkedQuoteId: null, stage: { notIn: ['rechazada'] } },
+      });
+    }
+
+    // Foro: cuántas publicaciones PROPIAS tienen una respuesta nueva de un admin/developer
+    // desde la última vez que el usuario visitó el Foro (para cualquier rol, no solo admin)
+    const userFull = await prisma.user.findUnique({ where: { id: req.user.id }, select: { notificationPrefs: true } });
+    const lastForoCheck = userFull?.notificationPrefs?.lastForoCheck
+      ? new Date(userFull.notificationPrefs.lastForoCheck)
+      : new Date(0);
+    const foroUnread = await prisma.feedbackPost.count({
+      where: {
+        userId: req.user.id,
+        responses: {
+          some: {
+            createdAt: { gt: lastForoCheck },
+            userId: { not: req.user.id },
+            user: { role: { in: ['ADMIN', 'DEVELOPER'] } },
+          },
+        },
+      },
     });
-    res.json({ unlinkedPresupuestos });
+
+    res.json({ unlinkedPresupuestos, foroUnread });
   } catch (err) {
     console.error('GET /notifications/counts error:', err);
-    res.json({ unlinkedPresupuestos: 0 }); // fallar silencioso para no romper sidebar
+    res.json({ unlinkedPresupuestos: 0, foroUnread: 0 }); // fallar silencioso para no romper sidebar
   }
 });
 
