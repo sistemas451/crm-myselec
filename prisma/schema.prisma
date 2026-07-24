@@ -147,6 +147,7 @@ model Quote {
   totalPercepciones Float?                  // Total percepciones ARBA/AGIP
   flexxusCode    String?                    // Código NP de Flexxus
   deadline       DateTime?                  // Fecha límite de armado
+  ackSentAt      DateTime?                  // Solicitud: confirmación manual de que se mandó el acuse de recibo
   rejectReason   String?                    // Motivo de rechazo
   rejectNotes    String?                    // Observaciones del rechazo
   isDraft        Boolean   @default(false)  // Auto-ingresada desde mail

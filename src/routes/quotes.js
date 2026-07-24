@@ -232,6 +232,7 @@ router.get('/', authMiddleware, async (req, res) => {
       mailType: q.mailType || null,
       followUpDate: q.followUpDate?.toISOString() || null,
       deadline: q.deadline?.toISOString() || null,
+      ackSentAt: q.ackSentAt?.toISOString() || null,
       rejectReason: q.rejectReason,
       linkedQuoteId:   q.linkedQuoteId || null,
       linkedQuoteCode: q.linkedQuote?.code || null,
@@ -1281,11 +1282,18 @@ router.post('/:id/send-email', authMiddleware, async (req, res) => {
       await prisma.activity.create({
         data: {
           action:  'EMAIL_SENT',
-          detail:  `${isSolicitud ? 'Acuse de recibo de solicitud' : 'Presupuesto'} abierto en Gmail para ${to}${cc ? ` (CC: ${cc})` : ''} · Asunto: "${subject}"`,
+          detail:  `${isSolicitud ? 'Acuse de recibo de solicitud confirmado como enviado por Gmail' : 'Presupuesto abierto en Gmail'} para ${to}${cc ? ` (CC: ${cc})` : ''} · Asunto: "${subject}"`,
           userId:  req.user.id,
           quoteId: req.params.id,
         },
       });
+      // Solicitud: el vendedor ya confirmó manualmente que mandó el mail desde su Gmail
+      // (esta rama solo se llama después de esa confirmación, ver SendEmailModal).
+      let ackSentAt = null;
+      if (isSolicitud) {
+        const updated = await prisma.quote.update({ where: { id: req.params.id }, data: { ackSentAt: new Date() } });
+        ackSentAt = updated.ackSentAt;
+      }
       let stageAdvanced = false;
       if (!isSolicitud && STAGES_TO_ADVANCE.includes(quote.stage)) {
         const fudSetting = await prisma.appSetting.findUnique({ where: { key: 'follow_up_days' } });
@@ -1303,7 +1311,7 @@ router.post('/:id/send-email', authMiddleware, async (req, res) => {
         });
         stageAdvanced = true;
       }
-      return res.json({ messageId: null, stageAdvanced, gmailOnly: true });
+      return res.json({ messageId: null, stageAdvanced, gmailOnly: true, ackSentAt });
     }
 
     // Buscar adjunto si se especificó

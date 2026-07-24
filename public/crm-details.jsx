@@ -482,6 +482,9 @@ function SendEmailModal({ quote, attachments, onClose, onSent, isSolicitud }) {
   const [subject, setSubject]           = React.useState('');
   const [body, setBody]                 = React.useState('');
   const [sending, setSending] = React.useState(false);
+  // Solicitud: tras abrir Gmail, esperamos confirmación manual antes de registrar nada
+  const [gmailOpened, setGmailOpened] = React.useState(false);
+  const [confirming,  setConfirming]  = React.useState(false);
 
   const pdfAtt = (attachments || []).find(a => a.mimeType === 'application/pdf' || a.filename?.endsWith('.pdf'));
 
@@ -551,13 +554,20 @@ function SendEmailModal({ quote, attachments, onClose, onSent, isSolicitud }) {
     // Abrir Gmail en nueva pestaña
     window.open(buildGmailUrl(), '_blank');
 
-    // Registrar actividad y avanzar etapa en background
+    if (isSolicitud) {
+      // No sabemos si el vendedor va a mandar el mail o no — esperamos que lo confirme
+      // a mano en vez de asumir que "abrir Gmail" significa "enviado".
+      setGmailOpened(true);
+      return;
+    }
+
+    // Presupuesto/OC: comportamiento sin cambios — registra y avanza etapa al toque
     setSending(true);
     try {
       const result = await CrmApi.sendQuoteEmail(quote.id, {
         to: to.trim(), cc: cc.trim(),
         subject: subject.trim(), body: body.trim(),
-        _gmailOnly: true,  // indicador — el servidor igual logea y avanza etapa
+        _gmailOnly: true,
       });
       pushToast(`Gmail abierto${result.stageAdvanced ? ' · Etapa → Enviado' : ''}`, 'ok');
       onSent && onSent(result);
@@ -565,6 +575,25 @@ function SendEmailModal({ quote, attachments, onClose, onSent, isSolicitud }) {
       // No bloqueamos si falla el log — el mail ya se abrió
     } finally {
       setSending(false);
+    }
+    onClose();
+  };
+
+  // Solicitud: el vendedor confirma manualmente que ya mandó el mail desde Gmail
+  const handleConfirmSent = async () => {
+    setConfirming(true);
+    try {
+      const result = await CrmApi.sendQuoteEmail(quote.id, {
+        to: to.trim(), cc: cc.trim(),
+        subject: subject.trim(), body: body.trim(),
+        _gmailOnly: true,
+      });
+      pushToast('Acuse de recibo confirmado', 'ok');
+      onSent && onSent(result);
+    } catch (err) {
+      pushToast('No se pudo registrar la confirmación: ' + err.message, 'bad');
+    } finally {
+      setConfirming(false);
     }
     onClose();
   };
@@ -651,39 +680,57 @@ function SendEmailModal({ quote, attachments, onClose, onSent, isSolicitud }) {
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-3 border-t border-line bg-surface flex items-center justify-between gap-2">
-          <button className="btn-ghost" onClick={onClose} disabled={sending}>Cancelar</button>
-          <div className="flex items-center gap-2">
-            <button className={cx('btn-primary', isSolicitud && 'opacity-40 grayscale cursor-not-allowed hover:opacity-40')}
-              title={isSolicitud ? 'Disponible cuando se configuren las cuentas de Ventas para envío directo' : undefined}
-              onClick={async () => {
-              if (!to.trim())      { pushToast('El destinatario (Para) es requerido', 'bad'); return; }
-              if (!subject.trim()) { pushToast('El asunto es requerido', 'bad'); return; }
-              if (!body.trim())    { pushToast('El cuerpo es requerido', 'bad'); return; }
-              setSending(true);
-              try {
-                const result = await CrmApi.sendQuoteEmail(quote.id, {
-                  to: to.trim(), cc: cc.trim(),
-                  subject: subject.trim(), body: body.trim(),
-                  attachmentId: pdfAtt?.id || null,
-                });
-                pushToast(`Enviado correctamente${result.stageAdvanced ? ' · Etapa → Enviado' : ''}`, 'ok');
-                onSent && onSent(result);
-                onClose();
-              } catch (err) {
-                pushToast('Error al enviar: ' + err.message, 'bad');
-              } finally { setSending(false); }
-            }} disabled={sending || isSolicitud}>
-              {sending
-                ? <><span className="inline-block w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin mr-1.5"/>Enviando...</>
-                : <><Icon name="send" size={13}/>Enviar</>
-              }
-            </button>
-            <button className="btn-ghost border border-line" onClick={handleOpenGmail} disabled={sending}>
-              <Icon name="external-link" size={13}/>Abrir en Gmail
-            </button>
+        {gmailOpened ? (
+          <div className="px-5 py-3 border-t border-line bg-amber-50">
+            <div className="text-[12px] text-amber-800 mb-2.5 flex items-center gap-1.5">
+              <Icon name="mail" size={13} className="shrink-0"/>
+              Se abrió Gmail con el mail armado. Una vez que lo hayas mandado, confirmá acá:
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              <button className="btn-ghost" onClick={onClose} disabled={confirming}>Todavía no</button>
+              <button className="btn-primary" onClick={handleConfirmSent} disabled={confirming}>
+                {confirming
+                  ? <><span className="inline-block w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin mr-1.5"/>Confirmando...</>
+                  : <><Icon name="check" size={13}/>Ya lo envié</>
+                }
+              </button>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="px-5 py-3 border-t border-line bg-surface flex items-center justify-between gap-2">
+            <button className="btn-ghost" onClick={onClose} disabled={sending}>Cancelar</button>
+            <div className="flex items-center gap-2">
+              <button className={cx('btn-primary', isSolicitud && 'opacity-40 grayscale cursor-not-allowed hover:opacity-40')}
+                title={isSolicitud ? 'Disponible cuando se configuren las cuentas de Ventas para envío directo' : undefined}
+                onClick={async () => {
+                if (!to.trim())      { pushToast('El destinatario (Para) es requerido', 'bad'); return; }
+                if (!subject.trim()) { pushToast('El asunto es requerido', 'bad'); return; }
+                if (!body.trim())    { pushToast('El cuerpo es requerido', 'bad'); return; }
+                setSending(true);
+                try {
+                  const result = await CrmApi.sendQuoteEmail(quote.id, {
+                    to: to.trim(), cc: cc.trim(),
+                    subject: subject.trim(), body: body.trim(),
+                    attachmentId: pdfAtt?.id || null,
+                  });
+                  pushToast(`Enviado correctamente${result.stageAdvanced ? ' · Etapa → Enviado' : ''}`, 'ok');
+                  onSent && onSent(result);
+                  onClose();
+                } catch (err) {
+                  pushToast('Error al enviar: ' + err.message, 'bad');
+                } finally { setSending(false); }
+              }} disabled={sending || isSolicitud}>
+                {sending
+                  ? <><span className="inline-block w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin mr-1.5"/>Enviando...</>
+                  : <><Icon name="send" size={13}/>Enviar</>
+                }
+              </button>
+              <button className="btn-ghost border border-line" onClick={handleOpenGmail} disabled={sending}>
+                <Icon name="external-link" size={13}/>Abrir en Gmail
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1325,6 +1372,13 @@ function QuoteDetail({ code, onClose, canReassign }) {
               ) : (
                 <span className="text-ink-400 text-[12px]">Se completa al asignar vendedor</span>
               )}
+            </Field>
+          )}
+          {isSolicitud && (
+            <Field label="Acuse de recibo">
+              {q.ackSentAt
+                ? <span className="text-emerald-600 font-medium text-[12.5px]">✓ Enviado el {fmtDate(q.ackSentAt)}</span>
+                : <span className="text-ink-400 text-[12.5px]">Pendiente</span>}
             </Field>
           )}
           {!isSolicitud && <Field label="Total con IVA" mono value={
