@@ -2426,6 +2426,7 @@ function Config() {
     notify_new_register:    'true',
     notify_stage_alert:     'true',
     notify_unassigned_mail: 'true',
+    notify_mentions:        'true',
   });
   // System notification toggles (in-app)
   const [sysNotifInapp, setSysNotifInapp] = useState({
@@ -2438,6 +2439,7 @@ function Config() {
     inapp_follow_up_upcoming:    'true',
     inapp_no_response:           'true',
     inapp_deadline_overdue:      'true',
+    inapp_mentions:               'true',
   });
 
   // Mail state
@@ -2478,6 +2480,7 @@ function Config() {
           notify_new_register:    s.notify_new_register    ?? 'true',
           notify_stage_alert:     s.notify_stage_alert     ?? 'true',
           notify_unassigned_mail: s.notify_unassigned_mail ?? 'true',
+          notify_mentions:        s.notify_mentions         ?? 'true',
         }));
         setSysNotifInapp(prev => ({
           ...prev,
@@ -2490,6 +2493,7 @@ function Config() {
           inapp_follow_up_upcoming:   s.inapp_follow_up_upcoming   ?? 'true',
           inapp_no_response:          s.inapp_no_response          ?? 'true',
           inapp_deadline_overdue:     s.inapp_deadline_overdue     ?? 'true',
+          inapp_mentions:             s.inapp_mentions              ?? 'true',
         }));
         if (s.stage_alert_cooldown_days) setStageCooldownDays(s.stage_alert_cooldown_days);
         if (s.unassigned_mail_frequency) setUnassignedMailFreq(s.unassigned_mail_frequency);
@@ -3589,6 +3593,11 @@ function Config() {
                 label="Fecha límite de armado vencida"
                 desc="Solicitudes que pasaron la fecha límite para tener el presupuesto listo, sin enviar todavía."
                 inapp="inapp_deadline_overdue"/>
+              <AlertRow icon="at-sign" color="blue"
+                label="Te mencionaron en una nota"
+                desc="Alguien te etiquetó con @ en una nota de una cotización u orden."
+                inapp="inapp_mentions"
+                mail="notify_mentions"/>
               <AlertRow icon="clock" color="gray"
                 label="Cotizaciones sin actividad"
                 desc="Cotizaciones sin movimiento. Descartable por N días."

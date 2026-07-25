@@ -495,6 +495,7 @@ function QuoteFiltersBar() {
 
   const sellerOptions = [
     { value:'', label:'Todos los vendedores', icon:'users' },
+    { value:'UNASSIGNED', label:'Sin asignar', icon:'user-x' },
     ...users.filter(u=>u.role==='Vendedor'||u.role==='Administrador')
       .map(u => ({ value:u.id, label:u.name, icon:'user' }))
   ];
@@ -517,7 +518,7 @@ function QuoteFiltersBar() {
         </div>
       ) : (
         <PopoverButton icon="user"
-          label={activeSeller ? activeSeller.name.split(' ')[0] : 'Todos los vendedores'}
+          label={activeSeller ? activeSeller.name.split(' ')[0] : quoteFilters.seller === 'UNASSIGNED' ? 'Sin asignar' : 'Todos los vendedores'}
           value={quoteFilters.seller}
           active={!!quoteFilters.seller}
           onChange={(v)=>setQuoteFilters(s=>({...s, seller:v}))}

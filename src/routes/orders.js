@@ -4,6 +4,7 @@ const {authMiddleware, isAdmin } = require('../middleware/auth');
 const { parseNotaPedidoPDF } = require('../services/flexxusParser');
 const { onStageChange } = require('../services/notifier');
 const { nextCode } = require('../services/codeHelper');
+const { notifyMentions } = require('../services/mentions');
 const prisma = require('../db');
 
 const router  = express.Router();
@@ -281,16 +282,18 @@ router.post('/:id/notes', authMiddleware, async (req, res) => {
     }
     const text = (req.body.text || '').trim();
     if (!text) return res.status(400).json({ error: 'El texto de la nota no puede estar vacío' });
+    const mentionedUserIds = Array.isArray(req.body.mentionedUserIds) ? req.body.mentionedUserIds.filter(Boolean) : [];
     const note = await prisma.note.create({
       data: {
         text,
         userId: req.user.id,
         orderId: req.params.id,
+        mentionedUserIds,
       },
       include: { user: { select: { name: true } } },
     });
 
-    const order = await prisma.order.findUnique({ where: { id: req.params.id } });
+    const order = await prisma.order.findUnique({ where: { id: req.params.id }, include: { client: { select: { name: true } } } });
     if (order) {
       await prisma.activity.create({
         data: {
@@ -300,6 +303,13 @@ router.post('/:id/notes', authMiddleware, async (req, res) => {
           orderId: req.params.id,
         },
       });
+
+      if (mentionedUserIds.length > 0) {
+        notifyMentions({
+          mentionedUserIds, authorUser: req.user, noteId: note.id, text,
+          kind: 'order', refId: req.params.id, code: order.code, clientName: order.client?.name,
+        }).catch(err => console.warn('⚠️  notifyMentions (order) failed:', err.message));
+      }
     }
 
     res.status(201).json(note);

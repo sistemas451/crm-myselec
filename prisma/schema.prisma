@@ -237,15 +237,16 @@ model Order {
 
 // ─── Notas / Comentarios ───
 model Note {
-  id        String   @id @default(uuid())
-  text      String
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
-  quoteId   String?
-  quote     Quote?   @relation("QuoteNotes", fields: [quoteId], references: [id], onDelete: Cascade)
-  orderId   String?
-  order     Order?   @relation("OrderNotes", fields: [orderId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now())
+  id               String   @id @default(uuid())
+  text             String
+  userId           String
+  user             User     @relation(fields: [userId], references: [id])
+  quoteId          String?
+  quote            Quote?   @relation("QuoteNotes", fields: [quoteId], references: [id], onDelete: Cascade)
+  orderId          String?
+  order            Order?   @relation("OrderNotes", fields: [orderId], references: [id], onDelete: Cascade)
+  mentionedUserIds String[] @default([])
+  createdAt        DateTime @default(now())
 }
 
 // ─── Archivos adjuntos ───

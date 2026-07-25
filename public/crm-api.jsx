@@ -122,8 +122,8 @@ const CrmApi = {
     method: 'POST', body: JSON.stringify(data)
   }),
   deleteQuote: (id) => apiFetch(`/quotes/${id}`, { method: 'DELETE' }),
-  addQuoteNote: (id, text) => apiFetch(`/quotes/${id}/notes`, {
-    method: 'POST', body: JSON.stringify({ text })
+  addQuoteNote: (id, text, mentionedUserIds) => apiFetch(`/quotes/${id}/notes`, {
+    method: 'POST', body: JSON.stringify({ text, mentionedUserIds })
   }),
   updateQuoteItem: (quoteId, itemId, data) => apiFetch(`/quotes/${quoteId}/items/${itemId}`, {
     method: 'PATCH', body: JSON.stringify(data)
@@ -167,8 +167,8 @@ const CrmApi = {
     method: 'PATCH', body: JSON.stringify({ stage })
   }),
   getOrderDetail: (id) => apiFetch(`/orders/${id}/detail`),
-  addOrderNote: (id, text) => apiFetch(`/orders/${id}/notes`, {
-    method: 'POST', body: JSON.stringify({ text })
+  addOrderNote: (id, text, mentionedUserIds) => apiFetch(`/orders/${id}/notes`, {
+    method: 'POST', body: JSON.stringify({ text, mentionedUserIds })
   }),
   updateOrder: (id, data) => apiFetch(`/orders/${id}`, {
     method: 'PATCH', body: JSON.stringify(data)
@@ -276,6 +276,7 @@ const CrmApi = {
   getNotificationRules: () => apiFetch('/notifications/rules'),
   getNotificationsInbox:  ()    => apiFetch('/notifications/inbox'),
   ackAssignedQuote: (quoteId)   => apiFetch('/notifications/ack-assigned', { method: 'POST', body: JSON.stringify({ quoteId }) }),
+  ackMention: (noteId)          => apiFetch('/notifications/ack-mention', { method: 'POST', body: JSON.stringify({ noteId }) }),
   testWeeklyReport: ()          => apiFetch('/notifications/weekly-report/test', { method: 'POST' }),
 
   // Articles

@@ -736,8 +736,35 @@ function SendEmailModal({ quote, attachments, onClose, onSent, isSolicitud }) {
   );
 }
 
+// Popover para elegir a quién etiquetar con @ en una nota
+function MentionPicker({ users, excludeId, onPick, onClose }) {
+  const [search, setSearch] = useState('');
+  const q = search.trim().toLowerCase();
+  const filtered = users.filter(u => u.id !== excludeId && (!q || u.name.toLowerCase().includes(q)));
+  return (
+    <>
+      <div className="fixed inset-0 z-40" onClick={onClose}/>
+      <div className="absolute bottom-full left-0 mb-1 w-56 bg-white border border-line rounded-lg shadow-pop z-50 py-1">
+        <input autoFocus value={search} onChange={e=>setSearch(e.target.value)}
+          placeholder="Buscar persona…"
+          className="w-full px-3 py-1.5 text-[12px] outline-none border-b border-line"/>
+        <div className="max-h-56 overflow-y-auto scroll-thin">
+          {filtered.length === 0 && <div className="px-3 py-2 text-[12px] text-ink-400">Sin resultados</div>}
+          {filtered.map(u => (
+            <button key={u.id} onClick={()=>onPick(u)}
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-surface text-[12.5px]">
+              <Avatar name={u.name} size={20}/>
+              <span className="truncate">{u.name}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
 function QuoteDetail({ code, onClose, canReassign }) {
-  const { quotes, clients, users, moveQuoteStage, setQuotes, setOrders, pushToast, closeModal, openModal, updateQuote } = useApp();
+  const { quotes, clients, users, moveQuoteStage, setQuotes, setOrders, pushToast, closeModal, openModal, updateQuote, currentUserId } = useApp();
   const q = quotes.find(x => x.code === code);
   if (!q) return null;
   const cli = clients.find(c=>c.code===q.client);
@@ -756,6 +783,8 @@ function QuoteDetail({ code, onClose, canReassign }) {
   const [notesLoading, setNotesLoading] = useState(true);
   const [newNote, setNewNote] = useState('');
   const [savingNote, setSavingNote] = useState(false);
+  const [mentionedUsers, setMentionedUsers] = useState([]);
+  const [mentionPickerOpen, setMentionPickerOpen] = useState(false);
   const [history, setHistory] = useState([]);
   const [assigningClient, setAssigningClient] = useState(false);
   const [assignClientId, setAssignClientId] = useState('');
@@ -946,9 +975,10 @@ function QuoteDetail({ code, onClose, canReassign }) {
     if (!newNote.trim()) return;
     setSavingNote(true);
     try {
-      const nota = await CrmApi.addQuoteNote(q.id, newNote.trim());
+      const nota = await CrmApi.addQuoteNote(q.id, newNote.trim(), mentionedUsers.map(u=>u.id));
       setNotes(ns => [...ns, nota]);
       setNewNote('');
+      setMentionedUsers([]);
       setQuotes(qs => qs.map(x => x.id === q.id ? {...x, notas: (x.notas||0)+1} : x));
     } catch (err) {
       pushToast(err.message || 'Error al guardar nota', 'bad');
@@ -1923,10 +1953,31 @@ function QuoteDetail({ code, onClose, canReassign }) {
           <div className="bg-white border border-line rounded-xl p-3">
             <textarea ref={noteInputRef} rows="3" value={newNote} onChange={e=>setNewNote(e.target.value)}
               className="w-full outline-none text-[13px] placeholder:text-ink-400 resize-none" placeholder="Escribir una nota para el equipo…"/>
+            {mentionedUsers.length > 0 && (
+              <div className="flex flex-wrap gap-1 pt-1.5">
+                {mentionedUsers.map(u => (
+                  <span key={u.id} className="inline-flex items-center gap-1 pl-1.5 pr-1 py-0.5 rounded bg-brandSoft text-brand text-[11px] font-medium">
+                    @{u.name.split(' ')[0]}
+                    <button onClick={()=>setMentionedUsers(ms=>ms.filter(x=>x.id!==u.id))} className="hover:opacity-60"><Icon name="x" size={10}/></button>
+                  </span>
+                ))}
+              </div>
+            )}
             <div className="flex items-center justify-between pt-2 border-t border-line">
               <div className="flex gap-1.5 text-ink-500">
                 <button className="w-7 h-7 rounded hover:bg-surface"><Icon name="paperclip" size={13}/></button>
-                <button className="w-7 h-7 rounded hover:bg-surface"><Icon name="at-sign" size={13}/></button>
+                <div className="relative">
+                  <button className="w-7 h-7 rounded hover:bg-surface" onClick={()=>setMentionPickerOpen(o=>!o)}><Icon name="at-sign" size={13}/></button>
+                  {mentionPickerOpen && (
+                    <MentionPicker users={users} excludeId={currentUserId}
+                      onPick={(u)=>{
+                        setMentionedUsers(ms => ms.some(x=>x.id===u.id) ? ms : [...ms, u]);
+                        setNewNote(t => (t && !/\s$/.test(t) ? t+' ' : t) + `@${u.name} `);
+                        setMentionPickerOpen(false);
+                      }}
+                      onClose={()=>setMentionPickerOpen(false)}/>
+                  )}
+                </div>
               </div>
               <button className="btn-primary text-xs py-1.5" onClick={handleAddNote}
                 disabled={savingNote || !newNote.trim()}
@@ -2066,7 +2117,7 @@ function QuoteDetail({ code, onClose, canReassign }) {
 }
 
 function OrderDetail({ code, onClose, canReassign }) {
-  const { orders, clients, users, quotes, moveOrderStage, pushToast, openModal, setOrders, setQuotes } = useApp();
+  const { orders, clients, users, quotes, moveOrderStage, pushToast, openModal, setOrders, setQuotes, currentUserId } = useApp();
   const o = orders.find(x=>x.code===code);
   if (!o) return null;
 
@@ -2086,6 +2137,8 @@ function OrderDetail({ code, onClose, canReassign }) {
   const [loading, setLoading]     = useState(true);
   const [newNote, setNewNote]     = useState('');
   const [savingNote, setSavingNote] = useState(false);
+  const [mentionedUsers, setMentionedUsers] = useState([]);
+  const [mentionPickerOpen, setMentionPickerOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [pdfPreview, setPdfPreview] = useState(null); // { url, filename }
   const [notaPedido, setNotaPedido]   = useState(null); // datos de la NP vinculada (para Order real)
@@ -2165,9 +2218,10 @@ function OrderDetail({ code, onClose, canReassign }) {
     setSavingNote(true);
     try {
       const fn = isQuoteSource ? CrmApi.addQuoteNote : CrmApi.addOrderNote;
-      const nota = await fn(o.id, newNote.trim());
+      const nota = await fn(o.id, newNote.trim(), mentionedUsers.map(u=>u.id));
       setNotes(ns => [...ns, nota]);
       setNewNote('');
+      setMentionedUsers([]);
     } catch (err) {
       pushToast(err.message || 'Error al guardar nota', 'bad');
     } finally {
@@ -3012,7 +3066,32 @@ function OrderDetail({ code, onClose, canReassign }) {
               ))}
             </div>
           )}
+          {mentionedUsers.length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-2">
+              {mentionedUsers.map(u => (
+                <span key={u.id} className="inline-flex items-center gap-1 pl-1.5 pr-1 py-0.5 rounded bg-brandSoft text-brand text-[11px] font-medium">
+                  @{u.name.split(' ')[0]}
+                  <button onClick={()=>setMentionedUsers(ms=>ms.filter(x=>x.id!==u.id))} className="hover:opacity-60"><Icon name="x" size={10}/></button>
+                </span>
+              ))}
+            </div>
+          )}
           <div className="flex gap-2 mt-2">
+            <div className="relative shrink-0 self-end">
+              <button className="w-9 h-9 rounded-lg border border-line hover:bg-surface flex items-center justify-center text-ink-500"
+                onClick={()=>setMentionPickerOpen(o=>!o)}>
+                <Icon name="at-sign" size={14}/>
+              </button>
+              {mentionPickerOpen && (
+                <MentionPicker users={users} excludeId={currentUserId}
+                  onPick={(u)=>{
+                    setMentionedUsers(ms => ms.some(x=>x.id===u.id) ? ms : [...ms, u]);
+                    setNewNote(t => (t && !/\s$/.test(t) ? t+' ' : t) + `@${u.name} `);
+                    setMentionPickerOpen(false);
+                  }}
+                  onClose={()=>setMentionPickerOpen(false)}/>
+              )}
+            </div>
             <textarea
               ref={noteInputRef}
               className="inp flex-1 resize-none text-[13px]"

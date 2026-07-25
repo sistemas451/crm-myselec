@@ -7,6 +7,7 @@ const { resyncQuoteEmail } = require('../services/mailReader');
 const multer = require('multer');
 const { parseFlexxusPDF, parseNotaPedidoPDF } = require('../services/flexxusParser');
 const { sendQuoteEmail, getTemplates, saveTemplates, getDefaultCC, applyTemplate } = require('../services/mailSender');
+const { notifyMentions } = require('../services/mentions');
 const prisma = require('../db');
 const { nextCode } = require('../services/codeHelper');
 
@@ -696,6 +697,7 @@ router.post('/:id/notes', authMiddleware, async (req, res) => {
   try {
     const text = (req.body.text || '').trim();
     if (!text) return res.status(400).json({ error: 'El texto de la nota no puede estar vacío' });
+    const mentionedUserIds = Array.isArray(req.body.mentionedUserIds) ? req.body.mentionedUserIds.filter(Boolean) : [];
 
     // VENDEDOR solo puede agregar notas a sus propias cotizaciones
     if (req.user.role === 'VENDEDOR') {
@@ -709,11 +711,12 @@ router.post('/:id/notes', authMiddleware, async (req, res) => {
         text,
         userId: req.user.id,
         quoteId: req.params.id,
+        mentionedUserIds,
       },
       include: { user: { select: { name: true } } },
     });
 
-    const quote = await prisma.quote.findUnique({ where: { id: req.params.id } });
+    const quote = await prisma.quote.findUnique({ where: { id: req.params.id }, include: { client: { select: { name: true } } } });
     await prisma.activity.create({
       data: {
         action: 'NOTE_ADDED',
@@ -722,6 +725,13 @@ router.post('/:id/notes', authMiddleware, async (req, res) => {
         quoteId: req.params.id,
       },
     });
+
+    if (mentionedUserIds.length > 0) {
+      notifyMentions({
+        mentionedUserIds, authorUser: req.user, noteId: note.id, text,
+        kind: 'quote', refId: req.params.id, code: quote.code, clientName: quote.client?.name,
+      }).catch(err => console.warn('⚠️  notifyMentions (quote) failed:', err.message));
+    }
 
     res.status(201).json(note);
   } catch (err) {

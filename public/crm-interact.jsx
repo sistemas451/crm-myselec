@@ -116,6 +116,16 @@ function AppProvider({ children }) {
     try { await CrmApi.ackAssignedQuote(quoteId); } catch (e) { console.warn('ack error:', e.message); }
   }, []);
 
+  // ── Confirmar mención en nota vista ("Ver") ───────────────────────────────────
+  const ackMention = useCallback(async (noteId) => {
+    setInboxAlerts(prev => prev.map(a => {
+      if (a.type !== 'MENTIONS') return a;
+      const newItems = a.items.filter(i => i.noteId !== noteId);
+      return newItems.length > 0 ? { ...a, items: newItems, count: newItems.length } : null;
+    }).filter(Boolean));
+    try { await CrmApi.ackMention(noteId); } catch (e) { console.warn('ack error:', e.message); }
+  }, []);
+
   // ── Smart sync: polling inteligente cada 25s (activo) / 2min (oculto) ────────
   const lastSyncTs  = useRef(new Date().toISOString());
   const syncCounts  = useRef({ quotes: 0, orders: 0, clients: 0, users: 0 });
@@ -376,7 +386,7 @@ function AppProvider({ children }) {
 
   const value = {
     quotes, setQuotes, orders, setOrders, clients, setClients, users, setUsers, activity, comments, notifications,
-    inboxAlerts, setInboxAlerts, snoozeAlert, markInboxSeen, ackAssigned,
+    inboxAlerts, setInboxAlerts, snoozeAlert, markInboxSeen, ackAssigned, ackMention,
     quoteFilters, setQuoteFilters, orderFilters, setOrderFilters,
     currentUserId, setCurrentUserId, roleKey, setRoleKey,
     addQuote, addOrder, addClient, updateQuote, updateOrder,
@@ -1819,7 +1829,7 @@ const MODAL_REGISTRY = {
 // ---------- Notifications Popover ----------
 function NotificationsPopover({ onClose, setScreen }) {
   const { notifications, markNotificationRead, markAllNotificationsRead, openModal,
-          inboxAlerts, setInboxAlerts, snoozeAlert, markInboxSeen, ackAssigned } = useApp();
+          inboxAlerts, setInboxAlerts, snoozeAlert, markInboxSeen, ackAssigned, ackMention } = useApp();
   const [tab, setTab] = useS(inboxAlerts.length > 0 ? 'inbox' : 'activity');
   const [dismissOpen, setDismissOpen] = useS(null); // alert.id with open dismiss dropdown
 
@@ -1856,6 +1866,7 @@ function NotificationsPopover({ onClose, setScreen }) {
     NO_RESPONSE:           '📨',
     ASSIGNED_QUOTES:       '🎯',
     DEADLINE_OVERDUE:      '🚩',
+    MENTIONS:              '🏷️',
   };
 
   const handleAlertAction = (alert) => {
@@ -1964,6 +1975,21 @@ function NotificationsPopover({ onClose, setScreen }) {
                                       className="shrink-0 ml-auto px-1.5 py-0.5 rounded bg-white/80 hover:bg-white text-[9px] font-semibold border border-current/20">
                                       Recordar
                                     </button>
+                                  )}
+                                  {alert.type === 'MENTIONS' && (
+                                    <>
+                                      {item.byName && <span className="shrink-0 text-[10px] opacity-70">por {item.byName}</span>}
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          ackMention(item.noteId);
+                                          onClose();
+                                          openModal(item.kind === 'order' ? 'orderDetail' : 'quoteDetail', { code: item.code });
+                                        }}
+                                        className="shrink-0 ml-auto px-1.5 py-0.5 rounded bg-white/80 hover:bg-white text-[9px] font-semibold border border-current/20">
+                                        Ver
+                                      </button>
+                                    </>
                                   )}
                                 </div>
                               ))}
@@ -2155,7 +2181,7 @@ function MoreFiltersPopover({ onClose, which='quote' }) {
   const { quoteFilters, setQuoteFilters, orderFilters, setOrderFilters } = useApp();
   const f = which==='quote' ? quoteFilters : orderFilters;
   const set = which==='quote' ? setQuoteFilters : setOrderFilters;
-  const reset = () => set(s => ({ ...s, min:'', max:'', zone:'', activity:'' }));
+  const reset = () => set(s => ({ ...s, min:'', max:'', hasNotes:false }));
   return (
     <>
       <div className="fixed inset-0 z-30" onClick={onClose}/>
@@ -2168,13 +2194,11 @@ function MoreFiltersPopover({ onClose, which='quote' }) {
           <FormGroup label="Monto máximo (ARS)">
             <input type="number" className="inp w-full" value={f.max||''} onChange={e=>set(s=>({...s, max:e.target.value}))} placeholder="Sin límite"/>
           </FormGroup>
-          <FormGroup label="Zona">
-            <Select value={f.zone||''} onChange={v=>set(s=>({...s, zone:v}))} options={['', ...ZONES].map(z => ({ value:z, label:z||'Todas las zonas' }))}/>
-          </FormGroup>
           {which === 'quote' && (
-            <FormGroup label="Tipo de actividad">
-              <Select value={f.activity||''} onChange={v=>set(s=>({...s, activity:v}))} options={['', ...ACTIVITIES].map(z => ({ value:z, label:z||'Todas' }))}/>
-            </FormGroup>
+            <label className="flex items-center gap-2 text-[13px] text-ink-700 cursor-pointer select-none">
+              <input type="checkbox" checked={!!f.hasNotes} onChange={e=>set(s=>({...s, hasNotes:e.target.checked}))} className="w-4 h-4 rounded border-line accent-brand"/>
+              Solo con notas
+            </label>
           )}
         </div>
         <div className="flex gap-2 pt-3 mt-3 border-t border-line">
@@ -2201,10 +2225,9 @@ function countActiveFilters(f) {
   if (f.seller) n++;
   if (f.client) n++;
   if (f.period && f.period !== '30d') n++;
-  if (f.zone) n++;
-  if (f.activity) n++;
   if (f.min) n++;
   if (f.max) n++;
+  if (f.hasNotes) n++;
   if (f.delivery) n++;
   if (f.transport) n++;
   return n;
@@ -2213,7 +2236,8 @@ function countActiveFilters(f) {
 function applyQuoteFilters(list, filters, clientsArr) {
   const periodStart = filters.period ? periodStartDate(filters.period) : null;
   return list.filter(q => {
-    if (filters.seller && q.seller !== filters.seller) return false;
+    if (filters.seller === 'UNASSIGNED') { if (q.seller) return false; }
+    else if (filters.seller && q.seller !== filters.seller) return false;
     if (periodStart && new Date(q.ingreso) < periodStart) return false;
     const cli = clientsArr.find(c => c.code === q.client);
     if (filters.client) {
@@ -2221,10 +2245,9 @@ function applyQuoteFilters(list, filters, clientsArr) {
       const name = cli?.name || q.clientName || q.emailSubject || '';
       if (!name.toLowerCase().includes(needle)) return false;
     }
-    if (filters.zone && cli?.zone !== filters.zone) return false;
-    if (filters.activity && cli?.activity !== filters.activity) return false;
     if (filters.min && (q.monto||0) < parseFloat(filters.min)) return false;
     if (filters.max && (q.monto||0) > parseFloat(filters.max)) return false;
+    if (filters.hasNotes && !(q.notas > 0)) return false;
     return true;
   });
 }
@@ -2241,7 +2264,6 @@ function applyOrderFilters(list, filters, clientsArr) {
     }
     if (filters.delivery && o.entrega !== filters.delivery) return false;
     if (filters.transport && !(o.transp||'').toLowerCase().includes(filters.transport.toLowerCase())) return false;
-    if (filters.zone && cli?.zone !== filters.zone) return false;
     return true;
   });
 }

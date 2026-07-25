@@ -50,9 +50,10 @@ router.get('/inbox', authMiddleware, async (req, res) => {
         getFlag('inapp_follow_up_upcoming'),
         getFlag('inapp_no_response'),
         getFlag('inapp_deadline_overdue'),
+        getFlag('inapp_mentions'),
       ]),
     ]);
-    const [sysUnassigned, sysPending, sysOverdue, sysIdle, sysFollowUp, sysUnlinkedSol, sysFollowUpUpcoming, sysNoResponse, sysDeadlineOverdue] = sysFlags;
+    const [sysUnassigned, sysPending, sysOverdue, sysIdle, sysFollowUp, sysUnlinkedSol, sysFollowUpUpcoming, sysNoResponse, sysDeadlineOverdue, sysMentions] = sysFlags;
     const prefs = userFull?.notificationPrefs || {};
     const idleInboxDays      = parseInt(idleInboxSetting?.value       ?? '5', 10);
     const solSinPresDays     = parseInt(solSetting?.value             ?? '3', 10);
@@ -71,6 +72,23 @@ router.get('/inbox', authMiddleware, async (req, res) => {
       const until = prefs.dismissed?.[key];
       return until && new Date(until) > now;
     };
+
+    // 0. Menciones pendientes en notas (aplica a cualquier rol)
+    if (sysMentions) {
+      const pendingMentions = Array.isArray(prefs.pendingMentions) ? prefs.pendingMentions : [];
+      if (pendingMentions.length > 0) {
+        alerts.push({
+          id: 'mentions', type: 'MENTIONS', severity: 'medium', icon: 'at-sign',
+          title: `${pendingMentions.length} mención${pendingMentions.length > 1 ? 'es' : ''} en notas`,
+          description: 'Te etiquetaron en una nota.',
+          count: pendingMentions.length,
+          items: pendingMentions.slice(-10).reverse().map(m => ({
+            noteId: m.noteId, kind: m.kind, id: m.id, code: m.code,
+            clientName: m.clientName, text: m.text, byName: m.byName,
+          })),
+        });
+      }
+    }
 
     if (isAdmin(req.user)) {
       // 1. Solicitudes sin vendedor asignado
@@ -540,6 +558,25 @@ router.post('/ack-assigned', authMiddleware, async (req, res) => {
     await prisma.user.update({
       where: { id: userId },
       data:  { notificationPrefs: { ...prefs, pendingAssigned: pending.filter(id => id !== quoteId) } },
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/notifications/ack-mention — usuario confirma que vio una mención en una nota
+router.post('/ack-mention', authMiddleware, async (req, res) => {
+  try {
+    const { noteId } = req.body;
+    if (!noteId) return res.status(400).json({ error: 'noteId requerido' });
+    const { id: userId } = req.user;
+    const userFull = await prisma.user.findUnique({ where: { id: userId }, select: { notificationPrefs: true } });
+    const prefs   = userFull?.notificationPrefs || {};
+    const pending = Array.isArray(prefs.pendingMentions) ? prefs.pendingMentions : [];
+    await prisma.user.update({
+      where: { id: userId },
+      data:  { notificationPrefs: { ...prefs, pendingMentions: pending.filter(m => m.noteId !== noteId) } },
     });
     res.json({ ok: true });
   } catch (err) {
