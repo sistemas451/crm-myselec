@@ -23,6 +23,13 @@ function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// true si el usuario tiene activada la pref de email para esa clave (default: activada)
+function userEmailPref(notificationPrefs, key) {
+  const emailPrefs = notificationPrefs?.email;
+  if (!emailPrefs || typeof emailPrefs !== 'object') return true;
+  return emailPrefs[key] !== false;
+}
+
 // ── Constantes ────────────────────────────────────────────────────────────────
 
 const VALID_STATUSES = ['OPEN','REVIEWING','PENDING_FIX','SCHEDULE_MEETING','RESPONDED','RESOLVED','CLOSED'];
@@ -115,18 +122,18 @@ async function getFeedbackNotifyEmails() {
       if (Array.isArray(ids) && ids.length > 0) {
         const users = await prisma.user.findMany({
           where: { id: { in: ids }, active: true },
-          select: { email: true },
+          select: { email: true, notificationPrefs: true },
         });
-        return users.map(u => u.email).filter(Boolean);
+        return users.filter(u => userEmailPref(u.notificationPrefs, 'foro_activity')).map(u => u.email).filter(Boolean);
       }
     }
   } catch (_) {}
   // Fallback: todos los DEVELOPER activos
   const devs = await prisma.user.findMany({
     where: { role: 'DEVELOPER', active: true },
-    select: { email: true },
+    select: { email: true, notificationPrefs: true },
   });
-  return devs.map(u => u.email).filter(Boolean);
+  return devs.filter(u => userEmailPref(u.notificationPrefs, 'foro_activity')).map(u => u.email).filter(Boolean);
 }
 
 async function nextCode() {
@@ -273,7 +280,7 @@ router.post('/:id/respond', async (req, res) => {
 
     const post = await prisma.feedbackPost.findUnique({
       where: { id: req.params.id },
-      include: { user: { select: { name: true, email: true } } },
+      include: { user: { select: { name: true, email: true, notificationPrefs: true } } },
     });
     if (!post) return res.status(404).json({ error: 'Post no encontrado.' });
 
@@ -292,7 +299,7 @@ router.post('/:id/respond', async (req, res) => {
 
     // Notificar al autor
     try {
-      if (post.user.email && post.user.email !== req.user.email) {
+      if (post.user.email && post.user.email !== req.user.email && userEmailPref(post.user.notificationPrefs, 'foro_response')) {
         await sendMail({
           to: post.user.email,
           replyTo: req.user.email,
@@ -327,7 +334,7 @@ router.post('/:id/comment', async (req, res) => {
 
     const post = await prisma.feedbackPost.findUnique({
       where: { id: req.params.id },
-      include: { user: { select: { id: true, name: true, email: true } } },
+      include: { user: { select: { id: true, name: true, email: true, notificationPrefs: true } } },
     });
     if (!post) return res.status(404).json({ error: 'Post no encontrado.' });
     if (post.status === 'CLOSED') return res.status(400).json({ error: 'Este caso está cerrado.' });
@@ -352,7 +359,7 @@ router.post('/:id/comment', async (req, res) => {
     // Notificar: si comenta el dev, avisar al autor; si comenta cualquier otro, avisar a los devs
     try {
       if (dev) {
-        if (post.user.email && post.user.email !== req.user.email) {
+        if (post.user.email && post.user.email !== req.user.email && userEmailPref(post.user.notificationPrefs, 'foro_response')) {
           await sendMail({
             to: post.user.email,
             replyTo: req.user.email,

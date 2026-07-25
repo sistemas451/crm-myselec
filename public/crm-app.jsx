@@ -168,8 +168,8 @@ function App() {
   // Merge avatar desde profileUser si fue actualizado en esta sesión.
   // role siempre viene del JWT como fallback por si el contexto de users aún no cargó.
   const displayUser = {
-    role: loggedUser?.role,
     ...(profileUser ? { ...user, ...profileUser } : user),
+    role: loggedUser?.role, // siempre el rol crudo del JWT — user.role trae la etiqueta en español (mapUsersArr)
   };
 
   const openDetail = (code, kind='quote') => openModal(kind==='quote'?'quoteDetail':'orderDetail', { code });
@@ -513,7 +513,7 @@ function ProfileModal({ user, onClose, onUpdated }) {
                 </button>
               );
 
-              const PrefRow = ({ section, key: k, label, desc }) => (
+              const PrefRow = ({ section, k, label, desc }) => (
                 <div className="flex items-start gap-3 py-3 border-b border-line last:border-0">
                   <div className="flex-1 min-w-0">
                     <div className="text-[13px] font-medium text-ink-800">{label}</div>
@@ -543,6 +543,8 @@ function ProfileModal({ user, onClose, onUpdated }) {
                       {isSeller && <PrefRow section="email" k="idle_reminder" label="Recordatorio de inactividad" desc="Aviso cuando tus cotizaciones llevan varios días sin movimiento."/>}
                       {isLogistics && <PrefRow section="email" k="order_new" label="Nueva OC asignada" desc="Cuando se crea una nueva orden de compra para gestionar."/>}
                       {isLogistics && <PrefRow section="email" k="order_overdue" label="Entrega vencida" desc="Cuando una OC supera su fecha estimada de entrega."/>}
+                      <PrefRow section="email" k="foro_response" label="Respuestas en el Foro" desc="Cuando alguien responde o comenta tu publicación."/>
+                      {isAdmin && <PrefRow section="email" k="foro_activity" label="Actividad nueva en el Foro" desc="Nuevo reporte o comentario de otro usuario, para revisar."/>}
                     </div>
                   </div>
 
