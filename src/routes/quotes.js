@@ -490,13 +490,20 @@ router.patch('/:id/stage', authMiddleware, async (req, res) => {
   }
 });
 
-// PATCH /api/quotes/:id/assign - Reassign seller (solo admin o logística)
+// PATCH /api/quotes/:id/assign - Reassign seller (admin/logística: cualquier cotización;
+// VENDEDOR: solo puede auto-asignarse una cotización que todavía esté sin vendedor)
 router.patch('/:id/assign', authMiddleware, async (req, res) => {
-  if (req.user.role === 'VENDEDOR') {
-    return res.status(403).json({ error: 'Solo administradores pueden reasignar cotizaciones' });
-  }
   try {
     const { sellerId } = req.body;
+
+    if (req.user.role === 'VENDEDOR') {
+      if (sellerId !== req.user.id) {
+        return res.status(403).json({ error: 'Solo podés asignarte cotizaciones a vos mismo' });
+      }
+      const existing = await prisma.quote.findUnique({ where: { id: req.params.id }, select: { sellerId: true } });
+      if (!existing) return res.status(404).json({ error: 'Cotización no encontrada' });
+      if (existing.sellerId) return res.status(403).json({ error: 'Esta cotización ya tiene un vendedor asignado' });
+    }
 
     const updateData = { sellerId };
     if (sellerId) {

@@ -764,7 +764,7 @@ function MentionPicker({ users, excludeId, onPick, onClose }) {
 }
 
 function QuoteDetail({ code, onClose, canReassign }) {
-  const { quotes, clients, users, moveQuoteStage, setQuotes, setOrders, pushToast, closeModal, openModal, updateQuote, currentUserId } = useApp();
+  const { quotes, clients, users, moveQuoteStage, setQuotes, setOrders, pushToast, closeModal, openModal, updateQuote, currentUserId, roleKey } = useApp();
   const q = quotes.find(x => x.code === code);
   if (!q) return null;
   const cli = clients.find(c=>c.code===q.client);
@@ -915,6 +915,21 @@ function QuoteDetail({ code, onClose, canReassign }) {
       setAssignSellerIdQuick('');
     } catch (err) {
       pushToast(err.message || 'Error al actualizar vendedor', 'bad');
+    } finally {
+      setAssignSellerSaving(false);
+    }
+  };
+
+  const handleSelfAssign = async () => {
+    setAssignSellerSaving(true);
+    try {
+      await CrmApi.assignQuote(q.id, currentUserId);
+      const freshQuotes = await CrmApi.getQuotes();
+      setQuotes(freshQuotes);
+      pushToast('Te asignaste esta cotización');
+      setAssigningSeller(false);
+    } catch (err) {
+      pushToast(err.message || 'Error al asignarte la cotización', 'bad');
     } finally {
       setAssignSellerSaving(false);
     }
@@ -1304,19 +1319,33 @@ function QuoteDetail({ code, onClose, canReassign }) {
       {assigningSeller && (
         <div className="mx-6 mt-3 px-4 py-3 bg-surface border border-line rounded-xl flex items-center gap-3">
           <Icon name="user" size={14} className="text-ink-400 shrink-0"/>
-          <select className="inp text-xs flex-1" value={assignSellerIdQuick}
-            onChange={e => setAssignSellerIdQuick(e.target.value)}
-            autoFocus>
-            <option value="">Seleccionar vendedor…</option>
-            {users.filter(u => u.role === 'Vendedor' || u.role === 'Administrador')
-              .map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-          </select>
-          <button className="btn-primary text-[11px] py-1 px-2.5 shrink-0"
-            disabled={!assignSellerIdQuick || assignSellerSaving}
-            style={!assignSellerIdQuick || assignSellerSaving ? {opacity:.45} : {}}
-            onClick={handleAssignSellerQuick}>
-            {assignSellerSaving ? <Icon name="loader" size={12} className="animate-spin"/> : 'Guardar'}
-          </button>
+          {roleKey === 'seller' ? (
+            <>
+              <span className="text-xs text-ink-600 flex-1">¿Asignarte esta cotización?</span>
+              <button className="btn-primary text-[11px] py-1 px-2.5 shrink-0"
+                disabled={assignSellerSaving}
+                style={assignSellerSaving ? {opacity:.45} : {}}
+                onClick={handleSelfAssign}>
+                {assignSellerSaving ? <Icon name="loader" size={12} className="animate-spin"/> : 'Asignarme esta cotización'}
+              </button>
+            </>
+          ) : (
+            <>
+              <select className="inp text-xs flex-1" value={assignSellerIdQuick}
+                onChange={e => setAssignSellerIdQuick(e.target.value)}
+                autoFocus>
+                <option value="">Seleccionar vendedor…</option>
+                {users.filter(u => u.role === 'Vendedor' || u.role === 'Administrador')
+                  .map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </select>
+              <button className="btn-primary text-[11px] py-1 px-2.5 shrink-0"
+                disabled={!assignSellerIdQuick || assignSellerSaving}
+                style={!assignSellerIdQuick || assignSellerSaving ? {opacity:.45} : {}}
+                onClick={handleAssignSellerQuick}>
+                {assignSellerSaving ? <Icon name="loader" size={12} className="animate-spin"/> : 'Guardar'}
+              </button>
+            </>
+          )}
           <button className="text-ink-400 hover:text-ink-700 shrink-0"
             onClick={() => { setAssigningSeller(false); setAssignSellerIdQuick(''); }}>
             <Icon name="x" size={14}/>
@@ -1342,11 +1371,13 @@ function QuoteDetail({ code, onClose, canReassign }) {
           <Field label={
             <span className="flex items-center gap-1">
               Vendedor
-              <button title="Cambiar vendedor"
-                onClick={() => { setAssigningSeller(true); setAssignSellerIdQuick(q.seller || ''); }}
-                className="text-ink-300 hover:text-brand transition-colors ml-0.5">
-                <Icon name="pencil" size={10}/>
-              </button>
+              {(roleKey !== 'seller' || !sel) && (
+                <button title={roleKey === 'seller' ? 'Asignarme' : 'Cambiar vendedor'}
+                  onClick={() => { setAssigningSeller(true); setAssignSellerIdQuick(roleKey === 'seller' ? currentUserId : (q.seller || '')); }}
+                  className="text-ink-300 hover:text-brand transition-colors ml-0.5">
+                  <Icon name="pencil" size={10}/>
+                </button>
+              )}
             </span>
           }>
             {sel
