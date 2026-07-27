@@ -543,12 +543,27 @@ app.listen(PORT, () => {
     runWeeklyReport().catch(e => console.error('weekly report error:', e.message));
   }, 5 * 60 * 1000);
 
-  // Sync automático de mails — intervalo configurable desde AppSetting
+  // true si "ahora" (hora Argentina, UTC-3) cae dentro de los días/horario configurados
+  function isWithinSyncWindow(days, startHour, endHour) {
+    const now     = new Date();
+    const argTime = new Date(now.getTime() - 3 * 3600 * 1000);
+    const curDay  = argTime.getUTCDay();  // 0=domingo … 6=sábado
+    const curHour = argTime.getUTCHours();
+    return days.includes(curDay) && curHour >= startHour && curHour < endHour;
+  }
+
+  // Sync automático de mails — intervalo y ventana horaria configurables desde AppSetting.
+  // Es solo la red de respaldo: el disparador principal es cuando alguien abre el CRM
+  // (login o pestaña con sesión recordada) o aprieta "Sincronizar" — ver routes/mail.js.
   async function scheduleMailSync() {
     try {
-      const [settingInterval, settingEnabled] = await Promise.all([
+      const [settingInterval, settingEnabled, winEnabled, winDays, winStart, winEnd] = await Promise.all([
         prisma.appSetting.findUnique({ where: { key: 'mail_sync_interval_hours' } }),
         prisma.appSetting.findUnique({ where: { key: 'mail_sync_enabled' } }),
+        prisma.appSetting.findUnique({ where: { key: 'mail_sync_window_enabled' } }),
+        prisma.appSetting.findUnique({ where: { key: 'mail_sync_window_days' } }),
+        prisma.appSetting.findUnique({ where: { key: 'mail_sync_window_start_hour' } }),
+        prisma.appSetting.findUnique({ where: { key: 'mail_sync_window_end_hour' } }),
       ]);
       const hours   = parseFloat(settingInterval?.value || '2');
       const enabled = settingEnabled?.value !== 'false'; // default true
@@ -558,11 +573,21 @@ app.listen(PORT, () => {
         setTimeout(scheduleMailSync, ms);
         return;
       }
-      console.log(`📧 Mail sync automático cada ${hours}h`);
+
+      const windowEnabled = winEnabled?.value !== 'false'; // default true
+      const windowDays    = (winDays?.value || '1,2,3,4,5').split(',').map(d => parseInt(d, 10));
+      const windowStart   = parseInt(winStart?.value ?? '8', 10);
+      const windowEnd     = parseInt(winEnd?.value ?? '20', 10);
+
+      console.log(`📧 Mail sync automático cada ${hours}h${windowEnabled ? ` · restringido a horario laboral (${windowStart}-${windowEnd}hs)` : ''}`);
       setTimeout(async () => {
-        console.log('📧 Auto-sync de mails...');
-        try { await syncMails(); } catch (e) { console.error('Auto-sync error:', e.message); }
-        scheduleMailSync(); // releer el intervalo en cada ciclo
+        if (!windowEnabled || isWithinSyncWindow(windowDays, windowStart, windowEnd)) {
+          console.log('📧 Auto-sync de mails...');
+          try { await syncMails(); } catch (e) { console.error('Auto-sync error:', e.message); }
+        } else {
+          console.log('📧 Auto-sync omitido — fuera de la ventana laboral configurada');
+        }
+        scheduleMailSync(); // releer el intervalo/ventana en cada ciclo
       }, ms);
     } catch (e) {
       console.error('scheduleMailSync error:', e.message);

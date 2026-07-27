@@ -2444,7 +2444,11 @@ function Config() {
 
   // Mail state
   const [mailAccounts,  setMailAccounts]  = useState([]);
-  const [mailSettings,  setMailSettings]  = useState({ mail_sync_interval_hours: '2', mail_lookback_days: '2', mail_sync_enabled: 'true' });
+  const [mailSettings,  setMailSettings]  = useState({
+    mail_sync_interval_hours: '2', mail_lookback_days: '2', mail_sync_enabled: 'true',
+    mail_sync_window_enabled: 'true', mail_sync_window_days: '1,2,3,4,5',
+    mail_sync_window_start_hour: '8', mail_sync_window_end_hour: '20',
+  });
   const [mailLoading,   setMailLoading]   = useState(false);
   const [mailSyncing,    setMailSyncing]    = useState({}); // { [email]: true/false }
   const [mailSyncingAll, setMailSyncingAll] = useState(false);
@@ -2546,7 +2550,9 @@ function Config() {
         headers: { Authorization: `Bearer ${localStorage.getItem('crm_token')}` },
       });
       const data = await res.json();
-      if (data.synced > 0) {
+      if (data.skipped) {
+        pushToast(data.message || 'Ya se sincronizó hace poco');
+      } else if (data.synced > 0) {
         pushToast(`✅ ${data.synced} mail(s) procesado(s)`);
       } else {
         pushToast(`Sync completo · sin novedades`);
@@ -3176,6 +3182,63 @@ function Config() {
                 </select>
               </div>
             </div>
+
+            {/* ── Ventana horaria del sync de respaldo ── */}
+            <div className={cx('mt-4 pt-4 border-t border-line transition-opacity', mailSettings.mail_sync_enabled === 'false' ? 'opacity-40 pointer-events-none' : '')}>
+              <div className="flex items-center justify-between mb-3">
+                <div className="pr-4">
+                  <div className="text-[12.5px] font-medium text-ink-700">Restringir a horario laboral</div>
+                  <div className="text-[11px] text-ink-400 mt-0.5">
+                    Fuera del horario y días elegidos, el sync automático de respaldo no corre — cuando alguien abre el CRM igual sincroniza, sin importar la hora.
+                  </div>
+                </div>
+                <button type="button"
+                  onClick={() => setMailSettings(s => ({ ...s, mail_sync_window_enabled: s.mail_sync_window_enabled === 'false' ? 'true' : 'false' }))}
+                  className={cx('w-10 h-5 rounded-full relative transition-colors shrink-0', mailSettings.mail_sync_window_enabled === 'false' ? 'bg-ink-300' : 'bg-emerald-500')}>
+                  <div className={cx('absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all', mailSettings.mail_sync_window_enabled === 'false' ? 'left-0.5' : 'left-[22px]')}/>
+                </button>
+              </div>
+              {mailSettings.mail_sync_window_enabled !== 'false' && (
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-[12px] text-ink-500 mb-1.5">Días</label>
+                    <div className="flex gap-1.5">
+                      {[{v:1,l:'L'},{v:2,l:'M'},{v:3,l:'M'},{v:4,l:'J'},{v:5,l:'V'},{v:6,l:'S'},{v:0,l:'D'}].map(d => {
+                        const days = (mailSettings.mail_sync_window_days || '1,2,3,4,5').split(',').filter(Boolean).map(x=>parseInt(x,10));
+                        const active = days.includes(d.v);
+                        return (
+                          <button key={d.v} type="button"
+                            onClick={() => {
+                              const next = active ? days.filter(x=>x!==d.v) : [...days, d.v];
+                              setMailSettings(s => ({ ...s, mail_sync_window_days: next.sort().join(',') }));
+                            }}
+                            className={cx('w-8 h-8 rounded-lg text-[12px] font-semibold transition-colors', active ? 'bg-brand text-white' : 'bg-surface text-ink-400 hover:bg-line')}>
+                            {d.l}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[12px] text-ink-500 mb-1">Desde</label>
+                      <select className="inp text-[13px] w-full" value={mailSettings.mail_sync_window_start_hour}
+                        onChange={e => setMailSettings(s => ({ ...s, mail_sync_window_start_hour: e.target.value }))}>
+                        {Array.from({length:24},(_,h)=>h).map(h => <option key={h} value={String(h)}>{String(h).padStart(2,'0')}:00</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[12px] text-ink-500 mb-1">Hasta</label>
+                      <select className="inp text-[13px] w-full" value={mailSettings.mail_sync_window_end_hour}
+                        onChange={e => setMailSettings(s => ({ ...s, mail_sync_window_end_hour: e.target.value }))}>
+                        {Array.from({length:24},(_,h)=>h).map(h => <option key={h} value={String(h)}>{String(h).padStart(2,'0')}:00</option>)}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div className="flex items-center gap-2 mt-4">
               <button onClick={handleMailSettingSave} className="btn-primary text-[12px]">Guardar</button>
               <button onClick={handleSyncAll} disabled={mailSyncingAll}

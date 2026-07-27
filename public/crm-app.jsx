@@ -1191,6 +1191,25 @@ function SyncResultModal({ result, onClose }) {
 function Topbar({ user, roleKey, setRoleKey, setScreen }) {
   const { notifications, inboxAlerts, openModal, pushToast } = useApp();
   const [notifOpen, setNotifOpen] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+
+  const handleSync = async () => {
+    setSyncing(true);
+    try {
+      const data = await CrmApi.syncMail();
+      if (data.skipped) {
+        pushToast(data.message || 'Ya se sincronizó hace poco');
+      } else if (data.synced > 0) {
+        pushToast(`✅ ${data.synced} mail(s) procesado(s)`);
+      } else {
+        pushToast('Sync completo · sin novedades');
+      }
+    } catch (err) {
+      pushToast(err.message || 'Error al sincronizar', 'bad');
+    } finally {
+      setSyncing(false);
+    }
+  };
   const _authUser = CrmAuth.getUser();
   const _jwt = decodeJwtPayload(CrmAuth.getToken());
   const loggedUser = _authUser || _jwt; // JWT como fallback si crm_user no está guardado
@@ -1220,6 +1239,12 @@ function Topbar({ user, roleKey, setRoleKey, setScreen }) {
           </span>
         )}
       </div>
+
+      <button onClick={handleSync} disabled={syncing} title="Sincronizar correo"
+        className="hidden sm:inline-flex items-center gap-1.5 px-2.5 h-8 rounded-lg hover:bg-brand/10 text-brand text-xs font-medium transition-colors disabled:opacity-50">
+        <Icon name="refresh-cw" size={13} className={syncing ? 'animate-spin' : ''}/>
+        <span className="hidden lg:inline">{syncing ? 'Sincronizando…' : 'Sincronizar'}</span>
+      </button>
 
       <button onClick={()=>openModal('search')}
         className="relative hidden md:inline-flex items-center gap-2 px-3 h-8 rounded-lg bg-surface/80 hover:bg-surface border border-line/60 text-ink-400 hover:text-ink-600 text-xs transition-all duration-200">

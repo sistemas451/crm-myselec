@@ -271,6 +271,7 @@ const CrmApi = {
   // Mail
   addMailAccount:    (user, password) => apiFetch('/mail/accounts', { method: 'POST', body: JSON.stringify({ user, password }) }),
   deleteMailAccount: (email) => apiFetch(`/mail/accounts/${encodeURIComponent(email)}`, { method: 'DELETE' }),
+  syncMail: () => apiFetch('/mail/sync', { method: 'POST' }),
 
   // Notifications
   getNotificationRules: () => apiFetch('/notifications/rules'),

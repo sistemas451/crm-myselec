@@ -68,9 +68,22 @@ async function getMailAccounts() {
 }
 
 // ── POST /api/mail/sync — sincroniza TODAS las cuentas ───────────────────────
-router.post('/sync', authMiddleware, adminOrDev, async (req, res) => {
+// Accesible a cualquier rol autenticado: se dispara tanto por el botón "Sincronizar"
+// del topbar (todos los roles) como al abrir el CRM (login o pestaña con sesión
+// recordada). Cooldown compartido entre ambos disparadores para no relanzar el
+// sync completo si ya corrió hace poco — cuida la cuota de cómputo de Neon.
+const MANUAL_SYNC_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutos
+let lastTriggeredSyncAt = 0;
+
+router.post('/sync', authMiddleware, async (req, res) => {
   try {
-    console.log('📧 Sync manual: todas las cuentas...');
+    const elapsed = Date.now() - lastTriggeredSyncAt;
+    if (elapsed < MANUAL_SYNC_COOLDOWN_MS) {
+      const waitMin = Math.ceil((MANUAL_SYNC_COOLDOWN_MS - elapsed) / 60000);
+      return res.json({ skipped: true, synced: 0, errors: [], message: `Ya se sincronizó hace poco. Esperá ${waitMin} min.` });
+    }
+    lastTriggeredSyncAt = Date.now();
+    console.log(`📧 Sync manual (${req.user.role}): todas las cuentas...`);
     const result = await syncMails(); // syncMails ya actualiza lastSyncAt por cuenta internamente
     res.json(result);
   } catch (err) {

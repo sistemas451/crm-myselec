@@ -93,6 +93,15 @@ function AppProvider({ children }) {
     CrmApi.getActivity(50).then(a => setNotifications(mapActivity(a))).catch(() => setNotifications([]));
   }, []);
 
+  // Dispara un sync de mail al abrir el CRM (login fresco o pestaña con sesión
+  // recordada) — no bloquea nada, corre en segundo plano. El backend tiene su
+  // propio cooldown para no relanzarlo si ya corrió hace poco.
+  useEff(() => {
+    if (CrmAuth.isLoggedIn()) {
+      CrmApi.syncMail().catch(() => {});
+    }
+  }, []);
+
   // ── Carga y polling de inbox alerts (cada 3 min) ─────────────────────────────
   const loadInboxAlerts = useRef(null);
   loadInboxAlerts.current = () => {

@@ -9,6 +9,13 @@ const DEFAULTS = {
   mail_sync_interval_hours:    '2',
   mail_lookback_days:          '2',
   mail_sync_enabled:           'true',
+  // Ventana horaria del sync automático de respaldo (el disparador principal es
+  // cuando alguien abre el CRM — ver routes/mail.js). Fuera de la ventana no corre,
+  // salvo que alguien entre igual.
+  mail_sync_window_enabled:     'true',
+  mail_sync_window_days:        '1,2,3,4,5', // 0=domingo … 6=sábado
+  mail_sync_window_start_hour:  '8',
+  mail_sync_window_end_hour:    '20',
 
   // ── Etapas de entrada ────────────────────────────────────────────────────
   default_stage_solicitud:              'recibida',
