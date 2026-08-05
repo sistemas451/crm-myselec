@@ -93,7 +93,7 @@ No tests, linter, or build step. Frontend JSX is compiled in-browser via Babel S
 | `routes/orders.js` | `/api/orders` | Órdenes de compra CRUD |
 | `routes/clients.js` | `/api/clients` | Client CRUD, XLSX import, email matcheo, timeline |
 | `routes/data.js` | `/api/data` | Dashboard KPIs, charts, activity feed, comparativa |
-| `routes/mail.js` | `/api/mail` | IMAP accounts, manual sync trigger |
+| `routes/mail.js` | `/api/mail` | IMAP accounts (ADMIN only), sync trigger (any role, 10min cooldown) |
 | `routes/users.js` | `/api/users` | User management, approve/reject, resend welcome, avatar |
 | `routes/notifications.js` | `/api/notifications` | Inbox alerts, mark-seen, dismiss, counts, cron triggers |
 | `routes/settings.js` | `/api/settings` | AppSetting key-value store (ADMIN only) |
@@ -179,7 +179,7 @@ F1 board excludes `mailType IN ('OC', 'NOTA_PEDIDO')`.
 JWT issued at login, validated in `src/middleware/auth.js`. Checks `passwordChangedAt` to reject tokens issued before a password reset.
 
 - **ADMIN** — full access
-- **VENDEDOR** — own quotes + unassigned `recibida`; own orders only
+- **VENDEDOR** — own quotes + unassigned `recibida` (can self-assign an unassigned quote to themselves via `PATCH /quotes/:id/assign`, but not reassign quotes owned by someone else); own orders only
 - **LOGISTICA** — read-only order board
 
 Ownership pattern on mutating endpoints: fetch record first → 404 if missing → 403 if `sellerId !== req.user.id` for VENDEDORs.
@@ -234,6 +234,7 @@ Multi-account: `MAIL_ACCOUNTS` env var (JSON array) or `AppSetting key='mail_acc
 
 Key settings used across the app:
 - `mail_sync_interval_hours`, `mail_lookback_days`, `mail_sync_enabled`
+- `mail_sync_window_enabled`, `mail_sync_window_days` (comma-separated `0`=domingo…`6`=sábado), `mail_sync_window_start_hour`, `mail_sync_window_end_hour` — restricts the background auto-sync timer to a configurable day/hour window (default Lun-Vie 8-20hs). Does not affect the login-triggered sync, which always runs regardless of time.
 - `follow_up_days`, `idle_inbox_days`, `idle_email_days`
 - `stage_alert_cooldown_days`, `unassigned_mail_frequency`
 - `solicitud_sin_pres_days`, `no_response_days`, `follow_up_upcoming_days`
@@ -345,6 +346,37 @@ Two email services coexist:
 - El modal "Nueva cotización" (creación manual) siempre crea el registro como Presupuesto ya en etapa `enviado` — se confirmó con el usuario que ese botón es específicamente para cargar presupuestos que un vendedor ya armó y mandó por otro medio (WhatsApp, teléfono), no solicitudes nuevas a trabajar. Por eso no tiene (ni necesita) fecha límite — se le sacó el campo "Fecha límite de armado" del formulario y se corrigió el copy que decía "monto estimado, se completa al armar el presupuesto" (ya está armado al cargarlo).
 - Backend: `POST /quotes` (creación manual) ya no calcula `deadline`. `PATCH /quotes/:id/assign` solo la setea si `mailType === 'SOLICITUD'`. Nuevo `PATCH /quotes/:id/deadline` para edición manual, también restringido a Solicitudes.
 - Complementos agregados después de mostrárselo a Diego: alerta in-app "Fecha límite de armado vencida" en la campanita (mismo patrón ADMIN-ve-todo/VENDEDOR-ve-lo-suyo que el resto de las alertas, toggle en Config → Alertas), y auto-avance de etapa: al asignar vendedor por primera vez a una Solicitud que está en la etapa de entrada "sin vendedor", pasa sola a la etapa "con vendedor" (settings `default_stage_solicitud`/`default_stage_solicitud_con_vendedor`, las mismas que usa `mailReader.js`). Reasignar más adelante en el pipeline no mueve la etapa.
+
+### Sesión menciones + filtros + auto-asignación + sync de mail (julio 2026)
+
+**Filtros del Kanban (`crm-kanban.jsx`, `crm-interact.jsx`)**
+- Nuevo valor sentinel `seller: 'UNASSIGNED'` en el filtro de Vendedor (Cotizaciones) — muestra solo cotizaciones con `sellerId` nulo.
+- "Más filtros" (Cotizaciones y Órdenes): se sacaron los filtros de Zona y Tipo de actividad (poco usados, hardcodeados) y se agregó "Solo con notas" (`hasNotes`, solo Cotizaciones — filtra `notas > 0`).
+
+**Menciones @ en notas** (`src/services/mentions.js`, `routes/quotes.js`, `routes/orders.js`, `routes/notifications.js`, `crm-details.jsx`, `crm-interact.jsx`, `crm-views.jsx`)
+- `Note.mentionedUserIds String[]` — cualquier usuario activo puede ser mencionado (no solo admin), vía el botón "@" en el composer de notas (antes decorativo, sin funcionalidad) de `QuoteDetail` y `OrderDetail`. El picker inserta `@Nombre` en el texto y trackea los IDs por separado (no se parsea el texto).
+- `POST /quotes/:id/notes` y `POST /orders/:id/notes` aceptan `mentionedUserIds[]` → `notifyMentions()` (mentions.js) agrega un `pendingMentions[]` al `notificationPrefs` del mencionado y le manda mail (branded template) si `notify_mentions` (AppSetting) está activo.
+- `POST /notifications/ack-mention { noteId }` saca la mención de `pendingMentions` — se llama automáticamente al hacer click en "Ver" desde la campanita (mismo patrón que `ack-assigned`/`pendingAssigned` para cotizaciones recién asignadas).
+- Alerta `MENTIONS` en `GET /notifications/inbox`, aplica a **cualquier rol** (no solo admin/vendedor), gateada por `inapp_mentions`.
+- Toggle propio en Config → Alertas: `inapp_mentions` (campanita) + `notify_mentions` (mail).
+
+**Preferencias de mail del Foro** (`src/routes/feedback.js`, `crm-app.jsx`)
+- Antes, los 3 puntos donde `feedback.js` manda mail (nuevo post, respuesta, comentario) no respetaban ninguna preferencia individual. Ahora: `foro_response` (todos los roles — "me respondieron/comentaron mi post") y `foro_activity` (solo Admin/Developer — "hay actividad nueva para revisar", filtra `getFeedbackNotifyEmails()`), ambas en `notificationPrefs.email` del perfil de cada usuario (Mi perfil → Notificaciones → Por mail).
+- **2 bugs preexistentes encontrados y corregidos en `ProfileModal` (`crm-app.jsx`) al implementar esto** (afectaban a todo el modal, no solo lo nuevo):
+  - `displayUser` (en `App()`) pisaba el rol crudo del JWT (`'DEVELOPER'`) con la etiqueta en español del listado de usuarios (`'Desarrollador'`, viene de `mapUsersArr` en `crm-interact.jsx`) por el orden del spread — `isAdmin`/`isSeller`/`isLogistics` dentro de `ProfileModal` daban siempre `false`, ocultando todas las filas de preferencias admin-only. Fix: el rol del JWT va al final del spread.
+  - `PrefRow` desestructuraba una prop llamada `key` (`{ section, key: k, ... }`) — React nunca pasa `key` como prop real a un componente (la intercepta el reconciler), así que `k` siempre daba `undefined`. Los call sites pasaban `k="..."` (prop distinta), nunca leída. Resultado: **todos** los toggles individuales de notificaciones (no solo los nuevos) leían/escribían la misma clave compartida `notificationPrefs.email.undefined` — activar cualquiera afectaba a todos por igual. Fix: `{ section, k, ... }`.
+
+**Auto-asignación de vendedor** (`routes/quotes.js`, `crm-details.jsx`)
+- `PATCH /quotes/:id/assign` ya no bloquea de plano a VENDEDOR — le permite asignarse a sí mismo (`sellerId === req.user.id`) únicamente si la cotización está sin vendedor; 403 si ya tiene dueño o si intenta asignarle a otro.
+- En `QuoteDetail`, el lápiz "Cambiar vendedor" se reemplaza por un botón "Asignarme esta cotización" (sin dropdown) cuando el usuario es VENDEDOR y la cotización está libre; no se muestra nada si ya tiene dueño.
+
+**Sync de mail — disparo al abrir el CRM + ventana laboral** (`server.js`, `routes/mail.js`, `crm-interact.jsx`, `crm-app.jsx`, `crm-views.jsx`)
+- Motivación: el timer automático corría fijo cada 1-2h las 24hs/7 días (sin importar uso real), gastando cuota de cómputo de Neon (plan Free, 100 CU-hora/mes) de noche y fin de semana sin beneficio.
+- `POST /api/mail/sync` dejó de ser admin-only — cualquier rol autenticado puede dispararlo (no expone cuentas ni credenciales IMAP, solo corre el sync). Cooldown compartido de 10 min (`lastTriggeredSyncAt`, en memoria) entre **todos** los disparadores — evita relanzar el sync completo de más.
+- Disparador principal: `crm-interact.jsx` (`AppProvider`) llama `CrmApi.syncMail()` en segundo plano al montar la app si hay un token válido — cubre tanto login fresco como reabrir la pestaña con sesión recordada (7 días). No bloquea el login.
+- Botón manual "Sincronizar" en el topbar (`crm-app.jsx`, `Topbar`), visible para todos los roles.
+- El timer automático de fondo (`scheduleMailSync()` en `server.js`) sigue siendo la red de respaldo, pero ahora respeta una ventana configurable de días + horario (`mail_sync_window_*`, ver Settings arriba) — fuera de la ventana no corre. Toggle para desactivar la restricción y volver al comportamiento de siempre (correr sin importar hora/día).
+- Sync siempre procesa **todas** las cuentas configuradas — no existe el concepto de "cuenta propia" por vendedor, las casillas son compartidas por la empresa.
 
 ### Known issues / audit backlog
 
