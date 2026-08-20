@@ -1,5 +1,6 @@
 const express = require('express');
 const fs = require('fs');
+const path = require('path');
 const crypto = require('crypto');
 const { authMiddleware, isDeveloper } = require('../middleware/auth');
 const { parseFlexxusPDF, isFlexxusPDF, isNotaPedidoPDF, parseNotaPedidoPDF } = require('../services/flexxusParser');
@@ -169,6 +170,104 @@ router.post('/reparse-apply', authMiddleware, requireDeveloper, async (req, res)
     res.json({ ok: true, applied, skipped });
   } catch (err) {
     console.error('reparse-apply error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Diagnóstico de storage (Volume de Railway) ──────────────────────────────
+// Solo lectura: recorre las carpetas de uploads y las cruza con la base para
+// detectar archivos huérfanos (en disco pero sin registro que los referencie) y
+// registros rotos (en la base pero sin archivo en disco). No borra nada.
+const UPLOADS_ROOT = path.join(__dirname, '..', '..', 'uploads');
+
+function scanDir(dirPath) {
+  if (!fs.existsSync(dirPath)) return [];
+  return fs.readdirSync(dirPath)
+    .map(name => {
+      const full = path.join(dirPath, name);
+      try {
+        const st = fs.statSync(full);
+        if (!st.isFile()) return null;
+        return { name, size: st.size, mtime: st.mtime };
+      } catch { return null; }
+    })
+    .filter(Boolean);
+}
+
+const sumSize = (files) => files.reduce((s, f) => s + (f.size || 0), 0);
+const sampleOf = (files, n = 15) => files
+  .slice()
+  .sort((a, b) => b.size - a.size)
+  .slice(0, n)
+  .map(f => ({ name: f.name, size: f.size, mtime: f.mtime }));
+
+// GET /api/admin/storage-report — no escribe nada
+router.get('/storage-report', authMiddleware, requireDeveloper, async (req, res) => {
+  try {
+    const attachmentsDir = path.join(UPLOADS_ROOT, 'attachments');
+    const feedbackDir    = path.join(UPLOADS_ROOT, 'feedback');
+    const avatarsDir     = path.join(UPLOADS_ROOT, 'avatars');
+
+    const [diskAttachments, diskFeedback, diskAvatars] = [
+      scanDir(attachmentsDir), scanDir(feedbackDir), scanDir(avatarsDir),
+    ];
+
+    // Referencias vivas en la base
+    const dbAttachments = await prisma.attachment.findMany({ select: { filename: true, path: true } });
+    const dbPosts       = await prisma.feedbackPost.findMany({ where: { imageUrl: { not: null } }, select: { imageUrl: true } });
+
+    // Match por basename: Attachment.path guarda ruta absoluta (distinta entre
+    // local y Railway), así que el nombre de archivo es el criterio confiable.
+    const refAttachments = new Set();
+    for (const a of dbAttachments) {
+      if (a.filename) refAttachments.add(a.filename);
+      if (a.path)     refAttachments.add(path.basename(a.path));
+    }
+    const refFeedback = new Set(
+      dbPosts.map(p => { try { return path.basename(p.imageUrl); } catch { return null; } }).filter(Boolean)
+    );
+
+    const orphanAttachments = diskAttachments.filter(f => !refAttachments.has(f.name));
+    const orphanFeedback    = diskFeedback.filter(f => !refFeedback.has(f.name));
+    // Los avatares hoy viven en la base como data-URL (users.js) — la carpeta es legacy
+    const orphanAvatars     = diskAvatars;
+
+    // Caso inverso: registros que apuntan a archivos que ya no están
+    const diskAttachmentNames = new Set(diskAttachments.map(f => f.name));
+    const missingAttachments  = dbAttachments.filter(a => {
+      const base = a.filename || (a.path ? path.basename(a.path) : null);
+      return base && !diskAttachmentNames.has(base);
+    });
+
+    const folder = (label, all, orphans, note) => ({
+      label,
+      totalFiles: all.length,
+      totalBytes: sumSize(all),
+      orphanFiles: orphans.length,
+      orphanBytes: sumSize(orphans),
+      orphanSample: sampleOf(orphans),
+      note: note || null,
+    });
+
+    const folders = [
+      folder('attachments', diskAttachments, orphanAttachments, 'PDFs de cotizaciones, presupuestos y notas de pedido'),
+      folder('feedback',    diskFeedback,    orphanFeedback,    'Capturas de pantalla de los reportes del Foro'),
+      folder('avatars',     diskAvatars,     orphanAvatars,     'Carpeta legacy — los avatares hoy se guardan en la base, nada lee de acá'),
+    ];
+
+    res.json({
+      generatedAt: new Date().toISOString(),
+      uploadsRoot: UPLOADS_ROOT,
+      totalFiles:  folders.reduce((s, f) => s + f.totalFiles, 0),
+      totalBytes:  folders.reduce((s, f) => s + f.totalBytes, 0),
+      orphanFiles: folders.reduce((s, f) => s + f.orphanFiles, 0),
+      orphanBytes: folders.reduce((s, f) => s + f.orphanBytes, 0),
+      folders,
+      missingFiles: missingAttachments.length,
+      missingSample: missingAttachments.slice(0, 15).map(a => a.filename || path.basename(a.path || '')),
+    });
+  } catch (err) {
+    console.error('storage-report error:', err);
     res.status(500).json({ error: err.message });
   }
 });

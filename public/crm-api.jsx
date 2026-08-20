@@ -35,6 +35,14 @@ async function apiFetch(path, options = {}) {
     throw new Error('Sesión expirada');
   }
 
+  if (res.status === 503) {
+    const body = await res.json().catch(() => ({}));
+    if (body.error === 'maintenance') {
+      window.dispatchEvent(new Event('crm:maintenance'));
+      throw new Error('maintenance');
+    }
+  }
+
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error || `Error ${res.status}`);
@@ -229,6 +237,7 @@ const CrmApi = {
   }),
 
   // Admin — reparseo de PDFs Flexxus
+  getStorageReport: () => apiFetch('/admin/storage-report'),
   getReparseCandidates: () => apiFetch('/admin/reparse-candidates'),
   reparsePreview: (quoteIds) => apiFetch('/admin/reparse-preview', {
     method: 'POST', body: JSON.stringify({ quoteIds }),
@@ -405,6 +414,9 @@ async function loadAllData() {
       activity,
     };
   } catch (err) {
+    // El modo mantenimiento se maneja aparte (pantalla dedicada en AppRoot) —
+    // no lo tratamos como un simple "no se pudo conectar".
+    if (err.message === 'maintenance') throw err;
     console.warn('⚠️ Could not load API data, using defaults:', err.message);
     return null;
   }

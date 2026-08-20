@@ -410,7 +410,40 @@ function AppProvider({ children }) {
       {children}
       <ModalHost/>
       <ToastHost/>
+      <MaintenanceOverlay/>
     </AppCtx.Provider>
+  );
+}
+
+// ---------- Maintenance Overlay ----------
+// Se activa cuando cualquier pedido a la API vuelve con { error: 'maintenance' }
+// (ver apiFetch en crm-api.jsx). Solo DEVELOPER queda exento del bloqueo del
+// lado del servidor, así que este cartel es lo único que ve todo el resto.
+function MaintenanceOverlay() {
+  const [show, setShow] = React.useState(false);
+  React.useEffect(() => {
+    const onMaintenance = () => setShow(true);
+    window.addEventListener('crm:maintenance', onMaintenance);
+    return () => window.removeEventListener('crm:maintenance', onMaintenance);
+  }, []);
+  if (!show) return null;
+  return (
+    <div className="fixed inset-0 z-[100] bg-navy-950/95 backdrop-blur-sm flex items-center justify-center p-6">
+      <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-7 text-center">
+        <div className="w-12 h-12 rounded-xl bg-amber-100 flex items-center justify-center mx-auto mb-4">
+          <Icon name="wrench" size={22} className="text-amber-600"/>
+        </div>
+        <div className="font-semibold text-base text-ink-800 mb-1.5">Sistema en mantenimiento</div>
+        <div className="text-[13px] text-ink-500 leading-relaxed mb-5">
+          Estamos haciendo un ajuste puntual. Volvé a intentar en unos minutos.
+        </div>
+        <button
+          onClick={() => window.location.reload()}
+          className="w-full py-2.5 rounded-lg bg-navy-900 text-white text-[13px] font-medium hover:bg-navy-800 transition-colors">
+          Reintentar
+        </button>
+      </div>
+    </div>
   );
 }
 

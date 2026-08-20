@@ -14,6 +14,7 @@ function AppRoot() {
   const [apiData, setApiData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  const [maintenance, setMaintenance] = useState(false);
   const [retry, setRetry] = useState(0);
 
   // On login or if already has token, load API data
@@ -21,6 +22,7 @@ function AppRoot() {
     if (!logged) { setLoading(false); return; }
     setLoading(true);
     setLoadError(false);
+    setMaintenance(false);
     loadAllData().then(data => {
       if (data) {
         // Replace window globals with API data
@@ -43,7 +45,11 @@ function AppRoot() {
         setLoadError(true);
         setLoading(false);
       }
-    }).catch(() => { setLoadError(true); setLoading(false); });
+    }).catch(err => {
+      if (err.message === 'maintenance') setMaintenance(true);
+      else setLoadError(true);
+      setLoading(false);
+    });
   }, [logged, retry]);
 
   if (!logged) return <Login onLogin={() => setLogged(true)} />;
@@ -63,6 +69,30 @@ function AppRoot() {
           <div className="text-white/50 text-[13px] mt-1">Cargando sistema</div>
           <div className="text-white/25 text-[11px]">Conectando con la base de datos</div>
         </div>
+      </div>
+    </div>
+  );
+
+  if (maintenance) return (
+    <div className="min-h-screen flex items-center justify-center bg-navy-950 p-6">
+      <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-7 text-center">
+        <div className="w-12 h-12 rounded-xl bg-amber-100 flex items-center justify-center mx-auto mb-4">
+          <Icon name="wrench" size={22} className="text-amber-600"/>
+        </div>
+        <div className="font-semibold text-base text-ink-800 mb-1.5">Sistema en mantenimiento</div>
+        <div className="text-[13px] text-ink-500 leading-relaxed mb-5">
+          Estamos haciendo un ajuste puntual. Volvé a intentar en unos minutos.
+        </div>
+        <button
+          onClick={() => setRetry(r => r + 1)}
+          className="w-full py-2.5 rounded-lg bg-navy-900 text-white text-[13px] font-medium hover:bg-navy-800 transition-colors">
+          Reintentar
+        </button>
+        <button
+          onClick={() => { CrmAuth.clearToken(); localStorage.removeItem('crm_user'); window.location.reload(); }}
+          className="mt-2 w-full text-ink-400 hover:text-ink-600 text-[13px] py-2 transition-colors">
+          Cerrar sesión
+        </button>
       </div>
     </div>
   );

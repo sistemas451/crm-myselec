@@ -5,6 +5,11 @@ const prisma = require('../db');
 const router = express.Router();
 
 const DEFAULTS = {
+  // ── Mantenimiento ────────────────────────────────────────────────────────
+  // Bloquea el acceso a toda la API salvo rol DEVELOPER (ver middleware/auth.js).
+  // Solo DEVELOPER puede prender/apagarlo — ver guardia en el PATCH de abajo.
+  maintenance_mode:            'false',
+
   // ── Mail sync ─────────────────────────────────────────────────────────────
   mail_sync_interval_hours:    '2',
   mail_lookback_days:          '2',
@@ -106,6 +111,14 @@ router.get('/', authMiddleware, adminOrDevMiddleware, async (req, res) => {
 router.patch('/', authMiddleware, adminOrDevMiddleware, async (req, res) => {
   try {
     const updates = req.body; // { key: value, ... }
+
+    // maintenance_mode bloquea a todos salvo DEVELOPER — un ADMIN que lo prenda
+    // quedaría afuera en su siguiente pedido y no podría revertirlo. Restringido
+    // a DEVELOPER para que quien lo activa siempre pueda desactivarlo.
+    if ('maintenance_mode' in updates && !isDeveloper(req.user)) {
+      return res.status(403).json({ error: 'Solo un Desarrollador puede cambiar el modo mantenimiento.' });
+    }
+
     for (const [key, value] of Object.entries(updates)) {
       await prisma.appSetting.upsert({
         where:  { key },

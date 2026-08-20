@@ -5039,12 +5039,41 @@ function Comparativa() {
 
 // ─── DeveloperSettings — Tab visible solo para DEVELOPER ────────────────────
 function DeveloperSettings() {
-  const { users: allUsersCtx } = useApp();
+  const { users: allUsersCtx, pushToast } = useApp();
   const [notifyIds, setNotifyIds] = useState([]);
   const [allUsers,  setAllUsers]  = useState([]);
   const [loading,   setLoading]   = useState(true);
   const [saving,    setSaving]    = useState(false);
   const [saved,     setSaved]     = useState(false);
+
+  // Modo mantenimiento
+  const [maintenanceOn,      setMaintenanceOn]      = useState(false);
+  const [maintenanceLoading, setMaintenanceLoading] = useState(true);
+  const [maintenanceSaving,  setMaintenanceSaving]  = useState(false);
+
+  useEffect(() => {
+    fetch('/api/settings', { headers: { Authorization: `Bearer ${localStorage.getItem('crm_token')}` } })
+      .then(r => r.json())
+      .then(s => setMaintenanceOn(s.maintenance_mode === 'true'))
+      .catch(() => {})
+      .finally(() => setMaintenanceLoading(false));
+  }, []);
+
+  const toggleMaintenance = async () => {
+    const next = !maintenanceOn;
+    if (next && !window.confirm('Esto bloquea el acceso a todo el equipo salvo tu usuario. ¿Confirmás activarlo?')) return;
+    setMaintenanceSaving(true);
+    try {
+      await fetch('/api/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('crm_token')}` },
+        body: JSON.stringify({ maintenance_mode: String(next) }),
+      });
+      setMaintenanceOn(next);
+      pushToast(next ? 'Mantenimiento activado' : 'Mantenimiento desactivado', next ? 'warn' : 'ok');
+    } catch { pushToast('Error al cambiar el modo mantenimiento', 'bad'); }
+    finally { setMaintenanceSaving(false); }
+  };
 
   // Reparseo de PDFs Flexxus
   const [reparseCands,    setReparseCands]    = useState([]);
@@ -5055,6 +5084,27 @@ function DeveloperSettings() {
   const [reparsePreviewing, setReparsePreviewing] = useState(false);
   const [reparseApplying, setReparseApplying] = useState(false);
   const [reparseResult,   setReparseResult]   = useState(null);
+
+  // Diagnóstico de storage (Volume) — solo lectura
+  const [storage,        setStorage]        = useState(null);
+  const [storageLoading, setStorageLoading] = useState(false);
+  const [storageError,   setStorageError]   = useState('');
+
+  const loadStorageReport = () => {
+    setStorageLoading(true);
+    setStorageError('');
+    CrmApi.getStorageReport()
+      .then(setStorage)
+      .catch(e => setStorageError(e.message || 'Error al generar el reporte'))
+      .finally(() => setStorageLoading(false));
+  };
+
+  const fmtBytes = (n) => {
+    if (!n) return '0 B';
+    const u = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.min(Math.floor(Math.log(n) / Math.log(1024)), u.length - 1);
+    return `${(n / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${u[i]}`;
+  };
 
   const loadReparseCandidates = () => {
     setReparseLoadingCands(true);
@@ -5204,6 +5254,130 @@ function DeveloperSettings() {
             className="flex items-center gap-1.5 px-4 py-1.5 bg-brand text-white rounded-lg text-xs font-medium hover:bg-brand/90 disabled:opacity-50">
             {saving ? <><Icon name="loader" size={11} className="animate-spin"/>Guardando…</> : saved ? <><Icon name="check" size={11}/>Guardado</> : 'Guardar cambios'}
           </button>
+        </div>
+      </div>
+
+      {/* Sección: modo mantenimiento */}
+      <div className={cx('border rounded-xl overflow-hidden shadow-sm', maintenanceOn ? 'bg-amber-50 border-amber-300' : 'bg-white border-slate-200')}>
+        <div className="px-5 py-4 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <Icon name="wrench" size={14} className={maintenanceOn ? 'text-amber-600' : 'text-brand'}/>
+            <div className="min-w-0">
+              <div className="font-semibold text-sm text-slate-700">Modo mantenimiento</div>
+              <div className="text-[11px] text-slate-400">
+                Bloquea el acceso a todo el equipo salvo tu usuario. Ideal antes de un cambio que necesite el sistema quieto.
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={toggleMaintenance}
+            disabled={maintenanceLoading || maintenanceSaving}
+            className="flex items-center gap-2 text-[12px] shrink-0 disabled:opacity-50"
+          >
+            <span className={cx('text-[11px] font-medium', maintenanceOn ? 'text-amber-700' : 'text-ink-400')}>
+              {maintenanceOn ? 'Activado' : 'Desactivado'}
+            </span>
+            <div className={cx('w-10 h-5 rounded-full relative transition-colors', maintenanceOn ? 'bg-amber-500' : 'bg-ink-300')}>
+              <div className={cx('absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all', maintenanceOn ? 'left-[22px]' : 'left-0.5')}/>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      {/* Sección: diagnóstico de storage (Volume de Railway) */}
+      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+        <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
+          <Icon name="hard-drive" size={14} className="text-brand"/>
+          <span className="font-semibold text-sm text-slate-700">Uso del disco (Volume)</span>
+          <span className="ml-auto text-[11px] text-slate-400">Solo lectura — no borra nada</span>
+        </div>
+
+        <div className="px-5 py-4">
+          <p className="text-[12.5px] text-slate-500 leading-relaxed mb-3">
+            Cruza los archivos que hay en disco contra los registros de la base. Un archivo
+            <strong> huérfano</strong> es uno que quedó en el disco pero que ya no está referenciado por
+            ninguna cotización ni publicación — ocupa lugar sin que nadie pueda verlo ni usarlo.
+          </p>
+
+          <button onClick={loadStorageReport} disabled={storageLoading}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-brand text-white rounded-lg text-xs font-medium hover:bg-brand/90 disabled:opacity-50">
+            <Icon name={storageLoading ? 'loader' : 'search'} size={12} className={storageLoading ? 'animate-spin' : ''}/>
+            {storageLoading ? 'Analizando…' : storage ? 'Volver a analizar' : 'Analizar disco'}
+          </button>
+
+          {storageError && (
+            <div className="mt-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2.5 text-[12.5px] text-red-700">
+              {storageError}
+            </div>
+          )}
+
+          {storage && (
+            <div className="mt-4 space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
+                  <div className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Total en disco</div>
+                  <div className="text-lg font-bold text-slate-800 mt-0.5">{fmtBytes(storage.totalBytes)}</div>
+                  <div className="text-[11px] text-slate-500">{storage.totalFiles} archivo{storage.totalFiles !== 1 ? 's' : ''}</div>
+                </div>
+                <div className={cx('border rounded-lg px-4 py-3',
+                  storage.orphanFiles > 0 ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200')}>
+                  <div className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Recuperable (huérfanos)</div>
+                  <div className={cx('text-lg font-bold mt-0.5', storage.orphanFiles > 0 ? 'text-amber-700' : 'text-emerald-700')}>
+                    {fmtBytes(storage.orphanBytes)}
+                  </div>
+                  <div className="text-[11px] text-slate-500">{storage.orphanFiles} archivo{storage.orphanFiles !== 1 ? 's' : ''}</div>
+                </div>
+              </div>
+
+              <div className="border border-slate-200 rounded-lg overflow-hidden">
+                {storage.folders.map((f, i) => (
+                  <div key={f.label} className={cx('px-4 py-3', i > 0 && 'border-t border-slate-100')}>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-[12px] font-semibold text-slate-700">{f.label}/</span>
+                      <span className="text-[11.5px] text-slate-500">
+                        {f.totalFiles} archivo{f.totalFiles !== 1 ? 's' : ''} · {fmtBytes(f.totalBytes)}
+                      </span>
+                      {f.orphanFiles > 0 && (
+                        <span className="ml-auto text-[11px] font-semibold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
+                          {f.orphanFiles} huérfano{f.orphanFiles !== 1 ? 's' : ''} · {fmtBytes(f.orphanBytes)}
+                        </span>
+                      )}
+                      {f.orphanFiles === 0 && f.totalFiles > 0 && (
+                        <span className="ml-auto text-[11px] font-medium text-emerald-700">Todo referenciado ✓</span>
+                      )}
+                    </div>
+                    {f.note && <div className="text-[11px] text-slate-400 mt-1">{f.note}</div>}
+                    {f.orphanSample.length > 0 && (
+                      <details className="mt-2">
+                        <summary className="text-[11.5px] text-brand cursor-pointer hover:underline">
+                          {f.orphanSample.length === 1 ? 'Ver el archivo' : `Ver los ${f.orphanSample.length} más pesados`}
+                        </summary>
+                        <div className="mt-1.5 space-y-1">
+                          {f.orphanSample.map(s => (
+                            <div key={s.name} className="flex items-center gap-2 text-[11px] text-slate-500">
+                              <span className="truncate font-mono">{s.name}</span>
+                              <span className="ml-auto shrink-0 text-slate-400">{fmtBytes(s.size)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {storage.missingFiles > 0 && (
+                <div className="bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
+                  <div className="text-[12px] font-medium text-slate-700">
+                    {storage.missingFiles} adjunto{storage.missingFiles !== 1 ? 's' : ''} sin archivo en disco
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-0.5">
+                    Registros en la base que apuntan a un archivo que ya no existe — el CRM los muestra pero no se pueden descargar.
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

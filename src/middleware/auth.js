@@ -28,6 +28,15 @@ async function authMiddleware(req, res, next) {
             }
           }
         }
+
+        // Modo mantenimiento: bloquea a todos salvo DEVELOPER. Reutiliza este
+        // mismo viaje a la base en vez de agregar una consulta aparte.
+        if (decoded.role !== 'DEVELOPER') {
+          const maint = await prisma.appSetting.findUnique({ where: { key: 'maintenance_mode' } });
+          if (maint?.value === 'true') {
+            return res.status(503).json({ error: 'maintenance', message: 'El sistema está en mantenimiento. Volvé en unos minutos.' });
+          }
+        }
       } catch (dbErr) {
         // Si la DB no responde, rechazar con 503 en lugar de dejar pasar silenciosamente.
         // Esto evita que usuarios desactivados sean autenticados durante ventanas de latencia.
