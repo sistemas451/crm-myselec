@@ -23,7 +23,7 @@ const helmet    = require('helmet');
 const rateLimit = require('express-rate-limit');
 const prisma    = require('./db');
 const { authMiddleware } = require('./middleware/auth');
-const { runIdleCheck, runStageAlerts, runWeeklyReport } = require('./services/notifier');
+const { runIdleCheck, runStageAlerts } = require('./services/notifier');
 const { syncMails }    = require('./services/mailReader');
 const { parseFlexxusPDF, isFlexxusPDF } = require('./services/flexxusParser');
 
@@ -534,14 +534,11 @@ app.listen(PORT, () => {
     runStageAlerts().catch(e => console.error('stage alerts initial error:', e.message));
   }, 60 * 1000);
 
-  // Resumen semanal — chequea cada 5 min y actúa solo el día/hora configurados.
-  // Intervalo corto a propósito: como el proceso se reinicia seguido (cada deploy),
-  // un intervalo de 60 min podía pasar semanas sin coincidir nunca con la ventana
-  // configurada. runWeeklyReport() ya es liviana cuando no coincide (solo lee 3
-  // AppSetting) y tiene dedup interno por weekly_report_last_sent.
-  setInterval(() => {
-    runWeeklyReport().catch(e => console.error('weekly report error:', e.message));
-  }, 5 * 60 * 1000);
+  // Nota: el envío automático del resumen semanal (antes un setInterval acá) se sacó —
+  // nunca llegó a mandarse en la práctica y el chequeo periódico mantenía el cómputo
+  // de Neon siempre despierto, sin dejarlo suspender (ver CLAUDE.md). El envío manual
+  // sigue disponible: botón "Probar" en Config → Alertas (DEVELOPER) y el endpoint
+  // POST /notifications/cron/weekly-report para un cron externo si algún día se usa.
 
   // true si "ahora" (hora Argentina, UTC-3) cae dentro de los días/horario configurados
   function isWithinSyncWindow(days, startHour, endHour) {
