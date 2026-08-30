@@ -975,10 +975,13 @@ async function processSentMail(parsed, mailData, imap) {
   if (!client) console.log(`   ⚠️  Sin match de cliente para To: ${toAddr}`);
 
   // ── Determinar vendedor: buscar usuario por dirección From: ───────────────
-  let sellerId = client?.defaultSellerId || null;
+  // Solo usuarios ACTIVOS: asignar a una cuenta desactivada deja la cotización
+  // huérfana — la pantalla no puede resolver el nombre y la muestra "Sin asignar",
+  // y ningún filtro de vendedor la encuentra (el filtro solo lista activos).
+  let sellerId = client?.defaultSeller?.active ? client.defaultSellerId : null;
   if (fromAddr) {
     try {
-      const vendedor = await prisma.user.findFirst({ where: { email: { equals: fromAddr, mode: 'insensitive' } } });
+      const vendedor = await prisma.user.findFirst({ where: { email: { equals: fromAddr, mode: 'insensitive' }, active: true } });
       if (vendedor) {
         sellerId = vendedor.id;
         console.log(`   👤 Vendedor detectado por From:: ${vendedor.name}`);
@@ -1439,11 +1442,14 @@ async function processEmail(mailData, imap) {
     if (!client) console.log(`   ⚠️  Sin match de cliente para ${originalSender}`);
 
     // ── Mejora 1: vendedor = cuenta IMAP (prioridad) > defaultSeller del cliente ─
+    // Solo usuarios ACTIVOS en ambos caminos: asignar a una cuenta desactivada deja
+    // la cotización huérfana — la pantalla no puede resolver el nombre y la muestra
+    // "Sin asignar", y ningún filtro de vendedor la encuentra (solo lista activos).
     let sellerId = null;
     if (mailData.accountEmail) {
       try {
         const vendedor = await prisma.user.findFirst({
-          where: { email: { equals: mailData.accountEmail, mode: 'insensitive' } },
+          where: { email: { equals: mailData.accountEmail, mode: 'insensitive' }, active: true },
         });
         if (vendedor) {
           sellerId = vendedor.id;
@@ -1451,7 +1457,7 @@ async function processEmail(mailData, imap) {
         }
       } catch (_) {}
     }
-    if (!sellerId) sellerId = client?.defaultSellerId || null;
+    if (!sellerId && client?.defaultSeller?.active) sellerId = client.defaultSellerId;
 
     // ── Crear cotización ──────────────────────────────────────────────────
     const year = new Date().getFullYear();
