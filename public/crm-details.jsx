@@ -930,11 +930,11 @@ function LinkQuotePicker({ onClose, candidates, title, subtitle, emptyText, conf
 }
 
 function QuoteDetail({ code, onClose, canReassign }) {
-  const { quotes, clients, users, moveQuoteStage, setQuotes, setOrders, pushToast, closeModal, openModal, updateQuote, currentUserId, roleKey } = useApp();
+  const { quotes, clients, users, allUsers, moveQuoteStage, setQuotes, setOrders, pushToast, closeModal, openModal, updateQuote, currentUserId, roleKey } = useApp();
   const q = quotes.find(x => x.code === code);
   if (!q) return null;
   const cli = clients.find(c=>c.code===q.client);
-  const sel = users.find(u=>u.id===q.seller);
+  const sel = allUsers.find(u=>u.id===q.seller);
   const stg = STAGES_F1.find(s=>s.id===q.stage);
   const isSolicitud = q.mailType === 'SOLICITUD' || (q.source === 'EMAIL' && !q.mailType);
   const isOC = q.mailType === 'OC';
@@ -1545,7 +1545,10 @@ function QuoteDetail({ code, onClose, canReassign }) {
             </span>
           }>
             {sel
-              ? <div className="flex items-center gap-2"><Avatar name={sel.name} size={20}/>{sel.name}</div>
+              ? <div className="flex items-center gap-2">
+                  <Avatar name={sel.name} size={20}/>{sel.name}
+                  {sel.active === false && <span className="text-[11px] text-ink-400">(inactivo)</span>}
+                </div>
               : <span className="text-ink-400">Sin asignar</span>}
           </Field>
           <Field label="Ingreso">
@@ -2304,12 +2307,12 @@ function QuoteDetail({ code, onClose, canReassign }) {
 }
 
 function OrderDetail({ code, onClose, canReassign }) {
-  const { orders, clients, users, quotes, moveOrderStage, pushToast, openModal, setOrders, setQuotes, currentUserId } = useApp();
+  const { orders, clients, users, allUsers, quotes, moveOrderStage, pushToast, openModal, setOrders, setQuotes, currentUserId } = useApp();
   const o = orders.find(x=>x.code===code);
   if (!o) return null;
 
   const cli  = clients.find(c=>c.code===o.client);
-  const sel  = users.find(u=>u.id===o.seller);
+  const sel  = allUsers.find(u=>u.id===o.seller);
   const stg  = STAGES_F2.find(s=>s.id===o.stage);
   // For email-OC orders, the record lives in the Quote table → use quote endpoints
   const isQuoteSource = o._source === 'QUOTE';
@@ -2685,7 +2688,10 @@ function OrderDetail({ code, onClose, canReassign }) {
             </span>
           ) : 'Vendedor'}>
             {sel
-              ? <div className="flex items-center gap-2"><Avatar name={sel.name} size={20}/>{sel.name}</div>
+              ? <div className="flex items-center gap-2">
+                  <Avatar name={sel.name} size={20}/>{sel.name}
+                  {sel.active === false && <span className="text-[11px] text-ink-400">(inactivo)</span>}
+                </div>
               : <span className="text-ink-400">Sin asignar</span>
             }
           </Field>

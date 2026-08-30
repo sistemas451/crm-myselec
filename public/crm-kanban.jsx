@@ -22,9 +22,9 @@ function EmptyCol() {
 }
 
 function QuoteCard({ q, onOpen, compact }) {
-  const { clients, users } = useApp();
+  const { clients, allUsers } = useApp();
   const cli = clients.find(c=>c.code===q.client);
-  const sel = users.find(u=>u.id===q.seller);
+  const sel = allUsers.find(u=>u.id===q.seller);
   const overdue = q.dias >= 5 && !['aceptada','rechazada'].includes(q.stage);
   // Seguimiento vencido: está en "enviado" y el followUpDate ya pasó
   const followUpOverdue = q.stage === 'enviado' && q.followUpDate && new Date(q.followUpDate) <= new Date();
@@ -113,9 +113,9 @@ function QuoteCard({ q, onOpen, compact }) {
 
 // Tarjeta combinada: PRESUPUESTO (arriba, grande) + SOLICITUD vinculada (abajo, chica)
 function PairedQuoteCard({ pres, sol, onOpenPres, onOpenSol }) {
-  const { clients, users } = useApp();
+  const { clients, allUsers } = useApp();
   const cli = clients.find(c => c.code === pres.client);
-  const sel = users.find(u => u.id === pres.seller);
+  const sel = allUsers.find(u => u.id === pres.seller);
   const displayName = cli?.name || pres.emailSubject || 'Sin cliente asignado';
   const displaySub  = cli ? `${cli.city || ''}${cli.city && cli.prov ? ', ' : ''}${cli.prov || ''}` : '';
   return (
@@ -170,9 +170,9 @@ function PairedQuoteCard({ pres, sol, onOpenPres, onOpenSol }) {
 }
 
 function OrderCard({ o, onOpen, compact }) {
-  const { clients, users } = useApp();
+  const { clients, allUsers } = useApp();
   const cli = clients.find(c=>c.code===o.client);
-  const sel = users.find(u=>u.id===o.seller);
+  const sel = allUsers.find(u=>u.id===o.seller);
   const displayName = cli?.name || o.clientName || o.emailSubject || 'Sin cliente';
   return (
     <div onClick={onOpen} className="kcard bg-white border border-line/80 rounded-xl p-3.5 cursor-pointer">

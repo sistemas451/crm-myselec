@@ -7,9 +7,14 @@ const router = express.Router();
 // GET /api/data/users
 router.get('/users', authMiddleware, async (req, res) => {
   try {
+    // Devuelve TODOS los usuarios (incluidos los desactivados) con la marca `active`.
+    // Los desactivados hacen falta para poder RESOLVER el nombre del vendedor en
+    // cotizaciones viejas: si no vienen, la pantalla no lo encuentra y muestra
+    // "Sin asignar" aunque la cotizacion SI tenga vendedor en la base.
+    // El frontend expone `users` (solo activos, para los desplegables donde se
+    // asigna) y `allUsers` (todos, solo para mostrar nombres).
     const users = await prisma.user.findMany({
-      where: { active: true },
-      select: { id: true, name: true, email: true, role: true, zone: true, avatar: true },
+      select: { id: true, name: true, email: true, role: true, zone: true, avatar: true, active: true },
       orderBy: { name: 'asc' },
     });
     res.json(users);

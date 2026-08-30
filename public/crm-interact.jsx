@@ -22,7 +22,9 @@ function AppProvider({ children }) {
   const [quotes, setQuotes]   = useS(() => [...QUOTES]);
   const [orders, setOrders]   = useS(() => [...ORDERS]);
   const [clients, setClients] = useS(() => [...CLIENTS]);
-  const [users, setUsers]     = useS(() => [...USERS]);
+  // allUsers = todos (incluye desactivados) — solo para RESOLVER nombres.
+  // users    = solo activos — es lo que consumen los desplegables donde se asigna.
+  const [allUsers, setUsers]  = useS(() => [...USERS]);
   const [activity, setActivity] = useS(() => [...ACTIVITY]);
   const [comments, setComments] = useS(() => ({...COMMENTS}));
   const [notifications, setNotifications] = useS([]);
@@ -163,6 +165,7 @@ function AppProvider({ children }) {
   const roleMap = { DEVELOPER: 'Desarrollador', ADMIN: 'Administrador', VENDEDOR: 'Vendedor', LOGISTICA: 'Logística' };
   const mapUsersArr = (arr) => arr.map(u => ({
     id: u.id, name: u.name, email: u.email, role: roleMap[u.role] || u.role, zone: u.zone || '—',
+    active: u.active !== false,
   }));
 
   const doSync = useRef(null);
@@ -407,8 +410,10 @@ function AppProvider({ children }) {
   const closeModal = useCallback(() => setModals(m => m.slice(0, -1)), []);
   const closeAllModals = useCallback(() => setModals([]), []);
 
+  const users = useMemo(() => allUsers.filter(u => u.active !== false), [allUsers]);
+
   const value = {
-    quotes, setQuotes, orders, setOrders, clients, setClients, users, setUsers, activity, comments, notifications,
+    quotes, setQuotes, orders, setOrders, clients, setClients, users, allUsers, setUsers, activity, comments, notifications,
     inboxAlerts, setInboxAlerts, snoozeAlert, markInboxSeen, ackAssigned, ackMention,
     quoteFilters, setQuoteFilters, orderFilters, setOrderFilters,
     currentUserId, setCurrentUserId, roleKey, setRoleKey,
