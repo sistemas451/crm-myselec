@@ -109,10 +109,19 @@ function AppProvider({ children }) {
       setInboxAlerts((alerts || []).filter(a => !isSnoozed(a.id)));
     }).catch(() => {});
   };
+  // Solo consulta mientras la pestaña está a la vista (evita mantener despierto
+  // el compute de Neon sin nadie mirando). Al volver: refresco inmediato.
   useEff(() => {
-    loadInboxAlerts.current();
-    const t = setInterval(() => loadInboxAlerts.current(), 3 * 60 * 1000);
-    return () => clearInterval(t);
+    let t = null;
+    const stop  = () => { if (t) { clearInterval(t); t = null; } };
+    const start = () => { stop(); t = setInterval(() => loadInboxAlerts.current(), 3 * 60 * 1000); };
+    if (!document.hidden) { loadInboxAlerts.current(); start(); }
+    const onVis = () => {
+      if (document.hidden) stop();
+      else { loadInboxAlerts.current(); start(); }
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { stop(); document.removeEventListener('visibilitychange', onVis); };
   }, []);
 
   // ── Confirmar cotización asignada vista ("Listo ✓") ───────────────────────────
@@ -135,11 +144,12 @@ function AppProvider({ children }) {
     try { await CrmApi.ackMention(noteId); } catch (e) { console.warn('ack error:', e.message); }
   }, []);
 
-  // ── Smart sync: polling inteligente cada 25s (activo) / 2min (oculto) ────────
+  // ── Smart sync: polling cada 25s, solo mientras la pestaña está a la vista ───
+  // Con la pestaña oculta se corta del todo (evita mantener despierto el compute
+  // de Neon sin que nadie esté mirando) — al volver, sync inmediato + se retoma.
   const lastSyncTs  = useRef(new Date().toISOString());
   const syncCounts  = useRef({ quotes: 0, orders: 0, clients: 0, users: 0 });
   const POLL_ACTIVE = 25 * 1000;   // 25s con pestaña activa
-  const POLL_HIDDEN = 120 * 1000;  // 2min con pestaña oculta
 
   // Helpers para mapear clients y users al formato del frontend
   const mapClientsArr = (arr) => arr.map(c => ({
@@ -217,25 +227,29 @@ function AppProvider({ children }) {
     };
 
     let timer = null;
-    const schedule = () => {
-      const interval = document.hidden ? POLL_HIDDEN : POLL_ACTIVE;
-      timer = setTimeout(() => { doSync.current(); schedule(); }, interval);
+    const stop = () => { if (timer) { clearTimeout(timer); timer = null; } };
+    const scheduleActive = () => {
+      stop();
+      timer = setTimeout(() => { doSync.current(); scheduleActive(); }, POLL_ACTIVE);
     };
-    schedule();
+    if (!document.hidden) scheduleActive();
 
-    // Al volver a la pestaña: sync inmediato + refresh de inbox alerts
-    const onVisible = () => {
-      if (!document.hidden) {
+    // Al ocultar la pestaña: cortar el polling. Al volver: sync inmediato +
+    // retomar el polling activo. (La campanita maneja su propia visibilidad.)
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        stop();
+      } else {
         doSync.current();
-        loadInboxAlerts.current();
+        scheduleActive();
       }
     };
-    document.addEventListener('visibilitychange', onVisible);
-    return () => { clearTimeout(timer); document.removeEventListener('visibilitychange', onVisible); };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => { stop(); document.removeEventListener('visibilitychange', onVisibilityChange); };
   }, []);
 
   // Quote-level filters (shared by board)
-  const [quoteFilters, setQuoteFilters] = useS({ seller:'', client:'', period:'30d', zone:'', activity:'', min:'', max:'' });
+  const [quoteFilters, setQuoteFilters] = useS({ seller:'', client:'', period:'30d', zone:'', activity:'', min:'', max:'', sort:'recent' });
   const [orderFilters, setOrderFilters] = useS({ seller:'', client:'', period:'30d', min:'', max:'' });
 
   // Logged-in user (for notes)
@@ -2293,6 +2307,23 @@ function applyQuoteFilters(list, filters, clientsArr) {
     return true;
   });
 }
+// Orden de las tarjetas dentro de cada columna del tablero.
+// 'recent' = como viene del backend (createdAt desc). Las cotizaciones sin monto
+// (típicamente Solicitudes aún no presupuestadas) van al final, no como cero.
+function sortQuotes(list, sort) {
+  if (!sort || sort === 'recent') return list;
+  const dir = sort === 'amount_asc' ? 1 : -1;
+  const byRecent = (a, b) => new Date(b.ingreso) - new Date(a.ingreso);
+  return [...list].sort((a, b) => {
+    const av = a.monto, bv = b.monto;
+    const aNull = av == null || av === '', bNull = bv == null || bv === '';
+    if (aNull && bNull) return byRecent(a, b);
+    if (aNull) return 1;
+    if (bNull) return -1;
+    if (av === bv) return byRecent(a, b);
+    return (av - bv) * dir;
+  });
+}
 function applyOrderFilters(list, filters, clientsArr) {
   const periodStart = filters.period ? periodStartDate(filters.period) : null;
   return list.filter(o => {
@@ -2352,5 +2383,5 @@ Object.assign(window, {
   AppProvider, useApp, Modal,
   REJECT_REASONS,
   NotificationsPopover, MoreFiltersPopover, PopoverButton,
-  applyQuoteFilters, applyOrderFilters, countActiveFilters,
+  applyQuoteFilters, applyOrderFilters, countActiveFilters, sortQuotes,
 });

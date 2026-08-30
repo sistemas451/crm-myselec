@@ -506,6 +506,11 @@ function QuoteFiltersBar() {
     { value:'quarter', label:'Trimestre' },
     { value:'all', label:'Todo el histórico' },
   ];
+  const sortOptions = [
+    { value:'recent',      label:'Más recientes', icon:'clock' },
+    { value:'amount_desc', label:'Mayor monto',   icon:'arrow-down-wide-narrow' },
+    { value:'amount_asc',  label:'Menor monto',   icon:'arrow-up-narrow-wide' },
+  ];
   const activeSeller = users.find(u=>u.id===quoteFilters.seller);
   const me = users.find(u=>u.id===currentUserId);
 
@@ -538,6 +543,14 @@ function QuoteFiltersBar() {
         active={quoteFilters.period !== '30d'}
         onChange={(v)=>setQuoteFilters(s=>({...s, period:v}))}
         options={periodOptions}
+      />
+      <PopoverButton icon="arrow-down-wide-narrow"
+        label={sortOptions.find(o=>o.value===(quoteFilters.sort||'recent'))?.label || 'Ordenar'}
+        value={quoteFilters.sort || 'recent'}
+        active={!!quoteFilters.sort && quoteFilters.sort !== 'recent'}
+        onChange={(v)=>setQuoteFilters(s=>({...s, sort:v}))}
+        onClear={()=>setQuoteFilters(s=>({...s, sort:'recent'}))}
+        options={sortOptions}
       />
       <div className="w-px h-6 bg-line mx-1"/>
       <div className="relative">
@@ -595,7 +608,7 @@ function OrderFiltersBar() {
 
 function KanbanQuotes({ onOpen }) {
   const { quotes, clients, quoteFilters, openModal } = useApp();
-  const filtered = applyQuoteFilters(quotes, quoteFilters, clients);
+  const filtered = sortQuotes(applyQuoteFilters(quotes, quoteFilters, clients), quoteFilters.sort);
   return (
     <KanbanBoard
       title="Cotizaciones"

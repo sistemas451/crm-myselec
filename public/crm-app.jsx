@@ -176,9 +176,17 @@ function App() {
         }))
         .catch(() => {});
     };
-    fetchBadges();
-    const iv = setInterval(fetchBadges, 5 * 60 * 1000); // cada 5 min
-    return () => clearInterval(iv);
+    // Solo consulta mientras la pestaña está a la vista; al volver, refresca al instante.
+    let iv = null;
+    const stop  = () => { if (iv) { clearInterval(iv); iv = null; } };
+    const start = () => { stop(); iv = setInterval(fetchBadges, 5 * 60 * 1000); }; // cada 5 min
+    if (!document.hidden) { fetchBadges(); start(); }
+    const onVis = () => {
+      if (document.hidden) stop();
+      else { fetchBadges(); start(); }
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { stop(); document.removeEventListener('visibilitychange', onVis); };
   }, [roleKey]);
 
   // Cmd/Ctrl+K opens search
