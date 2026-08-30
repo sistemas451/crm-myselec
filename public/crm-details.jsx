@@ -763,6 +763,141 @@ function MentionPicker({ users, excludeId, onPick, onClose }) {
   );
 }
 
+// ---------- Selector de cotización para vincular (MYS-0011) ----------
+// Reemplaza el desplegable chico que solo mostraba código + cliente: cuando un
+// cliente tiene varias solicitudes abiertas se veían todas iguales y no había
+// forma de distinguirlas. Ahora cada candidata muestra fecha, asunto del mail,
+// monto y vendedor, y el panel derecho permite confirmar cuál es antes de vincular.
+// El cuerpo del mail se pide al SELECCIONAR (no al pasar el mouse) y queda
+// cacheado, para no disparar una consulta por cada movimiento del cursor.
+function LinkQuotePicker({ onClose, candidates, title, subtitle, emptyText, confirmLabel = 'Vincular', onConfirm, saving }) {
+  const [search, setSearch] = useState('');
+  const [selId,  setSelId]  = useState(null);
+  const [cache,  setCache]  = useState({});
+  const [loadingDetail, setLoadingDetail] = useState(false);
+
+  const needle = search.trim().toLowerCase();
+  const list = !needle ? candidates : candidates.filter(x =>
+    (x.code || '').toLowerCase().includes(needle) ||
+    (x.clientName || '').toLowerCase().includes(needle) ||
+    (x.emailSubject || '').toLowerCase().includes(needle)
+  );
+
+  const selected = candidates.find(x => x.id === selId) || null;
+  const detail   = selId ? cache[selId] : null;
+
+  const pick = async (item) => {
+    setSelId(item.id);
+    if (cache[item.id]) return;
+    setLoadingDetail(true);
+    try {
+      const d = await CrmApi.getQuoteDetail(item.id);
+      setCache(c => ({ ...c, [item.id]: d }));
+    } catch (_) {
+      setCache(c => ({ ...c, [item.id]: { __error: true } }));
+    } finally {
+      setLoadingDetail(false);
+    }
+  };
+
+  return (
+    <Modal onClose={onClose} title={title} subtitle={subtitle} width={880}
+      footer={
+        <>
+          <button className="btn-ghost" onClick={onClose}>Cancelar</button>
+          <button className="btn-primary" disabled={!selId || saving} onClick={() => onConfirm(selId)}>
+            <Icon name="link" size={14}/>{saving ? 'Vinculando…' : confirmLabel}
+          </button>
+        </>
+      }>
+      <div className="grid gap-3" style={{ gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.05fr)', height: '56vh' }}>
+
+        {/* Lista de candidatas */}
+        <div className="flex flex-col min-h-0 border border-line rounded-xl overflow-hidden">
+          <div className="p-2 border-b border-line bg-surface">
+            <input autoFocus className="inp w-full text-xs" placeholder="Buscar por código, cliente o asunto…"
+              value={search} onChange={e => setSearch(e.target.value)}/>
+          </div>
+          <div className="flex-1 min-h-0 overflow-y-auto scroll-thin">
+            {list.length === 0 && (
+              <div className="px-3 py-8 text-[12px] text-ink-400 text-center">
+                {needle ? 'Sin resultados para esa búsqueda' : emptyText}
+              </div>
+            )}
+            {list.map(x => (
+              <button key={x.id} onClick={() => pick(x)}
+                className={cx('w-full text-left px-3 py-2.5 border-b border-line last:border-b-0 transition-colors',
+                  selId === x.id ? 'bg-brandSoft' : 'hover:bg-surface')}>
+                <div className="flex items-center gap-2">
+                  <span className="mono text-[12px] font-semibold text-ink-900">{x.code}</span>
+                  {x.flexxus && <span className="mono text-[10px] text-ink-500 truncate">{x.flexxus}</span>}
+                  <span className="ml-auto text-[11px] text-ink-500 shrink-0">
+                    {fmtDate(x.ingreso)}{x.dias != null ? ` · ${x.dias}d` : ''}
+                  </span>
+                </div>
+                <div className="text-[12.5px] text-ink-800 truncate mt-0.5">{x.clientName || 'Sin cliente'}</div>
+                {x.emailSubject && <div className="text-[11px] text-ink-500 truncate mt-0.5">{x.emailSubject}</div>}
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-[11px] text-ink-500 truncate">{x.sellerName || 'Sin vendedor'}</span>
+                  {x.monto != null && (
+                    <span className="ml-auto text-[11.5px] font-semibold text-ink-700 shrink-0">{fmtMoney(x.monto, x.currency, 2)}</span>
+                  )}
+                </div>
+              </button>
+            ))}
+          </div>
+          <div className="px-3 py-1.5 border-t border-line bg-surface text-[11px] text-ink-500">
+            {list.length} de {candidates.length} disponibles
+          </div>
+        </div>
+
+        {/* Detalle de la seleccionada */}
+        <div className="flex flex-col min-h-0 border border-line rounded-xl overflow-hidden bg-surface/30">
+          {!selected ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-center px-6 gap-2">
+              <Icon name="mouse-pointer-click" size={22} className="text-ink-300"/>
+              <div className="text-[12px] text-ink-400">Elegí una de la lista para ver el detalle<br/>y confirmar que es la correcta</div>
+            </div>
+          ) : (
+            <div className="flex-1 min-h-0 overflow-y-auto scroll-thin p-4">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="mono text-[13px] font-bold text-ink-900">{selected.code}</span>
+                {selected.mailType && <Badge tone={selected.mailType === 'SOLICITUD' ? 'sky' : 'blue'}>{selected.mailType}</Badge>}
+              </div>
+              <div className="text-[13px] font-semibold text-ink-900 mt-2">{selected.clientName || 'Sin cliente'}</div>
+              {(selected.clientCity || selected.clientProvince) && (
+                <div className="text-[11px] text-ink-500">{[selected.clientCity, selected.clientProvince].filter(Boolean).join(', ')}</div>
+              )}
+              <div className="grid grid-cols-2 gap-x-3 gap-y-2 mt-3">
+                <Field label="Ingreso"  value={fmtDateTime(selected.ingreso)}/>
+                <Field label="Vendedor" value={selected.sellerName || 'Sin asignar'}/>
+                <Field label="Monto"    value={selected.monto != null ? fmtMoney(selected.monto, selected.currency, 2) : '—'}/>
+                <Field label="Adjuntos" value={`${selected.adj || 0} ${(selected.adj || 0) === 1 ? 'archivo' : 'archivos'}`}/>
+              </div>
+              <div className="mt-3 pt-3 border-t border-line">
+                <div className="text-[11px] uppercase tracking-wider font-semibold text-ink-500 mb-1.5">Mail de origen</div>
+                {selected.emailSubject
+                  ? <div className="text-[12px] text-ink-800 font-medium">{selected.emailSubject}</div>
+                  : <div className="text-[12px] text-ink-400">Sin asunto (carga manual)</div>}
+                {selected.emailFrom && <div className="text-[11px] text-ink-500 mt-0.5">De: {selected.emailFrom}</div>}
+                <div className="mt-2">
+                  {loadingDetail && !detail && <div className="text-[11.5px] text-ink-400">Cargando el cuerpo del mail…</div>}
+                  {detail && detail.__error && <div className="text-[11.5px] text-bad">No se pudo cargar el cuerpo del mail.</div>}
+                  {detail && !detail.__error && (
+                    detail.emailBody
+                      ? <pre className="text-[11.5px] text-ink-700 whitespace-pre-wrap break-words bg-white border border-line rounded-lg p-2.5 max-h-52 overflow-y-auto scroll-thin" style={{ fontFamily: 'inherit' }}>{detail.emailBody}</pre>
+                      : <div className="text-[11.5px] text-ink-400">Este registro no tiene cuerpo de mail guardado.</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function QuoteDetail({ code, onClose, canReassign }) {
   const { quotes, clients, users, moveQuoteStage, setQuotes, setOrders, pushToast, closeModal, openModal, updateQuote, currentUserId, roleKey } = useApp();
   const q = quotes.find(x => x.code === code);
@@ -802,7 +937,6 @@ function QuoteDetail({ code, onClose, canReassign }) {
   const [emailBodyOpen, setEmailBodyOpen] = useState(false);
   const [linkedQuotes, setLinkedQuotes] = useState({ linkedQuote: null, linkedBy: [] });
   const [linkedOrder, setLinkedOrder] = useState(null); // OC vinculada a este presupuesto
-  const [linkSearch, setLinkSearch] = useState('');
   const [linkDropOpen, setLinkDropOpen] = useState(false);
   const [linkSaving, setLinkSaving] = useState(false);
   const noteInputRef = React.useRef(null);
@@ -1012,7 +1146,6 @@ function QuoteDetail({ code, onClose, canReassign }) {
       setLinkedQuotes({ linkedQuote: detail.linkedQuote || null, linkedBy: detail.linkedBy || [] });
       setHistory(detail.activities || []);
       setLinkDropOpen(false);
-      setLinkSearch('');
       pushToast('Cotizaciones vinculadas');
     } catch (err) {
       pushToast(err.message || 'Error al vincular', 'bad');
@@ -1528,37 +1661,27 @@ function QuoteDetail({ code, onClose, canReassign }) {
                     <div className="text-[11px] uppercase tracking-wider font-semibold text-ink-500 mb-0.5">{vc.label}</div>
                     <div className="text-[12px] text-ink-400">Sin vincular</div>
                   </div>
-                  <div className="relative shrink-0">
-                    <button className="btn-ghost text-[12px] py-1 px-2.5" onClick={() => setLinkDropOpen(o=>!o)}>
+                  <div className="shrink-0">
+                    <button className="btn-ghost text-[12px] py-1 px-2.5" onClick={() => setLinkDropOpen(true)}>
                       <Icon name="link" size={13}/>Vincular
                     </button>
                     {linkDropOpen && (
-                      <>
-                        <div className="fixed inset-0 z-10" onClick={() => setLinkDropOpen(false)}/>
-                        <div className="absolute right-0 top-full mt-1 z-20 w-72 bg-white border border-line rounded-xl shadow-pop overflow-hidden">
-                          <div className="p-2 border-b border-line">
-                            <input autoFocus className="inp w-full text-xs" placeholder="Buscar por código…"
-                              value={linkSearch} onChange={e => setLinkSearch(e.target.value)}/>
-                          </div>
-                          <div className="max-h-48 overflow-y-auto scroll-thin">
-                            {quotes.filter(x =>
-                              x.id !== q.id && x.mailType === vc.vincularTarget && !x.linkedQuoteId &&
-                              (!linkSearch || x.code.toLowerCase().includes(linkSearch.toLowerCase()) || (x.clientName||'').toLowerCase().includes(linkSearch.toLowerCase()))
-                            ).slice(0,15).map(x => (
-                              <button key={x.id} disabled={linkSaving}
-                                className="w-full text-left px-3 py-2 hover:bg-surface border-b border-line last:border-b-0 flex items-center gap-2"
-                                onClick={() => handleLinkQuote(x.id)}>
-                                <span className="mono text-[12px] font-semibold text-ink-900">{x.code}</span>
-                                <Badge tone={x.mailType==='SOLICITUD'?'sky':'blue'} className="text-[10px]">{x.mailType}</Badge>
-                                <span className="text-[11px] text-ink-500 truncate">{x.clientName||'sin cliente'}</span>
-                              </button>
-                            ))}
-                            {quotes.filter(x => x.id !== q.id && x.mailType === vc.vincularTarget && !x.linkedQuoteId && (!linkSearch || x.code.toLowerCase().includes(linkSearch.toLowerCase()) || (x.clientName||'').toLowerCase().includes(linkSearch.toLowerCase()))).length === 0 && (
-                              <div className="px-3 py-3 text-[12px] text-ink-400 text-center">Sin resultados</div>
-                            )}
-                          </div>
-                        </div>
-                      </>
+                      <LinkQuotePicker
+                        onClose={() => setLinkDropOpen(false)}
+                        candidates={quotes
+                          .filter(x => x.id !== q.id && x.mailType === vc.vincularTarget && !x.linkedQuoteId)
+                          .sort((a, b) => {
+                            // Las del mismo cliente primero — son las candidatas probables
+                            const am = a.client && a.client === q.client ? 0 : 1;
+                            const bm = b.client && b.client === q.client ? 0 : 1;
+                            return am !== bm ? am - bm : new Date(b.ingreso) - new Date(a.ingreso);
+                          })}
+                        title={vc.vincularTarget === 'SOLICITUD' ? 'Vincular solicitud origen' : 'Vincular presupuesto'}
+                        subtitle={`${q.code} · ${q.clientName || 'sin cliente'}`}
+                        emptyText={vc.vincularTarget === 'SOLICITUD' ? 'No hay solicitudes sin vincular' : 'No hay presupuestos sin vincular'}
+                        onConfirm={handleLinkQuote}
+                        saving={linkSaving}
+                      />
                     )}
                   </div>
                 </div>
@@ -2192,7 +2315,6 @@ function OrderDetail({ code, onClose, canReassign }) {
   const [npAssignSellerId, setNpAssignSellerId]    = useState('');
   const [npSellerSaving, setNpSellerSaving]        = useState(false);
   const [npLinkDropOpen, setNpLinkDropOpen]        = useState(false);
-  const [npLinkSearch, setNpLinkSearch]            = useState('');
   const [npLinkSaving, setNpLinkSaving]            = useState(false);
   const noteInputRef = React.useRef(null);
   const fileInputRef = React.useRef(null);
@@ -2366,7 +2488,6 @@ function OrderDetail({ code, onClose, canReassign }) {
       const freshOrders = await CrmApi.getOrders();
       setOrders(freshOrders);
       setNpLinkDropOpen(false);
-      setNpLinkSearch('');
       pushToast('Presupuesto vinculado');
     } catch (err) { pushToast(err.message || 'Error al vincular', 'bad'); }
     finally { setNpLinkSaving(false); }
@@ -2637,37 +2758,27 @@ function OrderDetail({ code, onClose, canReassign }) {
             <div className="text-[11px] uppercase tracking-wider font-semibold text-ink-500 mb-0.5">Presupuesto vinculado</div>
             <div className="text-[12px] text-ink-400">Sin presupuesto vinculado</div>
           </div>
-          <div className="relative shrink-0">
-            <button className="btn-ghost text-[12px] py-1 px-2.5" onClick={() => setNpLinkDropOpen(o=>!o)}>
+          <div className="shrink-0">
+            <button className="btn-ghost text-[12px] py-1 px-2.5" onClick={() => setNpLinkDropOpen(true)}>
               <Icon name="link" size={13}/>Vincular
             </button>
             {npLinkDropOpen && (
-              <>
-                <div className="fixed inset-0 z-10" onClick={() => setNpLinkDropOpen(false)}/>
-                <div className="absolute right-0 top-full mt-1 z-20 w-72 bg-white border border-line rounded-xl shadow-pop overflow-hidden">
-                  <div className="p-2 border-b border-line">
-                    <input autoFocus className="inp w-full text-xs" placeholder="Buscar por código…"
-                      value={npLinkSearch} onChange={e => setNpLinkSearch(e.target.value)}/>
-                  </div>
-                  <div className="max-h-48 overflow-y-auto scroll-thin">
-                    {quotes.filter(x =>
-                      x.mailType === 'PRESUPUESTO' &&
-                      (!npLinkSearch || x.code.toLowerCase().includes(npLinkSearch.toLowerCase()) || (x.clientName||'').toLowerCase().includes(npLinkSearch.toLowerCase()))
-                    ).slice(0,15).map(x => (
-                      <button key={x.id} disabled={npLinkSaving}
-                        className="w-full text-left px-3 py-2 hover:bg-surface border-b border-line last:border-b-0 flex items-center gap-2"
-                        onClick={() => handleNpLinkPresupuesto(x.id)}>
-                        <span className="mono text-[12px] font-semibold text-ink-900">{x.code}</span>
-                        <Badge tone="blue" className="text-[10px]">PRESUPUESTO</Badge>
-                        <span className="text-[11px] text-ink-500 truncate">{x.clientName||'sin cliente'}</span>
-                      </button>
-                    ))}
-                    {quotes.filter(x => x.mailType === 'PRESUPUESTO' && (!npLinkSearch || x.code.toLowerCase().includes(npLinkSearch.toLowerCase()) || (x.clientName||'').toLowerCase().includes(npLinkSearch.toLowerCase()))).length === 0 && (
-                      <div className="px-3 py-3 text-[12px] text-ink-400 text-center">Sin presupuestos disponibles</div>
-                    )}
-                  </div>
-                </div>
-              </>
+              <LinkQuotePicker
+                onClose={() => setNpLinkDropOpen(false)}
+                candidates={quotes
+                  .filter(x => x.mailType === 'PRESUPUESTO')
+                  .sort((a, b) => {
+                    // Los del mismo cliente primero — son los candidatos probables
+                    const am = a.client && a.client === o.client ? 0 : 1;
+                    const bm = b.client && b.client === o.client ? 0 : 1;
+                    return am !== bm ? am - bm : new Date(b.ingreso) - new Date(a.ingreso);
+                  })}
+                title="Vincular presupuesto"
+                subtitle={`${o.code} · ${o.clientName || cli?.name || 'sin cliente'}`}
+                emptyText="No hay presupuestos disponibles"
+                onConfirm={handleNpLinkPresupuesto}
+                saving={npLinkSaving}
+              />
             )}
           </div>
         </div>
