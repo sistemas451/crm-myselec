@@ -770,14 +770,19 @@ function MentionPicker({ users, excludeId, onPick, onClose }) {
 // monto y vendedor, y el panel derecho permite confirmar cuál es antes de vincular.
 // El cuerpo del mail se pide al SELECCIONAR (no al pasar el mouse) y queda
 // cacheado, para no disparar una consulta por cada movimiento del cursor.
-function LinkQuotePicker({ onClose, candidates, title, subtitle, emptyText, confirmLabel = 'Vincular', onConfirm, saving }) {
+function LinkQuotePicker({ onClose, candidates, title, subtitle, emptyText, confirmLabel = 'Vincular', onConfirm, saving, clientCode, clientName }) {
+  // Arranca acotado al cliente de la ficha actual — que es el caso normal. Se puede
+  // pasar a "Todos" para el resto (p. ej. si el cliente se detecto mal en el mail).
+  const [onlyClient, setOnlyClient] = useState(!!clientCode);
   const [search, setSearch] = useState('');
   const [selId,  setSelId]  = useState(null);
   const [cache,  setCache]  = useState({});
   const [loadingDetail, setLoadingDetail] = useState(false);
 
+  const sameClient = clientCode ? candidates.filter(x => x.client === clientCode) : [];
+  const base = (clientCode && onlyClient) ? sameClient : candidates;
   const needle = search.trim().toLowerCase();
-  const list = !needle ? candidates : candidates.filter(x =>
+  const list = !needle ? base : base.filter(x =>
     (x.code || '').toLowerCase().includes(needle) ||
     (x.clientName || '').toLowerCase().includes(needle) ||
     (x.emailSubject || '').toLowerCase().includes(needle)
@@ -814,14 +819,40 @@ function LinkQuotePicker({ onClose, candidates, title, subtitle, emptyText, conf
 
         {/* Lista de candidatas */}
         <div className="flex flex-col min-h-0 border border-line rounded-xl overflow-hidden">
-          <div className="p-2 border-b border-line bg-surface">
+          <div className="p-2 border-b border-line bg-surface space-y-2">
+            {clientCode && (
+              <div className="flex items-center gap-1 p-0.5 bg-white border border-line rounded-lg">
+                <button onClick={() => setOnlyClient(true)}
+                  className={cx('flex-1 min-w-0 text-[11.5px] py-1 px-2 rounded-md font-medium truncate transition-colors',
+                    onlyClient ? 'bg-brand text-white' : 'text-ink-600 hover:bg-surface')}>
+                  Este cliente ({sameClient.length})
+                </button>
+                <button onClick={() => setOnlyClient(false)}
+                  className={cx('flex-1 min-w-0 text-[11.5px] py-1 px-2 rounded-md font-medium truncate transition-colors',
+                    !onlyClient ? 'bg-brand text-white' : 'text-ink-600 hover:bg-surface')}>
+                  Todos ({candidates.length})
+                </button>
+              </div>
+            )}
             <input autoFocus className="inp w-full text-xs" placeholder="Buscar por código, cliente o asunto…"
               value={search} onChange={e => setSearch(e.target.value)}/>
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto scroll-thin">
             {list.length === 0 && (
               <div className="px-3 py-8 text-[12px] text-ink-400 text-center">
-                {needle ? 'Sin resultados para esa búsqueda' : emptyText}
+                {needle
+                  ? 'Sin resultados para esa búsqueda'
+                  : (clientCode && onlyClient)
+                    ? <>No hay nada sin vincular de<br/><span className="text-ink-600">{clientName || 'este cliente'}</span></>
+                    : emptyText}
+                {clientCode && onlyClient && (
+                  <div className="mt-2">
+                    <button className="text-[11.5px] text-brand font-semibold hover:underline"
+                      onClick={() => setOnlyClient(false)}>
+                      Buscar en todos ({candidates.length})
+                    </button>
+                  </div>
+                )}
               </div>
             )}
             {list.map(x => (
@@ -847,7 +878,7 @@ function LinkQuotePicker({ onClose, candidates, title, subtitle, emptyText, conf
             ))}
           </div>
           <div className="px-3 py-1.5 border-t border-line bg-surface text-[11px] text-ink-500">
-            {list.length} de {candidates.length} disponibles
+            {list.length} de {base.length} disponibles
           </div>
         </div>
 
@@ -1679,6 +1710,8 @@ function QuoteDetail({ code, onClose, canReassign }) {
                         title={vc.vincularTarget === 'SOLICITUD' ? 'Vincular solicitud origen' : 'Vincular presupuesto'}
                         subtitle={`${q.code} · ${q.clientName || 'sin cliente'}`}
                         emptyText={vc.vincularTarget === 'SOLICITUD' ? 'No hay solicitudes sin vincular' : 'No hay presupuestos sin vincular'}
+                        clientCode={q.client}
+                        clientName={q.clientName}
                         onConfirm={handleLinkQuote}
                         saving={linkSaving}
                       />
@@ -2776,6 +2809,8 @@ function OrderDetail({ code, onClose, canReassign }) {
                 title="Vincular presupuesto"
                 subtitle={`${o.code} · ${o.clientName || cli?.name || 'sin cliente'}`}
                 emptyText="No hay presupuestos disponibles"
+                clientCode={o.client}
+                clientName={o.clientName || cli?.name}
                 onConfirm={handleNpLinkPresupuesto}
                 saving={npLinkSaving}
               />
