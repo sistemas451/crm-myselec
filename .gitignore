@@ -9,3 +9,6 @@ uploads/
 # Data files — never commit client data
 DA_MY-*.xlsx
 *.xlsx.bak
+
+# Backups de migraciones de datos — nunca commitear
+backups/
