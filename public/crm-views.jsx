@@ -1715,6 +1715,82 @@ function Clients({ readonly=false }) {
 
 // ---------- Team (admin) ----------
 // ---------- UserModal — crear/editar usuario ----------
+// Al desactivar un usuario con cotizaciones u ordenes asignadas hay que decidir
+// que pasa con ellas: si quedan en la cuenta apagada se vuelven invisibles
+// (la pantalla no resuelve el nombre y ningun filtro de vendedor las encuentra).
+function DeactivateUserModal({ user, quotes, orders, candidates, onClose, onConfirm }) {
+  const [opcion, setOpcion]   = useState('transfer');
+  const [destino, setDestino] = useState('');
+  const [saving, setSaving]   = useState(false);
+
+  const partes = [];
+  if (quotes) partes.push(quotes + (quotes === 1 ? ' cotización' : ' cotizaciones'));
+  if (orders) partes.push(orders + (orders === 1 ? ' orden' : ' órdenes'));
+
+  const puedeConfirmar = opcion === 'unassign' || (opcion === 'transfer' && destino);
+
+  const confirmar = async () => {
+    if (!puedeConfirmar) return;
+    setSaving(true);
+    try { await onConfirm(opcion === 'transfer' ? { transferTo: destino } : { unassign: true }); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <Modal onClose={onClose} title={'Desactivar a ' + user.name} subtitle="Qué hacer con su cartera" width={520}
+      footer={
+        <>
+          <button className="btn-ghost" onClick={onClose}>Cancelar</button>
+          <button className="btn-primary" disabled={!puedeConfirmar || saving} onClick={confirmar}>
+            {saving ? 'Aplicando…' : 'Desactivar'}
+          </button>
+        </>
+      }>
+      <div className="space-y-4">
+        <div className="text-[13px] text-ink-700">
+          <b>{user.name}</b> tiene <b>{partes.join(' y ')}</b> a su nombre.
+          Si quedan asignadas a una cuenta desactivada dejan de verse en el CRM,
+          así que hay que decidir qué hacer con ellas.
+        </div>
+
+        <label className={cx('block border rounded-xl p-3 cursor-pointer transition-colors',
+          opcion === 'transfer' ? 'border-brand bg-brandSoft/40' : 'border-line hover:bg-surface')}>
+          <div className="flex items-start gap-2">
+            <input type="radio" name="cartera" className="mt-0.5 accent-brand" checked={opcion === 'transfer'}
+              onChange={() => setOpcion('transfer')}/>
+            <div className="flex-1 min-w-0">
+              <div className="text-[13px] font-semibold text-ink-900">Transferir a otro vendedor</div>
+              <div className="text-[11.5px] text-ink-500 mt-0.5">Pasa todo a la persona que elijas.</div>
+              <select className="input-sm w-full mt-2" value={destino} disabled={opcion !== 'transfer'}
+                onChange={e => setDestino(e.target.value)}>
+                <option value="">Elegir vendedor…</option>
+                {candidates.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+              {opcion === 'transfer' && candidates.length === 0 && (
+                <div className="text-[11.5px] text-bad mt-1">No hay otros usuarios activos disponibles.</div>
+              )}
+            </div>
+          </div>
+        </label>
+
+        <label className={cx('block border rounded-xl p-3 cursor-pointer transition-colors',
+          opcion === 'unassign' ? 'border-brand bg-brandSoft/40' : 'border-line hover:bg-surface')}>
+          <div className="flex items-start gap-2">
+            <input type="radio" name="cartera" className="mt-0.5 accent-brand" checked={opcion === 'unassign'}
+              onChange={() => setOpcion('unassign')}/>
+            <div className="flex-1 min-w-0">
+              <div className="text-[13px] font-semibold text-ink-900">Dejar sin vendedor</div>
+              <div className="text-[11.5px] text-ink-500 mt-0.5">
+                Quedan en el filtro “Sin asignar” y cualquier vendedor puede tomarlas.
+              </div>
+            </div>
+          </div>
+        </label>
+      </div>
+    </Modal>
+  );
+}
+
 function UserModal({ user, onClose, onSave }) {
   const [form, setForm] = useState({
     name:     user?.name     || '',
@@ -1969,22 +2045,23 @@ function Team() {
     });
   };
 
-  const handleToggle = async (u, force = false) => {
+  // decision = undefined -> primer intento; { transferTo } | { unassign:true } -> ya decidido
+  const handleToggle = async (u, decision) => {
     try {
       const res = await fetch(`/api/users/${u.id}/toggle`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('crm_token')}` },
-        body: JSON.stringify(force ? { forceDeactivate: true } : {}),
+        body: JSON.stringify(decision || {}),
       });
       const data = await res.json();
-      if (res.status === 409 && data.requiresConfirmation) {
-        if (window.confirm(`${data.error}\n\n¿Desactivarlo igualmente?`)) {
-          return handleToggle(u, true);
-        }
+      // Tiene cartera asignada: hay que elegir a quien pasa antes de desactivar
+      if (res.status === 409 && data.requiresPortfolioDecision) {
+        setModal({ mode: 'deactivate', user: u, quotes: data.quotes, orders: data.orders });
         return;
       }
       if (!res.ok) { pushToast(data.error || 'Error', 'bad'); return; }
       setUsers(prev => prev.map(x => x.id === u.id ? {...x, active: data.active} : x));
+      setModal(null);
       pushToast(`${u.name} ${data.active ? 'activado' : 'desactivado'}`);
     } catch (err) {
       pushToast(err.message || 'Error', 'bad');
@@ -2148,6 +2225,17 @@ function Team() {
           user={modal.user}
           onClose={() => setModal(null)}
           onApprove={handleApprove}
+        />
+      )}
+
+      {modal && modal.mode === 'deactivate' && (
+        <DeactivateUserModal
+          user={modal.user}
+          quotes={modal.quotes}
+          orders={modal.orders}
+          candidates={(users || []).filter(x => x.id !== modal.user.id && x.active)}
+          onClose={() => setModal(null)}
+          onConfirm={(decision) => handleToggle(modal.user, decision)}
         />
       )}
 

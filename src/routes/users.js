@@ -346,20 +346,52 @@ router.patch('/:id/toggle', authMiddleware, adminOnly, async (req, res) => {
       }
     }
 
-    // Al desactivar un vendedor, advertir si tiene cotizaciones abiertas
-    if (user.active && user.role === 'VENDEDOR' && !req.body.forceDeactivate) {
-      const openQuotes = await prisma.quote.count({
-        where: {
-          sellerId: req.params.id,
-          stage: { notIn: ['aceptada', 'rechazada'] },
-        },
-      });
-      if (openQuotes > 0) {
-        return res.status(409).json({
-          error: `${user.name} tiene ${openQuotes} cotización(es) activa(s). ¿Confirmar desactivación?`,
-          openQuotes,
-          requiresConfirmation: true,
-        });
+    // ── Al DESACTIVAR: decidir que pasa con la cartera ──────────────────────
+    // Antes solo se advertia (y solo a los VENDEDOR, y solo por cotizaciones
+    // abiertas) y se podia confirmar dejando todo asignado a la cuenta apagada.
+    // Eso dejaba registros huerfanos: la pantalla no puede resolver el nombre de
+    // un usuario desactivado y los mostraba "Sin asignar", y ningun filtro de
+    // vendedor los encontraba. Ahora hay que elegir explicitamente.
+    if (user.active) {
+      const [nQuotes, nOrders] = await Promise.all([
+        prisma.quote.count({ where: { sellerId: user.id } }),
+        prisma.order.count({ where: { sellerId: user.id } }),
+      ]);
+
+      if (nQuotes + nOrders > 0) {
+        const { transferTo, unassign } = req.body || {};
+
+        if (!transferTo && !unassign) {
+          return res.status(409).json({
+            error: `${user.name} tiene ${nQuotes} cotización(es) y ${nOrders} orden(es) asignadas. Hay que decidir qué hacer con ellas antes de desactivarlo.`,
+            quotes: nQuotes,
+            orders: nOrders,
+            requiresPortfolioDecision: true,
+          });
+        }
+
+        if (transferTo) {
+          if (transferTo === user.id) {
+            return res.status(400).json({ error: 'No se puede transferir al mismo usuario que se desactiva' });
+          }
+          const target = await prisma.user.findUnique({ where: { id: transferTo } });
+          if (!target)        return res.status(400).json({ error: 'El usuario destino no existe' });
+          if (!target.active) return res.status(400).json({ error: 'El usuario destino tiene que estar activo' });
+
+          await prisma.$transaction([
+            prisma.quote.updateMany({ where: { sellerId: user.id }, data: { sellerId: target.id } }),
+            prisma.order.updateMany({ where: { sellerId: user.id }, data: { sellerId: target.id } }),
+          ]);
+          console.log(`[AUDIT] ${req.user.email} transfirio ${nQuotes} cotizaciones y ${nOrders} ordenes de ${user.email} a ${target.email}`);
+        } else {
+          // unassign: quedan sin vendedor — visibles en el filtro "Sin asignar" y
+          // reclamables por cualquier vendedor con el boton de auto-asignacion.
+          await prisma.$transaction([
+            prisma.quote.updateMany({ where: { sellerId: user.id }, data: { sellerId: null } }),
+            prisma.order.updateMany({ where: { sellerId: user.id }, data: { sellerId: null } }),
+          ]);
+          console.log(`[AUDIT] ${req.user.email} dejo sin vendedor ${nQuotes} cotizaciones y ${nOrders} ordenes al desactivar ${user.email}`);
+        }
       }
     }
 
