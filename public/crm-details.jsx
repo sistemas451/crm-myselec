@@ -1039,6 +1039,21 @@ function QuoteDetail({ code, onClose, canReassign }) {
   const [editingDeadline, setEditingDeadline] = useState(false);
   const [deadlineVal, setDeadlineVal] = useState('');
   const [deadlineSaving, setDeadlineSaving] = useState(false);
+  // La fecha límite es un día del calendario: se fija al mediodía UTC para que no
+  // se lea un día menos en Argentina (UTC-3). El backend hace lo mismo. MYS-0017.
+  const deadlineIso = (dia) => dia ? new Date(dia + 'T12:00:00.000Z').toISOString() : null;
+  const guardarDeadline = async (dia) => {
+    setDeadlineSaving(true);
+    try {
+      await CrmApi.updateQuoteDeadline(q.id, dia);
+      updateQuote(q.code, { deadline: deadlineIso(dia) });
+      pushToast(dia ? 'Fecha límite actualizada' : 'Fecha límite quitada');
+    } catch (err) {
+      pushToast(err.message || 'Error al guardar', 'bad');
+    } finally {
+      setDeadlineSaving(false);
+    }
+  };
 
   const handleDuplicate = async () => {
     if (!dupClientId) return;
@@ -1616,6 +1631,13 @@ function QuoteDetail({ code, onClose, canReassign }) {
                     <Icon name="pencil" size={10}/>
                   </button>
                 )}
+                {sel && q.deadline && !editingDeadline && (
+                  <button title="Quitar fecha límite"
+                    onClick={() => guardarDeadline(null)}
+                    className="text-ink-300 hover:text-bad transition-colors">
+                    <Icon name="x" size={10}/>
+                  </button>
+                )}
               </span>
             }>
               {editingDeadline ? (
@@ -1625,16 +1647,13 @@ function QuoteDetail({ code, onClose, canReassign }) {
                     value={deadlineVal}
                     onChange={e => setDeadlineVal(e.target.value)}
                     onBlur={async () => {
-                      const newVal = deadlineVal || null;
+                      // Salir con el casillero vacío NO borra la fecha: el campo de
+                      // fecha queda vacío mientras esté incompleta, así que al tipearla
+                      // a mano y hacer clic afuera se comía la que ya estaba (MYS-0017).
+                      // Para quitarla a propósito está el botón "Quitar".
                       const oldVal = q.deadline ? q.deadline.slice(0, 10) : null;
-                      if (newVal !== oldVal) {
-                        setDeadlineSaving(true);
-                        try {
-                          await CrmApi.updateQuoteDeadline(q.id, newVal);
-                          updateQuote(q.code, { deadline: newVal ? new Date(newVal).toISOString() : null });
-                          pushToast('Fecha límite actualizada');
-                        } catch (err) { pushToast(err.message || 'Error al guardar', 'bad'); }
-                        finally { setDeadlineSaving(false); }
+                      if (deadlineVal && deadlineVal !== oldVal) {
+                        await guardarDeadline(deadlineVal);
                       }
                       setEditingDeadline(false);
                     }}

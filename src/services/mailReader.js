@@ -1496,8 +1496,10 @@ async function processEmail(mailData, imap) {
     let deadline = null;
     if (sellerId) {
       const deadlineDays = Math.max(1, parseInt(stageAndFudSettings.deadline_days || '3'));
-      deadline = new Date();
-      deadline.setDate(deadline.getDate() + deadlineDays);
+      // Al mediodía UTC: la fecha límite es un día del calendario, no un instante
+      // (si se guarda a medianoche, en Argentina se lee un día menos). Ver MYS-0017.
+      const hoy = new Date();
+      deadline = new Date(Date.UTC(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() + deadlineDays, 12, 0, 0, 0));
     }
 
     let quote;

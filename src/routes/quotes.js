@@ -516,9 +516,7 @@ router.patch('/:id/assign', authMiddleware, async (req, res) => {
       if (current && current.mailType === 'SOLICITUD' && !current.deadline) {
         const deadlineSetting = await prisma.appSetting.findUnique({ where: { key: 'deadline_days' } });
         const deadlineDays = Math.max(1, parseInt(deadlineSetting?.value || '3'));
-        const deadline = new Date();
-        deadline.setDate(deadline.getDate() + deadlineDays);
-        updateData.deadline = deadline;
+        updateData.deadline = deadlineInDays(deadlineDays);
       }
 
       // Primera asignación de una Solicitud sin vendedor previo → mover de la etapa de
@@ -1014,6 +1012,28 @@ router.patch('/:id/amount', authMiddleware, async (req, res) => {
   }
 });
 
+// La fecha límite es un DÍA del calendario, no un instante. Guardada como
+// medianoche UTC, en Argentina (UTC-3) cae a las 21:00 del día anterior y la
+// pantalla muestra un día menos — que es lo que reportó Diego en MYS-0017.
+// Fijándola al mediodía UTC, el día se lee igual en cualquier huso razonable.
+function deadlineAt(y, m, d) {
+  return new Date(Date.UTC(y, m, d, 12, 0, 0, 0));
+}
+// Acepta 'YYYY-MM-DD' (lo que manda el campo de fecha) o un ISO completo.
+function parseDeadlineInput(value) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value).trim());
+  if (m) return deadlineAt(+m[1], +m[2] - 1, +m[3]);
+  const d = new Date(value);
+  // getters UTC, no locales: con un ISO a medianoche UTC los getters locales
+  // devuelven el día anterior y volveríamos a tener el bug que estamos arreglando.
+  return isNaN(d.getTime()) ? null : deadlineAt(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+// Hoy + N días, también al mediodía, para que las automáticas se comporten igual.
+function deadlineInDays(days) {
+  const now = new Date();
+  return deadlineAt(now.getFullYear(), now.getMonth(), now.getDate() + days);
+}
+
 // PATCH /api/quotes/:id/deadline — editar fecha límite de armado manualmente
 router.patch('/:id/deadline', authMiddleware, async (req, res) => {
   try {
@@ -1026,8 +1046,8 @@ router.patch('/:id/deadline', authMiddleware, async (req, res) => {
     if (quote.mailType !== 'SOLICITUD') {
       return res.status(400).json({ error: 'La fecha límite de armado solo aplica a Solicitudes' });
     }
-    const parsed = deadline ? new Date(deadline) : null;
-    if (deadline && isNaN(parsed.getTime())) return res.status(400).json({ error: 'Fecha inválida' });
+    const parsed = deadline ? parseDeadlineInput(deadline) : null;
+    if (deadline && !parsed) return res.status(400).json({ error: 'Fecha inválida' });
 
     const updated = await prisma.quote.update({
       where: { id: req.params.id },

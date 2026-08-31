@@ -872,6 +872,12 @@ router.get('/sync', authMiddleware, async (req, res) => {
       emailMessageId: q.emailMessageId || null,
       mailType: q.mailType || null,
       followUpDate: q.followUpDate?.toISOString() || null,
+      // deadline y ackSentAt tienen que estar SÍ O SÍ: el frontend reemplaza la
+      // cotización entera con lo que devuelve este sync, así que un campo que
+      // falte acá se borra de la pantalla a los 25s aunque esté bien en la base
+      // (era el "queda en blanco" de MYS-0017). Mantener alineado con GET /quotes.
+      deadline: q.deadline?.toISOString() || null,
+      ackSentAt: q.ackSentAt?.toISOString() || null,
       rejectReason: q.rejectReason,
       linkedQuoteId: q.linkedQuoteId || null,
       linkedQuoteCode: q.linkedQuote?.code || null,
