@@ -770,6 +770,56 @@ function MentionPicker({ users, excludeId, onPick, onClose }) {
 // monto y vendedor, y el panel derecho permite confirmar cuál es antes de vincular.
 // El cuerpo del mail se pide al SELECCIONAR (no al pasar el mouse) y queda
 // cacheado, para no disparar una consulta por cada movimiento del cursor.
+// Confirmacion de desvinculacion. Antes era un window.confirm generico
+// ("¿Desvincular esta cotización?") que no decia QUE se desvinculaba ni que habia
+// colgando, asi que se aceptaba en automatico y se cortaban cadenas enteras
+// (Solicitud -> Presupuesto -> NP -> Orden) sin querer.
+function ConfirmUnlinkModal({ ownCode, target, clientName, warnings = [], onClose, onConfirm }) {
+  const [saving, setSaving] = useState(false);
+  const confirmar = async () => {
+    setSaving(true);
+    try { await onConfirm(); } finally { setSaving(false); }
+  };
+  return (
+    <Modal onClose={onClose} title="Desvincular" subtitle={ownCode} width={470}
+      footer={
+        <>
+          <button className="btn-ghost" onClick={onClose}>Cancelar</button>
+          <button className="btn-ghost text-bad border-red-200 hover:bg-red-50"
+            disabled={saving} onClick={confirmar}>
+            <Icon name="unlink" size={13}/>{saving ? 'Desvinculando…' : 'Desvincular'}
+          </button>
+        </>
+      }>
+      <div className="space-y-3">
+        <div className="text-[13px] text-ink-700">
+          Vas a cortar el vínculo entre <b className="mono">{ownCode}</b> y <b className="mono">{target.code}</b>
+          {clientName ? <> — {clientName}</> : null}.
+        </div>
+        <div className="px-3 py-2.5 bg-surface border border-line rounded-xl">
+          <div className="flex items-center gap-2 text-[12px]">
+            <span className="mono font-semibold text-ink-900">{target.code}</span>
+            {target.mailType && <Badge tone={target.mailType === 'SOLICITUD' ? 'sky' : 'blue'}>{target.mailType}</Badge>}
+          </div>
+          {target.emailSubject && <div className="text-[11.5px] text-ink-500 mt-1 truncate">{target.emailSubject}</div>}
+        </div>
+        {warnings.length > 0 && (
+          <div className="px-3 py-2.5 bg-amber-50 border border-amber-200 rounded-xl">
+            <div className="text-[12px] font-semibold text-amber-800 mb-1">Ojo con esto:</div>
+            <ul className="text-[11.5px] text-amber-900 space-y-0.5 list-disc pl-4">
+              {warnings.map((w, i) => <li key={i}>{w}</li>)}
+            </ul>
+          </div>
+        )}
+        <div className="text-[11.5px] text-ink-500">
+          El historial de cada una se conserva, pero dejan de verse como un mismo caso.
+          Se puede volver a vincular después.
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function LinkQuotePicker({ onClose, candidates, title, subtitle, emptyText, confirmLabel = 'Vincular', onConfirm, saving, clientCode, clientName }) {
   // Arranca acotado al cliente de la ficha actual — que es el caso normal. Se puede
   // pasar a "Todos" para el resto (p. ej. si el cliente se detecto mal en el mail).
@@ -1185,13 +1235,14 @@ function QuoteDetail({ code, onClose, canReassign }) {
     }
   };
 
+  const [unlinkTarget, setUnlinkTarget] = useState(null);
   const handleUnlinkQuote = async () => {
-    if (!window.confirm('¿Desvincular esta cotización?')) return;
     try {
       await CrmApi.linkQuote(q.id, null);
       const [freshQuotes, detail] = await Promise.all([CrmApi.getQuotes(), CrmApi.getQuoteDetail(q.id)]);
       setQuotes(freshQuotes);
       setLinkedQuotes({ linkedQuote: detail.linkedQuote || null, linkedBy: detail.linkedBy || [] });
+      setUnlinkTarget(null);
       pushToast('Vínculo eliminado');
     } catch (err) {
       pushToast(err.message || 'Error', 'bad');
@@ -1662,6 +1713,20 @@ function QuoteDetail({ code, onClose, canReassign }) {
         </div>
       )}
 
+      {unlinkTarget && (
+        <ConfirmUnlinkModal
+          ownCode={q.code}
+          target={unlinkTarget}
+          clientName={cli?.name || q.clientName}
+          warnings={[
+            ...(linkedOrder ? [`La orden ${linkedOrder.code} quedará sin su presupuesto de origen.`] : []),
+            ...((linkedQuotes.linkedBy || []).filter(x => x.mailType === 'NOTA_PEDIDO').map(np => `La Nota de Pedido ${np.code} perderá la referencia.`)),
+          ]}
+          onClose={() => setUnlinkTarget(null)}
+          onConfirm={handleUnlinkQuote}
+        />
+      )}
+
       {/* ── Vinculaciones: Solicitud / Presupuesto / OC / NP ── */}
       {(() => {
         const solicitud   = linkedQuotes.linkedQuote?.mailType === 'SOLICITUD'   ? linkedQuotes.linkedQuote : linkedQuotes.linkedBy?.find(x => x.mailType === 'SOLICITUD');
@@ -1746,7 +1811,7 @@ function QuoteDetail({ code, onClose, canReassign }) {
                       Ver <Icon name="arrow-right" size={11}/>
                     </button>
                     {vc.vincularTarget && (
-                      <button onClick={handleUnlinkQuote} className="w-7 h-7 rounded-lg hover:bg-red-50 text-ink-400 hover:text-bad flex items-center justify-center" title="Desvincular">
+                      <button onClick={() => setUnlinkTarget(vc.data)} className="w-7 h-7 rounded-lg hover:bg-red-50 text-ink-400 hover:text-bad flex items-center justify-center" title="Desvincular">
                         <Icon name="x" size={12}/>
                       </button>
                     )}
