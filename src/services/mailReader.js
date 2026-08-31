@@ -1192,31 +1192,43 @@ async function processEmail(mailData, imap) {
     // procesarse desde Enviados como PRESUPUESTO, no como SOLICITUD entrante.
     // También ignorar si el From: es la misma cuenta que se está sincronizando.
     //
-    // EXCEPCIÓN — reenvío deliberado (MYS-0007 / MYS-0013): alguien de Myselec
-    // recibe un pedido por otro canal, lo reenvía a la casilla del CRM y le pone
-    // la etiqueta a mano. Más abajo ya existía la lógica para sacar el remitente
-    // real de un reenvío propio (isOwnForward), pero este guard la dejaba
-    // inalcanzable y el mail se descartaba entero.
-    // Para no volver a tragarse las respuestas del vendedor, exigimos las tres:
-    //   1) vino de la etiqueta CRM puesta a mano (no de All Mail por asunto)
-    //   2) no es una respuesta dentro de un hilo (sin In-Reply-To)
-    //   3) se ve como reenvío: asunto Fwd/RV o trae el mail original adjunto
+    // EXCEPCIÓN — ingreso deliberado (MYS-0007 / MYS-0013). Dos casos reales que
+    // el guard se estaba comiendo:
+    //   a) alguien de Myselec reenvía a la casilla del CRM un pedido que entró
+    //      por otro canal y le pone la etiqueta a mano
+    //   b) el aviso automático de la tienda web (sale de ventas@ pero el
+    //      Reply-To es el cliente real que hizo el pedido)
+    // Más abajo ya existía la lógica para sacar el remitente real en ambos casos
+    // (isOwnForward → mensaje embebido, cuerpo o Reply-To), pero este guard la
+    // dejaba inalcanzable y el mail se descartaba entero.
+    //
+    // Lo que el guard SÍ tiene que seguir bloqueando son las respuestas del
+    // vendedor, que quedan en la carpeta del hilo y deben entrar desde Enviados
+    // como PRESUPUESTO. Se distinguen por el asunto: una respuesta empieza con
+    // "Re:", un reenvío con "Fwd:"/"RV:". (Ojo: un reenvío de Gmail CONSERVA el
+    // In-Reply-To del original, así que ese header no sirve para distinguirlos.)
     const isCurrentAccount = mailData.accountEmail &&
       directFrom.toLowerCase() === mailData.accountEmail.toLowerCase().trim();
     const esCuentaPropia = isOwnAddress(directFrom) || isCurrentAccount;
 
     const vinoDeEtiqueta  = !mailData.requiresPrefixCheck;
+    const esRespuesta     = /^\s*re\s*:/i.test(subject);
     const asuntoDeReenvio = /^\s*(fwd?|rv|reenv\w*)\s*:/i.test(subject);
     const traeMailAdjunto = (parsed.attachments || []).some(a =>
       (a.contentType || '').toLowerCase().startsWith('message/'));
-    const esReenvioDeliberado = vinoDeEtiqueta && !inReplyTo && (asuntoDeReenvio || traeMailAdjunto);
+    const replyToAddress  = parsed.replyTo?.value?.[0]?.address || '';
+    const replyToExterno  = !!replyToAddress && !isOwnAddress(replyToAddress);
 
-    if (esCuentaPropia && !esReenvioDeliberado) {
+    const esIngresoDeliberado = vinoDeEtiqueta && !esRespuesta &&
+      (asuntoDeReenvio || traeMailAdjunto || replyToExterno);
+
+    if (esCuentaPropia && !esIngresoDeliberado) {
       console.log(`   ⏭️  Ignorado en entrantes (cuenta propia): ${directFrom}`);
       return null;
     }
     if (esCuentaPropia) {
-      console.log(`   📨 Reenvío interno con etiqueta CRM — se procesa: "${subject}"`);
+      const motivo = asuntoDeReenvio || traeMailAdjunto ? 'reenvío interno' : `aviso con Reply-To externo (${replyToAddress})`;
+      console.log(`   📨 Ingreso deliberado con etiqueta CRM (${motivo}) — se procesa: "${subject}"`);
     }
 
     // ── Mejora 2: respuesta del cliente a un PRESUPUESTO/OC → crear Nota ────
