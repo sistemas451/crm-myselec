@@ -1498,8 +1498,13 @@ async function processEmail(mailData, imap) {
       const deadlineDays = Math.max(1, parseInt(stageAndFudSettings.deadline_days || '3'));
       // Al mediodía UTC: la fecha límite es un día del calendario, no un instante
       // (si se guarda a medianoche, en Argentina se lee un día menos). Ver MYS-0017.
-      const hoy = new Date();
-      deadline = new Date(Date.UTC(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() + deadlineDays, 12, 0, 0, 0));
+      // "Hoy" según el calendario argentino: el servidor corre en UTC y entre las
+      // 21 y las 00 de Argentina su día ya es el siguiente (daría un día de más).
+      const hoy = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Argentina/Buenos_Aires',
+        year: 'numeric', month: '2-digit', day: '2-digit',
+      }).format(new Date()).split('-').map(Number);
+      deadline = new Date(Date.UTC(hoy[0], hoy[1] - 1, hoy[2] + deadlineDays, 12, 0, 0, 0));
     }
 
     let quote;

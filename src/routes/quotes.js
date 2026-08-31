@@ -1028,10 +1028,20 @@ function parseDeadlineInput(value) {
   // devuelven el día anterior y volveríamos a tener el bug que estamos arreglando.
   return isNaN(d.getTime()) ? null : deadlineAt(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
 }
+// "Hoy" según el calendario argentino, no el del servidor: Railway corre en UTC,
+// así que entre las 21 y las 00 de Argentina el día del servidor ya es el
+// siguiente y la fecha límite salía con un día de más.
+function hoyEnArgentina() {
+  const p = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Argentina/Buenos_Aires',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date()).split('-').map(Number);
+  return { y: p[0], m: p[1] - 1, d: p[2] };
+}
 // Hoy + N días, también al mediodía, para que las automáticas se comporten igual.
 function deadlineInDays(days) {
-  const now = new Date();
-  return deadlineAt(now.getFullYear(), now.getMonth(), now.getDate() + days);
+  const { y, m, d } = hoyEnArgentina();
+  return deadlineAt(y, m, d + days);
 }
 
 // PATCH /api/quotes/:id/deadline — editar fecha límite de armado manualmente
