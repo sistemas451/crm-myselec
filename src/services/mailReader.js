@@ -1181,22 +1181,43 @@ async function processEmail(mailData, imap) {
       return null;
     }
 
-    // ── Ignorar mails de cuentas propias en entrantes ─────────────────────
-    // Las respuestas del vendedor quedan en la carpeta crm (hilo) pero deben
-    // procesarse desde Enviados como PRESUPUESTO, no como SOLICITUD entrante.
-    // También ignorar si el From: es la misma cuenta que se está sincronizando.
-    const isCurrentAccount = mailData.accountEmail &&
-      directFrom.toLowerCase() === mailData.accountEmail.toLowerCase().trim();
-    if (isOwnAddress(directFrom) || isCurrentAccount) {
-      console.log(`   ⏭️  Ignorado en entrantes (cuenta propia): ${directFrom}`);
-      return null;
-    }
-
     const date        = parsed.date || new Date();
     const messageId   = parsed.messageId || `uid-${mailData.uid}`;
     const inReplyTo   = parsed.inReplyTo
       ? parsed.inReplyTo.replace(/[<>]/g, '').trim()
       : null;
+
+    // ── Ignorar mails de cuentas propias en entrantes ─────────────────────
+    // Las respuestas del vendedor quedan en la carpeta crm (hilo) pero deben
+    // procesarse desde Enviados como PRESUPUESTO, no como SOLICITUD entrante.
+    // También ignorar si el From: es la misma cuenta que se está sincronizando.
+    //
+    // EXCEPCIÓN — reenvío deliberado (MYS-0007 / MYS-0013): alguien de Myselec
+    // recibe un pedido por otro canal, lo reenvía a la casilla del CRM y le pone
+    // la etiqueta a mano. Más abajo ya existía la lógica para sacar el remitente
+    // real de un reenvío propio (isOwnForward), pero este guard la dejaba
+    // inalcanzable y el mail se descartaba entero.
+    // Para no volver a tragarse las respuestas del vendedor, exigimos las tres:
+    //   1) vino de la etiqueta CRM puesta a mano (no de All Mail por asunto)
+    //   2) no es una respuesta dentro de un hilo (sin In-Reply-To)
+    //   3) se ve como reenvío: asunto Fwd/RV o trae el mail original adjunto
+    const isCurrentAccount = mailData.accountEmail &&
+      directFrom.toLowerCase() === mailData.accountEmail.toLowerCase().trim();
+    const esCuentaPropia = isOwnAddress(directFrom) || isCurrentAccount;
+
+    const vinoDeEtiqueta  = !mailData.requiresPrefixCheck;
+    const asuntoDeReenvio = /^\s*(fwd?|rv|reenv\w*)\s*:/i.test(subject);
+    const traeMailAdjunto = (parsed.attachments || []).some(a =>
+      (a.contentType || '').toLowerCase().startsWith('message/'));
+    const esReenvioDeliberado = vinoDeEtiqueta && !inReplyTo && (asuntoDeReenvio || traeMailAdjunto);
+
+    if (esCuentaPropia && !esReenvioDeliberado) {
+      console.log(`   ⏭️  Ignorado en entrantes (cuenta propia): ${directFrom}`);
+      return null;
+    }
+    if (esCuentaPropia) {
+      console.log(`   📨 Reenvío interno con etiqueta CRM — se procesa: "${subject}"`);
+    }
 
     // ── Mejora 2: respuesta del cliente a un PRESUPUESTO/OC → crear Nota ────
     // En lugar de ignorar silenciosamente, registramos el contenido como actividad.
@@ -1399,9 +1420,19 @@ async function processEmail(mailData, imap) {
       if (client) console.log(`   ✅ Match nombre Flexxus: ${client.name}`);
     }
 
+    // Si el remitente real no se pudo despejar de un reenvío y quedó una
+    // dirección NUESTRA, no se matchea cliente por email: hay ~50 clientes
+    // cargados con dominio myselec.com.ar y ~120 contactos internos (resto de la
+    // importación de Flexxus), así que engancharía uno al azar. Es preferible
+    // que la solicitud entre sin cliente y la asigne una persona.
+    const remitenteEsPropio = isOwnAddress(originalSender);
+    if (remitenteEsPropio) {
+      console.log(`   ⚠️  No se pudo identificar al remitente real del reenvío (quedó ${originalSender}) — entra sin cliente para asignar a mano`);
+    }
+
     // Para SOLICITUD y fallback: matchear por email del remitente
     // 1. ClientEmail exacto
-    if (!client) {
+    if (!client && !remitenteEsPropio) {
       try {
         const ce = await prisma.clientEmail.findFirst({
           where: { email: originalSender },
@@ -1412,7 +1443,7 @@ async function processEmail(mailData, imap) {
     }
 
     // 2. Client.email exacto
-    if (!client) {
+    if (!client && !remitenteEsPropio) {
       client = await prisma.client.findFirst({
         where: { email: { equals: originalSender, mode: 'insensitive' } },
         include: { defaultSeller: true },
@@ -1426,7 +1457,7 @@ async function processEmail(mailData, imap) {
       'gmail.com', 'hotmail.com', 'outlook.com', 'yahoo.com', 'yahoo.com.ar',
       'live.com', 'icloud.com', 'protonmail.com', 'aol.com', 'zoho.com',
     ]);
-    if (!client && originalSender.includes('@')) {
+    if (!client && !remitenteEsPropio && originalSender.includes('@')) {
       const domain = originalSender.split('@')[1]?.toLowerCase();
       if (domain && !FREE_DOMAINS.has(domain)) {
         client = await prisma.client.findFirst({
