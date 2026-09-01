@@ -837,6 +837,24 @@ async function processNotaPedido(parsed, mailData, att, imap) {
  *  - Si no tiene PDF Flexxus → ignorar silenciosamente
  *  - Si asunto empieza con "presupuesto" → log informativo (no bloquea)
  */
+/**
+ * Al vincular un PRESUPUESTO con su SOLICITUD, el vendedor que vale es el de la
+ * solicitud: es quien venia trabajando ese caso (puede habersela auto-asignado
+ * aunque el cliente sea de otro). Sin esto el paquete queda partido, con cada
+ * mitad a nombre de una persona distinta.
+ */
+async function heredarVendedorDeSolicitud(presupuestoId, solicitud) {
+  if (!solicitud?.sellerId) return;
+  try {
+    const pres = await prisma.quote.findUnique({ where: { id: presupuestoId }, select: { sellerId: true, code: true } });
+    if (!pres || pres.sellerId === solicitud.sellerId) return;
+    await prisma.quote.update({ where: { id: presupuestoId }, data: { sellerId: solicitud.sellerId } });
+    console.log(`   👤 ${pres.code} toma el vendedor de ${solicitud.code} (quien venia trabajando el caso)`);
+  } catch (e) {
+    console.error('   ❌ No se pudo heredar el vendedor de la solicitud:', e.message);
+  }
+}
+
 async function processSentMail(parsed, mailData, imap) {
   const subject    = parsed.subject || '(sin asunto)';
   const date       = parsed.date    || new Date();
@@ -978,13 +996,21 @@ async function processSentMail(parsed, mailData, imap) {
   // Solo usuarios ACTIVOS: asignar a una cuenta desactivada deja la cotización
   // huérfana — la pantalla no puede resolver el nombre y la muestra "Sin asignar",
   // y ningún filtro de vendedor la encuentra (el filtro solo lista activos).
-  let sellerId = client?.defaultSeller?.active ? client.defaultSellerId : null;
-  if (fromAddr) {
+  // Misma regla que para el mail entrante: manda el vendedor del cliente y quien
+  // mandó el mail es el respaldo. Antes el remitente pisaba al del cliente, asi
+  // que un presupuesto enviado a un cliente de otro vendedor quedaba a nombre de
+  // quien lo mandó (MYS-0014).
+  let sellerId = null;
+  if (client?.defaultSeller?.active) {
+    sellerId = client.defaultSellerId;
+    console.log(`   👤 Vendedor del cliente: ${client.defaultSeller.name}`);
+  }
+  if (!sellerId && fromAddr) {
     try {
       const vendedor = await prisma.user.findFirst({ where: { email: { equals: fromAddr, mode: 'insensitive' }, active: true } });
       if (vendedor) {
         sellerId = vendedor.id;
-        console.log(`   👤 Vendedor detectado por From:: ${vendedor.name}`);
+        console.log(`   👤 Sin vendedor en el cliente — se asigna a quien lo envió: ${vendedor.name}`);
       }
     } catch (_) {}
   }
@@ -1081,6 +1107,7 @@ async function processSentMail(parsed, mailData, imap) {
         data:  { linkedQuoteId: quote.id, ...(npCode ? { flexxusCode: npCode } : {}) },
       });
       console.log(`   🔗 Vinculado ${quote.code} ↔ ${solicitudTarget.code}${npCode ? ` | NP: ${npCode}` : ''}`);
+      await heredarVendedorDeSolicitud(quote.id, solicitudTarget);
     }
   } catch (e) {
     console.error('   ❌ Error al auto-vincular (enviado):', e.message);
@@ -1484,23 +1511,30 @@ async function processEmail(mailData, imap) {
 
     if (!client) console.log(`   ⚠️  Sin match de cliente para ${originalSender}`);
 
-    // ── Mejora 1: vendedor = cuenta IMAP (prioridad) > defaultSeller del cliente ─
+    // ── Vendedor: manda el del cliente, la casilla es el respaldo ──────────────
+    // Antes ganaba la casilla por la que entraba el mail, y eso hacía que todo lo
+    // que llegaba a una casilla que además es un usuario del CRM se le asignara a
+    // esa persona aunque el cliente fuera de otro vendedor (MYS-0014). El cliente
+    // es el dato estable; la casilla, circunstancial.
     // Solo usuarios ACTIVOS en ambos caminos: asignar a una cuenta desactivada deja
     // la cotización huérfana — la pantalla no puede resolver el nombre y la muestra
     // "Sin asignar", y ningún filtro de vendedor la encuentra (solo lista activos).
     let sellerId = null;
-    if (mailData.accountEmail) {
+    if (client?.defaultSeller?.active) {
+      sellerId = client.defaultSellerId;
+      console.log(`   👤 Vendedor del cliente: ${client.defaultSeller.name}`);
+    }
+    if (!sellerId && mailData.accountEmail) {
       try {
         const vendedor = await prisma.user.findFirst({
           where: { email: { equals: mailData.accountEmail, mode: 'insensitive' }, active: true },
         });
         if (vendedor) {
           sellerId = vendedor.id;
-          console.log(`   👤 Vendedor asignado por cuenta IMAP (${mailData.accountEmail}): ${vendedor.name}`);
+          console.log(`   👤 Sin vendedor en el cliente — se asigna por la casilla (${mailData.accountEmail}): ${vendedor.name}`);
         }
       } catch (_) {}
     }
-    if (!sellerId && client?.defaultSeller?.active) sellerId = client.defaultSellerId;
 
     // ── Crear cotización ──────────────────────────────────────────────────
     const year = new Date().getFullYear();
@@ -1634,6 +1668,7 @@ async function processEmail(mailData, imap) {
             },
           });
           console.log(`   🔗 Vinculado ${quote.code} ↔ ${solicitudTarget.code}${npCode ? ` | NP propagado: ${npCode}` : ''}`);
+          await heredarVendedorDeSolicitud(quote.id, solicitudTarget);
         }
       } catch (e) {
         console.error('   ❌ Error al auto-vincular:', e.message);
@@ -1910,4 +1945,4 @@ async function resyncQuoteEmail(quoteId) {
   });
 }
 
-module.exports = { syncMails, syncAccount, listRecentMails, resyncQuoteEmail };
+module.exports = { syncMails, syncAccount, listRecentMails, resyncQuoteEmail, heredarVendedorDeSolicitud };
