@@ -1059,6 +1059,9 @@ async function processSentMail(parsed, mailData, imap) {
   const FREE_DOMAINS = new Set([
     'gmail.com', 'hotmail.com', 'outlook.com', 'yahoo.com', 'yahoo.com.ar',
     'live.com', 'icloud.com', 'protonmail.com', 'aol.com', 'zoho.com',
+    // No es un proveedor de mail, pero funciona igual: 70 clientes lo tienen
+    // cargado como dominio, asi que no identifica a ninguno.
+    'mercadolibre.com',
   ]);
 
   let client = null;
@@ -1094,11 +1097,19 @@ async function processSentMail(parsed, mailData, imap) {
   if (!client && toAddr.includes('@')) {
     const domain = toAddr.split('@')[1]?.toLowerCase();
     if (domain && !FREE_DOMAINS.has(domain)) {
-      client = await prisma.client.findFirst({
+      // Igual que en el mail entrante: si el dominio lo comparten varios
+      // clientes no se adivina, porque se termina asignando el equivocado.
+      const candidatos = await prisma.client.findMany({
         where: { emailDomain: { equals: domain, mode: 'insensitive' } },
         include: { defaultSeller: true },
+        take: 5,
       });
-      if (client) console.log(`   ✅ Match dominio To: @${domain}: ${client.name}`);
+      if (candidatos.length === 1) {
+        client = candidatos[0];
+        console.log(`   ✅ Match dominio To: @${domain}: ${client.name}`);
+      } else if (candidatos.length > 1) {
+        console.log(`   ⚠️  ${candidatos.length} clientes con el dominio @${domain} — entra sin cliente para asignar a mano`);
+      }
     }
   }
 
@@ -1617,15 +1628,29 @@ async function processEmail(mailData, imap) {
     const FREE_DOMAINS = new Set([
       'gmail.com', 'hotmail.com', 'outlook.com', 'yahoo.com', 'yahoo.com.ar',
       'live.com', 'icloud.com', 'protonmail.com', 'aol.com', 'zoho.com',
+      // No es un proveedor de mail, pero funciona igual: 70 clientes lo tienen
+      // cargado como dominio, asi que no identifica a ninguno.
+      'mercadolibre.com',
     ]);
     if (!client && !remitenteEsPropio && originalSender.includes('@')) {
       const domain = originalSender.split('@')[1]?.toLowerCase();
       if (domain && !FREE_DOMAINS.has(domain)) {
-        client = await prisma.client.findFirst({
+        // Un dominio puede estar cargado en varios clientes (una empresa con
+        // varias razones sociales, un estudio que factura por varias). Antes se
+        // tomaba el primero que apareciera y se asignaba el cliente equivocado:
+        // un mail de @electricidadpanamericana.com.ar termino en DOSVOLT SRL.
+        // Mismo criterio que la autovinculacion: si hay mas de uno, no se adivina.
+        const candidatos = await prisma.client.findMany({
           where: { emailDomain: { equals: domain, mode: 'insensitive' } },
           include: { defaultSeller: true },
+          take: 5,
         });
-        if (client) console.log(`   ✅ Match dominio @${domain}: ${client.name}`);
+        if (candidatos.length === 1) {
+          client = candidatos[0];
+          console.log(`   ✅ Match dominio @${domain}: ${client.name}`);
+        } else if (candidatos.length > 1) {
+          console.log(`   ⚠️  ${candidatos.length} clientes con el dominio @${domain} — entra sin cliente para asignar a mano`);
+        }
       } else if (domain && FREE_DOMAINS.has(domain)) {
         console.log(`   ⚠️  Dominio genérico @${domain} ignorado para matcheo`);
       }
