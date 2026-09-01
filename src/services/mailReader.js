@@ -707,7 +707,9 @@ async function processNotaPedido(parsed, mailData, att, imap) {
           data: {
             code:         ocCode,
             clientId,
-            sellerId:     presupuesto.sellerId || client?.defaultSellerId || null,
+            // Solo si el vendedor del cliente esta activo: asignar a una cuenta
+            // dada de baja deja la orden huerfana, se ve "Sin asignar" (MYS-0014).
+            sellerId:     presupuesto.sellerId || (client?.defaultSeller?.active ? client.defaultSellerId : null),
             fromQuoteId:  presupuesto.id,
             stage:        'np_enviada',
             flexxusCode:  npData.npCode,
@@ -742,7 +744,9 @@ async function processNotaPedido(parsed, mailData, att, imap) {
       data: {
         code,
         clientId:       client?.id || presupuesto?.clientId || null,
-        sellerId:       presupuesto?.sellerId || client?.defaultSellerId || null,
+        // Igual que la orden: primero el del presupuesto que la origino, y si no
+        // el del cliente, siempre que su cuenta siga activa (MYS-0014).
+        sellerId:       presupuesto?.sellerId || (client?.defaultSeller?.active ? client.defaultSellerId : null),
         stage:          npEntryStage,
         source:         'EMAIL',
         mailType:       'NOTA_PEDIDO',
