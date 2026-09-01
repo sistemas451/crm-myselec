@@ -116,6 +116,8 @@ const CrmApi = {
     }).then(r => r.ok ? r.json() : r.json().then(b => Promise.reject(new Error(b.error || `Error ${r.status}`))));
   },
   createQuote: (data) => apiFetch('/quotes', { method: 'POST', body: JSON.stringify(data) }),
+  updateQuotePedido: (id, pedido, pedidoDe, pedidoRef) =>
+    apiFetch(`/quotes/${id}/pedido`, { method: 'PATCH', body: JSON.stringify({ pedido, pedidoDe, pedidoRef }) }),
   changeQuoteStage: (id, stage, extra = {}) => apiFetch(`/quotes/${id}/stage`, {
     method: 'PATCH', body: JSON.stringify({ stage, ...extra })
   }),

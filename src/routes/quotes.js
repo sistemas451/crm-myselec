@@ -279,7 +279,8 @@ router.get('/send-accounts', authMiddleware, async (req, res) => {
 // POST /api/quotes - Create new quote
 router.post('/', authMiddleware, async (req, res) => {
   try {
-    const { clientId, sellerId, amount, source, notes, currency, type, ingreso } = req.body;
+    const { clientId, sellerId, amount, source, notes, currency, type, ingreso,
+            pedido, pedidoDe, pedidoRef } = req.body;
 
     // type: 'SOLICITUD' (pedido que entra por otro canal y hay que cotizar) o
     // 'PRESUPUESTO' (ya armado y enviado por fuera del CRM). Default PRESUPUESTO
@@ -313,6 +314,13 @@ router.post('/', authMiddleware, async (req, res) => {
         prisma.appSetting.findUnique({ where: { key: 'deadline_days' } }),
       ]);
       data.mailType = 'SOLICITUD';
+      // El pedido del cliente (lo que mando por WhatsApp, dicto por telefono, etc)
+      // se guarda en los mismos campos que el cuerpo del mail, para que la ficha
+      // lo muestre igual que una solicitud que entro por correo. emailMessageId
+      // queda en null: es lo que distingue una manual de una ingresada por mail.
+      if (pedido    && String(pedido).trim())    data.emailBody    = String(pedido).trim();
+      if (pedidoDe  && String(pedidoDe).trim())  data.emailFrom    = String(pedidoDe).trim();
+      if (pedidoRef && String(pedidoRef).trim()) data.emailSubject = String(pedidoRef).trim();
       data.stage    = sellerId ? (conVendedor?.value || 'asignada') : (sinVendedor?.value || 'recibida');
       data.stageChangedAt = new Date();
       // Fecha límite de armado: igual que al asignar vendedor desde el tablero
@@ -1118,6 +1126,54 @@ router.patch('/:id/deadline', authMiddleware, async (req, res) => {
   } catch (err) {
     console.error('Error updating deadline:', err);
     res.status(500).json({ error: 'Error al actualizar fecha límite' });
+  }
+});
+
+// PATCH /api/quotes/:id/pedido — editar el pedido de una solicitud cargada a mano.
+// Solo para las manuales: si vino por correo (emailMessageId), el cuerpo es el
+// mail real y no se toca.
+router.patch('/:id/pedido', authMiddleware, async (req, res) => {
+  try {
+    const { pedido, pedidoDe, pedidoRef } = req.body;
+    const quote = await prisma.quote.findUnique({
+      where:  { id: req.params.id },
+      select: { id: true, code: true, sellerId: true, mailType: true, emailMessageId: true },
+    });
+    if (!quote) return res.status(404).json({ error: 'Cotización no encontrada' });
+    if (quote.emailMessageId) {
+      return res.status(400).json({ error: 'Esta solicitud entró por mail: el cuerpo del correo no se edita' });
+    }
+    if (quote.mailType !== 'SOLICITUD') {
+      return res.status(400).json({ error: 'Solo se puede editar el pedido de una solicitud' });
+    }
+    if (req.user.role === 'VENDEDOR' && quote.sellerId !== req.user.id) {
+      return res.status(403).json({ error: 'Sin permiso sobre esta cotización' });
+    }
+
+    const limpio = v => (v != null && String(v).trim()) ? String(v).trim() : null;
+    const updated = await prisma.quote.update({
+      where: { id: quote.id },
+      data: {
+        emailBody:    limpio(pedido),
+        emailFrom:    limpio(pedidoDe),
+        emailSubject: limpio(pedidoRef),
+      },
+      select: { emailBody: true, emailFrom: true, emailSubject: true },
+    });
+
+    await prisma.activity.create({
+      data: {
+        action: 'PEDIDO_EDITED',
+        detail: `Editó el pedido de ${quote.code}`,
+        userId: req.user.id,
+        quoteId: quote.id,
+      },
+    });
+
+    res.json(updated);
+  } catch (err) {
+    console.error('Error al editar pedido:', err);
+    res.status(500).json({ error: 'Error al guardar el pedido' });
   }
 });
 

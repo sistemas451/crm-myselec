@@ -992,16 +992,21 @@ function QuoteDetail({ code, onClose, canReassign }) {
   const isSolicitud = q.mailType === 'SOLICITUD' || (q.source === 'EMAIL' && !q.mailType);
   const isOC = q.mailType === 'OC';
   const isManual = q.source !== 'EMAIL';
-  // Una solicitud cargada a mano (teléfono, WhatsApp, web) no tiene mail detrás:
-  // la pestaña Mail se esconde en vez de mostrarla vacía.
-  const tieneMail = !!q.emailSubject;
-  const defaultTab = isSolicitud ? (tieneMail ? 'mail' : 'notas') : isOC ? 'items' : 'resumen';
+  // emailMessageId solo lo tienen las que entraron por correo. Las cargadas a
+  // mano guardan el pedido del cliente en los mismos campos, pero se muestran
+  // como "Pedido" y se pueden editar.
+  const esDeMail  = !!q.emailMessageId;
+  const defaultTab = isSolicitud ? 'mail' : isOC ? 'items' : 'resumen';
   const [tab, setTab] = useState(defaultTab);
   const [stageOpen, setStageOpen] = useState(false);
   const [rejectPending, setRejectPending] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
   const [rejectNotes, setRejectNotes] = useState('');
   const [notes, setNotes] = useState([]);
+  // Edición del pedido (solo solicitudes cargadas a mano)
+  const [editPedido,   setEditPedido]   = useState(false);
+  const [pedidoVal,    setPedidoVal]    = useState({ body:'', de:'', ref:'' });
+  const [pedidoSaving, setPedidoSaving] = useState(false);
   const [notesLoading, setNotesLoading] = useState(true);
   const [newNote, setNewNote] = useState('');
   const [savingNote, setSavingNote] = useState(false);
@@ -1720,7 +1725,7 @@ function QuoteDetail({ code, onClose, canReassign }) {
           }/>}
           {!isSolicitud && <Field label="Cod. Flexxus PR" mono value={q.flexxus || '—'}/>}
           {!isSolicitud && <Field label="Zona de entrega" value={cli?.zone || '—'}/>}
-          {!tieneMail && <Field label="Origen" value={SOURCE_LABELS[q.source] || 'Carga manual'}/>}
+          {!esDeMail && isSolicitud && <Field label="Origen" value={SOURCE_LABELS[q.source] || 'Carga manual'}/>}
           <Field label="Contacto">
             {cli?.email
               ? <a href={`mailto:${cli.email}`} className="text-brand hover:underline text-[12.5px] truncate block">{cli.email}</a>
@@ -1879,7 +1884,7 @@ function QuoteDetail({ code, onClose, canReassign }) {
         const nonImageAdj = detailAttachments.filter(a => !a.mimeType?.startsWith('image/'));
         const tabs = isSolicitud
           ? [
-              ...(tieneMail ? [{ id:'mail', label:'Mail' }] : []),
+              { id:'mail',     label: esDeMail ? 'Mail' : 'Pedido' },
               { id:'adj',      label:'Adjuntos', count: nonImageAdj.length > 0 ? nonImageAdj.length : null },
               { id:'historial',label:'Historial' },
               { id:'notas',    label:'Notas', count: notes.length > 0 ? notes.length : null },
@@ -1913,29 +1918,95 @@ function QuoteDetail({ code, onClose, canReassign }) {
       {tab === 'mail' && (
         <div className="p-6">
           <div className="bg-white border border-line rounded-xl overflow-hidden">
-            {/* Header del mail */}
+            {/* Mismo bloque para un mail real o para un pedido cargado a mano */}
             <div className="px-5 py-4 border-b border-line space-y-2.5">
-              <div className="flex items-start gap-3">
-                <span className="text-[11px] uppercase tracking-wider font-semibold text-ink-500 w-16 shrink-0 pt-0.5">Asunto</span>
-                <span className="text-[14px] font-semibold text-ink-900 leading-snug">{q.emailSubject || '(sin asunto)'}</span>
-              </div>
+              {editPedido ? (
+                <>
+                  <div className="flex items-start gap-3">
+                    <span className="text-[11px] uppercase tracking-wider font-semibold text-ink-500 w-20 shrink-0 pt-2">Referencia</span>
+                    <input className="inp flex-1 text-[13px]" placeholder="Ej: Pedido cables 3x2.5"
+                      value={pedidoVal.ref} onChange={e => setPedidoVal(v => ({...v, ref: e.target.value}))}/>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <span className="text-[11px] uppercase tracking-wider font-semibold text-ink-500 w-20 shrink-0 pt-2">De</span>
+                    <input className="inp flex-1 text-[13px]" placeholder="Ej: Juan Pérez · 351 555 1234"
+                      value={pedidoVal.de} onChange={e => setPedidoVal(v => ({...v, de: e.target.value}))}/>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-start gap-3">
+                    <span className="text-[11px] uppercase tracking-wider font-semibold text-ink-500 w-20 shrink-0 pt-0.5">
+                      {esDeMail ? 'Asunto' : 'Referencia'}
+                    </span>
+                    <span className="text-[14px] font-semibold text-ink-900 leading-snug flex-1">
+                      {q.emailSubject || (esDeMail ? '(sin asunto)' : '—')}
+                    </span>
+                    {!esDeMail && isSolicitud && (
+                      <button
+                        onClick={() => { setPedidoVal({ body: detailEmailBody || '', de: q.emailFrom || '', ref: q.emailSubject || '' }); setEditPedido(true); }}
+                        className="shrink-0 text-[12px] text-brand hover:underline flex items-center gap-1">
+                        <Icon name="pencil" size={12}/>Editar
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-[11px] uppercase tracking-wider font-semibold text-ink-500 w-20 shrink-0">De</span>
+                    <span className={cx('text-[13px] text-ink-700', esDeMail && 'mono')}>{q.emailFrom || '—'}</span>
+                  </div>
+                </>
+              )}
               <div className="flex items-center gap-3">
-                <span className="text-[11px] uppercase tracking-wider font-semibold text-ink-500 w-16 shrink-0">De</span>
-                <span className="text-[13px] text-ink-700 mono">{q.emailFrom || '—'}</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <span className="text-[11px] uppercase tracking-wider font-semibold text-ink-500 w-16 shrink-0">Ingreso</span>
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-ink-500 w-20 shrink-0">Ingreso</span>
                 <span className="text-[13px] text-ink-500">{fmtDate(q.ingreso)} · hace {q.dias}d</span>
               </div>
             </div>
             {/* Cuerpo */}
             <div className="px-5 py-4">
-              {detailEmailBody ? (
+              {editPedido ? (
+                <div className="space-y-3">
+                  <textarea rows="12" autoFocus
+                    className="inp w-full resize-none text-[12.5px] leading-relaxed"
+                    placeholder="Pegá acá lo que te escribió el cliente, o escribí lo que te pidió…"
+                    value={pedidoVal.body} onChange={e => setPedidoVal(v => ({...v, body: e.target.value}))}/>
+                  <div className="flex items-center justify-end gap-2">
+                    <button className="btn-ghost text-[12px] py-1.5 px-3" disabled={pedidoSaving}
+                      onClick={() => setEditPedido(false)}>Cancelar</button>
+                    <button className="btn-primary text-[12px] py-1.5 px-3" disabled={pedidoSaving}
+                      onClick={async () => {
+                        if (!window.confirm('Se va a reemplazar el pedido guardado por este texto. ¿Confirmás?')) return;
+                        setPedidoSaving(true);
+                        try {
+                          await CrmApi.updateQuotePedido(q.id, pedidoVal.body, pedidoVal.de, pedidoVal.ref);
+                          setDetailEmailBody(pedidoVal.body);
+                          updateQuote(q.code, { emailSubject: pedidoVal.ref || null, emailFrom: pedidoVal.de || null });
+                          setEditPedido(false);
+                          pushToast('Pedido actualizado');
+                        } catch (err) {
+                          pushToast(err.message || 'Error al guardar el pedido', 'bad');
+                        } finally { setPedidoSaving(false); }
+                      }}>
+                      <Icon name={pedidoSaving ? 'loader' : 'check'} size={12} className={pedidoSaving ? 'animate-spin' : ''}/>
+                      {pedidoSaving ? 'Guardando…' : 'Guardar'}
+                    </button>
+                  </div>
+                </div>
+              ) : detailEmailBody ? (
                 <pre className="text-[12.5px] text-ink-700 whitespace-pre-wrap font-sans leading-relaxed max-h-[480px] overflow-y-auto scroll-thin">
                   {detailEmailBody}
                 </pre>
-              ) : (
+              ) : esDeMail ? (
                 <div className="text-[13px] text-ink-400 py-8 text-center">Sin cuerpo de mail guardado</div>
+              ) : (
+                <div className="text-[13px] text-ink-400 py-8 text-center">
+                  Todavía no cargaste el pedido del cliente.
+                  {isSolicitud && (
+                    <button className="block mx-auto mt-2 text-brand hover:underline text-[13px]"
+                      onClick={() => { setPedidoVal({ body:'', de: q.emailFrom || '', ref: q.emailSubject || '' }); setEditPedido(true); }}>
+                      Cargarlo ahora
+                    </button>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -2175,6 +2246,7 @@ function QuoteDetail({ code, onClose, canReassign }) {
                   LINKED:              { name:'link',           cls:'text-violet-600 bg-violet-50' },
                   ATTACHMENT_UPLOADED: { name:'paperclip',      cls:'text-sky-600 bg-sky-50' },
                   REMINDER_SENT:       { name:'bell',           cls:'text-amber-600 bg-amber-50' },
+                  PEDIDO_EDITED:       { name:'pencil',         cls:'text-ink-500 bg-surface' },
                 };
                 const ic = iconMap[a.action] || { name:'activity', cls:'text-ink-500 bg-surface' };
                 const isLast = i === history.length - 1;

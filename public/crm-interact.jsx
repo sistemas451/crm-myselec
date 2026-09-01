@@ -574,6 +574,9 @@ function NewQuoteModal({ defaultClient }) {
     currency: 'USD',
     origin: 'Mail',
     observaciones: '',
+    pedido: '',
+    pedidoDe: '',
+    pedidoRef: '',
   });
   const [saving, setSaving] = useS(false);
   const [parsing, setParsing] = useS(false);
@@ -629,7 +632,10 @@ function NewQuoteModal({ defaultClient }) {
         currency: form.currency,
         source,
         ingreso: form.ingreso || null,
-        notes: form.observaciones || null,
+        // En una solicitud el texto del cliente va al cuerpo del pedido (se ve
+        // como el mail); las Observaciones son del presupuesto y son una nota.
+        notes: esSolicitud ? null : (form.observaciones || null),
+        ...(esSolicitud ? { pedido: form.pedido || null, pedidoDe: form.pedidoDe || null, pedidoRef: form.pedidoRef || null } : {}),
       });
       if (pdfFile && created?.id) {
         try {
@@ -786,11 +792,30 @@ function NewQuoteModal({ defaultClient }) {
             <input type="number" className="inp flex-1" placeholder="Ej: 45200" value={form.monto} onChange={e=>set('monto',e.target.value)}/>
           </div>
         </FormGroup>}
-        <FormGroup label="Observaciones" cols={2}>
-          <textarea rows="3" className="inp w-full resize-none" placeholder="Contexto del pedido, urgencia, condiciones particulares…"
-            value={form.observaciones} onChange={e=>set('observaciones',e.target.value)}/>
-          <p className="text-[11px] text-ink-400 mt-1">Se guarda como la primera nota del caso.</p>
-        </FormGroup>
+        {esSolicitud ? (
+          <>
+            <FormGroup label="Referencia" hint="Opcional — como el asunto de un mail">
+              <input className="inp w-full" placeholder="Ej: Pedido cables 3x2.5"
+                value={form.pedidoRef} onChange={e=>set('pedidoRef',e.target.value)}/>
+            </FormGroup>
+            <FormGroup label="De" hint="Opcional — quién lo pidió">
+              <input className="inp w-full" placeholder="Ej: Juan Pérez · 351 555 1234"
+                value={form.pedidoDe} onChange={e=>set('pedidoDe',e.target.value)}/>
+            </FormGroup>
+            <FormGroup label="Pedido del cliente" cols={2}>
+              <textarea rows="6" className="inp w-full resize-none"
+                placeholder="Pegá acá lo que te escribió el cliente por WhatsApp, o escribí lo que te pidió por teléfono…"
+                value={form.pedido} onChange={e=>set('pedido',e.target.value)}/>
+              <p className="text-[11px] text-ink-400 mt-1">Se muestra en la ficha igual que el cuerpo de un mail. Después lo podés editar.</p>
+            </FormGroup>
+          </>
+        ) : (
+          <FormGroup label="Observaciones" cols={2}>
+            <textarea rows="3" className="inp w-full resize-none" placeholder="Contexto del pedido, urgencia, condiciones particulares…"
+              value={form.observaciones} onChange={e=>set('observaciones',e.target.value)}/>
+            <p className="text-[11px] text-ink-400 mt-1">Se guarda como la primera nota del caso.</p>
+          </FormGroup>
+        )}
       </div>
     </Modal>
   );
