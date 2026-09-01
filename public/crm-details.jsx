@@ -2247,6 +2247,7 @@ function QuoteDetail({ code, onClose, canReassign }) {
                   ATTACHMENT_UPLOADED: { name:'paperclip',      cls:'text-sky-600 bg-sky-50' },
                   REMINDER_SENT:       { name:'bell',           cls:'text-amber-600 bg-amber-50' },
                   PEDIDO_EDITED:       { name:'pencil',         cls:'text-ink-500 bg-surface' },
+                  DUPLICATE_MERGED:    { name:'copy',           cls:'text-ink-500 bg-surface' },
                 };
                 const ic = iconMap[a.action] || { name:'activity', cls:'text-ink-500 bg-surface' };
                 const isLast = i === history.length - 1;

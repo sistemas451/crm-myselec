@@ -855,6 +855,118 @@ async function heredarVendedorDeSolicitud(presupuestoId, solicitud) {
   }
 }
 
+/**
+ * Un mismo presupuesto de Flexxus suele llegar dos veces: el vendedor lo manda y
+ * despues reenvia ese mismo mail. Los dos salen de la carpeta Enviados con el
+ * mismo PDF, pero con identificador de mail distinto, asi que se creaban dos
+ * cotizaciones (MYS-0018).
+ *
+ * Se considera el mismo presupuesto cuando coincide el codigo de Flexxus Y el
+ * total. Si el total cambio es una revision real del presupuesto y si tiene que
+ * entrar como cotizacion nueva.
+ */
+async function buscarPresupuestoDuplicado(npCode, total) {
+  if (!npCode) return null;
+  const existentes = await prisma.quote.findMany({
+    where:   { flexxusCode: npCode, mailType: 'PRESUPUESTO' },
+    orderBy: { createdAt: 'asc' },
+    include: { _count: { select: { items: true, attachments: true } } },
+  });
+  if (!existentes.length) return null;
+  const mismoTotal = (a, b) => {
+    if (a == null || b == null) return a == null && b == null;
+    return Math.abs(a - b) < 0.01;
+  };
+  return existentes.find(q => mismoTotal(q.amount, total)) || null;
+}
+
+/**
+ * Cuando se detecta el reenvio, no se descarta el mail: lo que traiga de nuevo se
+ * suma a la cotizacion que ya existe, para no perder nada. Adjuntos que no esten,
+ * items si la original quedo sin ellos, y siempre una actividad con el asunto y
+ * el identificador del mail para que quede el rastro.
+ */
+async function absorberEnPresupuesto(existente, { subject, messageId, attachments = [], flexxusData }) {
+  // El mail reenviado no queda guardado en ninguna Quote, asi que sin esta marca
+  // cada sincronizacion volveria a absorberlo y a duplicar adjuntos y actividades.
+  if (messageId) {
+    const yaRegistrado = await prisma.activity.findFirst({
+      where: { quoteId: existente.id, detail: { contains: messageId } },
+      select: { id: true },
+    });
+    if (yaRegistrado) {
+      console.log(`   ⏭️  Reenvio ya registrado en ${existente.code} — nada que hacer`);
+      return;
+    }
+  }
+
+  // Adjuntos que la cotizacion original no tenga (se comparan por nombre)
+  let nuevos = 0;
+  if (attachments.length) {
+    const previos = await prisma.attachment.findMany({
+      where: { quoteId: existente.id }, select: { originalName: true },
+    });
+    const conocidos = new Set(previos.map(a => (a.originalName || '').toLowerCase()));
+    for (const att of attachments) {
+      const rawName = att.filename || att.name || `adjunto-${Date.now()}`;
+      if (conocidos.has(rawName.toLowerCase())) continue;
+      try {
+        const safeName = `${existente.id}-${rawName.replace(/[^a-zA-Z0-9._\-]/g, '_')}`;
+        const filePath = path.join(UPLOADS_DIR, safeName);
+        fs.writeFileSync(filePath, att.content);
+        await prisma.attachment.create({
+          data: {
+            filename: safeName, originalName: rawName, path: filePath,
+            size: att.size || att.content?.length || null,
+            mimeType: att.contentType || null, quoteId: existente.id,
+          },
+        });
+        conocidos.add(rawName.toLowerCase());
+        nuevos++;
+      } catch (e) {
+        console.error(`   ❌ Error guardando adjunto del reenvio ${rawName}:`, e.message);
+      }
+    }
+  }
+
+  // Si la original quedo sin items y este parseo si los trajo, completarla
+  let itemsAgregados = 0;
+  if (!existente._count?.items && flexxusData?.items?.length) {
+    try {
+      await prisma.quoteItem.createMany({
+        data: flexxusData.items.map((item, i) => ({
+          quoteId:     existente.id,
+          sku:         item.sku || null,
+          description: (item.description || '').substring(0, 500),
+          quantity:    item.quantity || 0,
+          unit:        item.unit || null,
+          unitPrice:   item.unitPrice || null,
+          total:       item.total || null,
+          accepted:    item.accepted !== false,
+          sortOrder:   i,
+        })),
+      });
+      itemsAgregados = flexxusData.items.length;
+    } catch (e) {
+      console.error('   ❌ Error completando items desde el reenvio:', e.message);
+    }
+  }
+
+  const extra = [
+    nuevos ? `${nuevos} adjunto(s) nuevo(s)` : null,
+    itemsAgregados ? `${itemsAgregados} item(s) completados` : null,
+  ].filter(Boolean).join(', ');
+
+  await prisma.activity.create({
+    data: {
+      action:  'DUPLICATE_MERGED',
+      detail:  `Se recibió de nuevo el mismo presupuesto ${existente.flexxusCode} ("${(subject || '').substring(0, 120)}") — no se creó una cotización duplicada${extra ? `. Se sumó: ${extra}` : ''}. [${messageId || 'sin id'}]`,
+      quoteId: existente.id,
+    },
+  });
+  console.log(`   ♻️  Reenvio del mismo presupuesto — absorbido en ${existente.code}${extra ? ` (${extra})` : ''}`);
+}
+
 async function processSentMail(parsed, mailData, imap) {
   const subject    = parsed.subject || '(sin asunto)';
   const date       = parsed.date    || new Date();
@@ -1016,11 +1128,21 @@ async function processSentMail(parsed, mailData, imap) {
   }
 
   // ── Crear Quote ───────────────────────────────────────────────────────────
-  const code = await nextCode(prisma.quote, 'COT-2026');
   const itemsSubtotal = flexxusData?.items?.length
     ? flexxusData.items.filter(i => i.accepted !== false).reduce((s, i) => s + (i.total || 0), 0)
     : null;
   const flexxusGrandTotal = flexxusData?.total || itemsSubtotal; // total con IVA del PDF, fallback suma ítems
+
+  // ¿Es el mismo presupuesto que ya entró, reenviado? (MYS-0018)
+  const yaExiste = await buscarPresupuestoDuplicado(flexxusData?.npCode, flexxusGrandTotal);
+  if (yaExiste) {
+    await absorberEnPresupuesto(yaExiste, {
+      subject, messageId, attachments: realAttachments, flexxusData,
+    });
+    return null;
+  }
+
+  const code = await nextCode(prisma.quote, 'COT-2026');
 
   const bodyText = parsed.text || (parsed.html ? stripHtml(parsed.html) : '');
 
@@ -1537,14 +1659,26 @@ async function processEmail(mailData, imap) {
     }
 
     // ── Crear cotización ──────────────────────────────────────────────────
-    const year = new Date().getFullYear();
-    const code = await nextCode(prisma.quote, mailType === 'PRESUPUESTO' ? `COT-${year}` : `SOL-${year}`);
-
     // Calcular monto total de ítems Flexxus (solo los aceptados)
     const itemsSubtotal = flexxusData?.items?.length
       ? flexxusData.items.filter(i => i.accepted).reduce((s, i) => s + (i.total || 0), 0)
       : null;
     const flexxusGrandTotal = flexxusData?.total || itemsSubtotal; // total con IVA del PDF
+
+    // Mismo presupuesto que ya entró, reenviado o respondido de nuevo (MYS-0018).
+    // Solo aplica a PRESUPUESTO: una SOLICITUD no tiene código de Flexxus propio.
+    if (mailType === 'PRESUPUESTO') {
+      const yaExiste = await buscarPresupuestoDuplicado(flexxusData?.npCode, flexxusGrandTotal);
+      if (yaExiste) {
+        await absorberEnPresupuesto(yaExiste, {
+          subject, messageId, attachments: realAttachments, flexxusData,
+        });
+        return null;
+      }
+    }
+
+    const year = new Date().getFullYear();
+    const code = await nextCode(prisma.quote, mailType === 'PRESUPUESTO' ? `COT-${year}` : `SOL-${year}`);
 
     // Leer etapas de entrada configurables + follow_up_days (para paridad con creación manual)
     const stageAndFudSettings = await prisma.appSetting.findMany({
@@ -1945,4 +2079,4 @@ async function resyncQuoteEmail(quoteId) {
   });
 }
 
-module.exports = { syncMails, syncAccount, listRecentMails, resyncQuoteEmail, heredarVendedorDeSolicitud };
+module.exports = { syncMails, syncAccount, listRecentMails, resyncQuoteEmail, heredarVendedorDeSolicitud, buscarPresupuestoDuplicado, absorberEnPresupuesto };
