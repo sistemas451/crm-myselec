@@ -290,12 +290,25 @@ function splitCodeQty(pre, total, unitPrice) {
         return { sku: code || null, qty: qtyCand };
       }
     }
-    // Fallback: dígitos al final como cantidad, validados contra los precios
-    const td = pre.match(/^(.*?)(\d{1,6})$/);
-    if (td) {
-      const q = parseInt(td[2], 10);
-      if (q > 0 && Math.abs(q * unitPrice - total) <= Math.max(0.05, total * 0.02)) {
-        return { sku: td[1].trim() || null, qty: q };
+    // Fallback: dígitos al final como cantidad, validados contra los precios.
+    // Se prueban todos los largos, del más largo al más corto: con un solo
+    // intento sobre el máximo de dígitos no alcanza. En "ROJO69338-21260" los
+    // dígitos finales son "21260", que no valida contra los precios, y la
+    // cantidad real es "1260" — sin reintentar quedaba la del cociente (1259
+    // por redondeo) y el código con la cantidad pegada.
+    const dig = pre.match(/(\d+)$/);
+    if (dig) {
+      const cola = dig[1];
+      for (let len = Math.min(6, cola.length); len >= 1; len--) {
+        const cand = cola.slice(-len);
+        // "0200" vale 200 igual que "200", pero se comeria un digito del
+        // codigo: en "ZCC 10200" dejaria "ZCC 1" en vez de "ZCC 10".
+        if (len > 1 && cand.startsWith('0')) continue;
+        const q = parseInt(cand, 10);
+        if (!(q > 0)) continue;
+        if (Math.abs(q * unitPrice - total) <= Math.max(0.05, total * 0.02)) {
+          return { sku: pre.slice(0, pre.length - len).trim() || null, qty: q };
+        }
       }
     }
     return { sku: pre || null, qty: qtyCand > 0 ? qtyCand : 1 };
