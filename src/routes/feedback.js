@@ -143,13 +143,17 @@ async function nextCode() {
 
 const TYPE_LABEL = { BUG: 'Error', QUESTION: 'Pregunta' };
 
-const POST_INCLUDE = {
+// Los borradores solo los ve quien los escribió: para el resto, el hilo se ve
+// como si no existieran hasta que se publican.
+const postInclude = (userId) => ({
   user: { select: { id: true, name: true, email: true, avatar: true, role: true } },
   responses: {
+    where: { OR: [{ published: true }, { userId: userId || '' }] },
     orderBy: { createdAt: 'asc' },
     include: { user: { select: { id: true, name: true, avatar: true, role: true } } },
   },
-};
+});
+const POST_INCLUDE = postInclude(null);
 
 // ── GET /meta ─────────────────────────────────────────────────────────────────
 router.get('/meta', async (req, res) => {
@@ -188,11 +192,88 @@ router.post('/mark-seen', async (req, res) => {
 });
 
 // ── GET / ─────────────────────────────────────────────────────────────────────
+// ── GET /drafts — cuántos borradores tengo sin publicar ──────────────────────
+router.get('/drafts', async (req, res) => {
+  try {
+    const drafts = await prisma.feedbackResponse.findMany({
+      where:  { userId: req.user.id, published: false },
+      orderBy: { createdAt: 'asc' },
+      include: { post: { select: { code: true, title: true } } },
+    });
+    res.json(drafts.map(d => ({
+      id: d.id, postCode: d.post?.code, postTitle: d.post?.title,
+      body: d.body, draftStatus: d.draftStatus, createdAt: d.createdAt,
+    })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /publish-drafts — publicar todos mis borradores de una ──────────────
+// Recién acá se aplica el cambio de estado y se manda el mail al autor.
+router.post('/publish-drafts', async (req, res) => {
+  try {
+    if (!isDeveloper(req.user)) return res.status(403).json({ error: 'Solo desarrolladores.' });
+
+    const drafts = await prisma.feedbackResponse.findMany({
+      where:  { userId: req.user.id, published: false },
+      orderBy: { createdAt: 'asc' },
+      include: { post: { include: { user: { select: { name: true, email: true, notificationPrefs: true } } } } },
+    });
+    if (!drafts.length) return res.json({ publicados: 0, fallos: [] });
+
+    const fallos = [];
+    let publicados = 0;
+
+    for (const d of drafts) {
+      const post = d.post;
+      try {
+        await prisma.$transaction([
+          prisma.feedbackResponse.update({ where: { id: d.id }, data: { published: true } }),
+          prisma.feedbackPost.update({ where: { id: post.id }, data: { status: d.draftStatus || post.status } }),
+        ]);
+        publicados++;
+      } catch (e) {
+        fallos.push({ code: post.code, error: e.message });
+        continue;   // si no se pudo publicar, no mandar el mail
+      }
+
+      // El mail va después de publicar: si falla, la respuesta ya quedó visible igual
+      try {
+        if (post.user.email && post.user.email !== req.user.email && userEmailPref(post.user.notificationPrefs, 'foro_response')) {
+          await sendMail({
+            to: post.user.email,
+            replyTo: req.user.email,
+            subject: `[MySelec CRM] Respuesta a tu reporte ${post.code}`,
+            html: require('../services/emailTemplate').brandedEmail({
+              title: `Respuesta · ${post.code}`,
+              preheader: `${req.user.name} respondió a tu reporte`,
+              content: [
+                require('../services/emailTemplate').emailParagraph(`<strong>${req.user.name}</strong> respondió a: <em>${post.title}</em>`),
+                `<div style="background:#F5F6F7;border-left:3px solid #20759E;border-radius:4px;padding:14px 16px;margin:16px 0;white-space:pre-wrap;font-size:14px;color:#231F20;line-height:1.6">${escHtml(d.body)}</div>`,
+                require('../services/emailTemplate').emailParagraph('Podés ver el hilo completo en la sección <strong>Foro</strong> del CRM.'),
+              ].join(''),
+            }),
+            text: `${req.user.name} respondió tu reporte ${post.code}:\n\n${d.body}`,
+          });
+        }
+      } catch (mailErr) {
+        console.warn(`⚠️  publish-drafts: no se pudo notificar ${post.code}:`, mailErr.message);
+      }
+    }
+
+    console.log(`[FORO] ${req.user.email} publicó ${publicados} borrador(es)`);
+    res.json({ publicados, fallos });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/', async (req, res) => {
   try {
     const posts = await prisma.feedbackPost.findMany({
       orderBy: { createdAt: 'desc' },
-      include: POST_INCLUDE,
+      include: postInclude(req.user.id),
     });
     res.json(posts);
   } catch (err) {
@@ -205,7 +286,7 @@ router.get('/:id', async (req, res) => {
   try {
     const post = await prisma.feedbackPost.findUnique({
       where: { id: req.params.id },
-      include: POST_INCLUDE,
+      include: postInclude(req.user.id),
     });
     if (!post) return res.status(404).json({ error: 'Post no encontrado.' });
     res.json(post);
@@ -274,7 +355,7 @@ router.post('/', async (req, res) => {
 router.post('/:id/respond', async (req, res) => {
   try {
     if (!isDeveloper(req.user)) return res.status(403).json({ error: 'Solo desarrolladores pueden responder.' });
-    const { body, status } = req.body;
+    const { body, status, draft } = req.body;
     if (!body?.trim()) return res.status(400).json({ error: 'La respuesta no puede estar vacía.' });
     if (status && !VALID_STATUSES.includes(status)) return res.status(400).json({ error: 'Estado inválido.' });
 
@@ -285,6 +366,15 @@ router.post('/:id/respond', async (req, res) => {
     if (!post) return res.status(404).json({ error: 'Post no encontrado.' });
 
     const newStatus = status || (post.status === 'OPEN' ? 'REVIEWING' : post.status);
+
+    // Borrador: se guarda y nada más. Ni mail ni cambio de estado hasta publicar.
+    if (draft) {
+      const borrador = await prisma.feedbackResponse.create({
+        data: { body: body.trim(), userId: req.user.id, postId: post.id, published: false, draftStatus: newStatus },
+        include: { user: { select: { id: true, name: true, avatar: true, role: true } } },
+      });
+      return res.json({ response: borrador, newStatus: post.status, draft: true });
+    }
 
     const [response] = await prisma.$transaction([
       prisma.feedbackResponse.create({

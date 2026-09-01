@@ -5616,7 +5616,35 @@ function FbTypeBadge({ type }) {
 }
 
 // ── Vista lista ───────────────────────────────────────────────────────────────
-function FeedbackListView({ onNew, onOpen, posts, loading, isAdmin, currentUserId, lastForoCheck }) {
+function FeedbackListView({ onNew, onOpen, posts, loading, isAdmin, currentUserId, lastForoCheck, onReload }) {
+  // Borradores: respuestas escritas pero sin publicar. Se publican todas juntas
+  // desde acá — recién ahí cambian el estado del caso y avisan por mail.
+  const [borradores, setBorradores] = useState([]);
+  const [publicando, setPublicando] = useState(false);
+  const cargarBorradores = React.useCallback(() => {
+    if (!isAdmin) return;
+    CrmApi.getFeedbackDrafts().then(setBorradores).catch(() => {});
+  }, [isAdmin]);
+  useEffect(() => { cargarBorradores(); }, [cargarBorradores, posts]);
+
+  async function publicarBorradores() {
+    if (!borradores.length) return;
+    const n = borradores.length;
+    if (!window.confirm(`Se van a publicar ${n} ${n === 1 ? 'respuesta' : 'respuestas'}.\n\nRecién ahí se cambia el estado de cada caso y se avisa por mail a quien lo reportó. ¿Confirmás?`)) return;
+    setPublicando(true);
+    try {
+      const r = await CrmApi.publishFeedbackDrafts();
+      setBorradores([]);
+      if (r.fallos?.length) alert(`Se publicaron ${r.publicados}, pero fallaron ${r.fallos.length}: ${r.fallos.map(f => f.code).join(', ')}`);
+      // Recargar solo el listado: un reload de la pagina entera sacaba al
+      // usuario del Foro y lo dejaba en el Dashboard.
+      await onReload?.();
+    } catch (e) {
+      alert(e.message || 'Error al publicar.');
+    }
+    setPublicando(false);
+  }
+
   const [search,     setSearch]     = useState('');
   const [typeFilter, setTypeFilter] = useState('ALL');
   // Para el developer, arranca mostrando solo lo que necesita atención (menos ruido al triar).
@@ -5672,10 +5700,20 @@ function FeedbackListView({ onNew, onOpen, posts, loading, isAdmin, currentUserI
             </h1>
             <p className="text-sm text-slate-500 mt-0.5">Reportá errores o hacé preguntas sobre el sistema. El equipo responde y hace seguimiento de forma pública.</p>
           </div>
-          <button onClick={onNew}
-            className="shrink-0 flex items-center gap-2 px-4 py-2 bg-brand text-white rounded-lg text-sm font-medium hover:bg-brand/90 shadow-sm">
-            <Icon name="plus" size={15}/>Nueva publicación
-          </button>
+          <div className="shrink-0 flex items-center gap-2">
+            {borradores.length > 0 && (
+              <button onClick={publicarBorradores} disabled={publicando}
+                title="Publica todas las respuestas que dejaste guardadas"
+                className="flex items-center gap-2 px-4 py-2 border border-amber-300 bg-amber-50 text-amber-800 rounded-lg text-sm font-medium hover:bg-amber-100 disabled:opacity-50">
+                <Icon name="send" size={15}/>
+                {publicando ? 'Publicando…' : `Publicar ${borradores.length} ${borradores.length === 1 ? 'borrador' : 'borradores'}`}
+              </button>
+            )}
+            <button onClick={onNew}
+              className="flex items-center gap-2 px-4 py-2 bg-brand text-white rounded-lg text-sm font-medium hover:bg-brand/90 shadow-sm">
+              <Icon name="plus" size={15}/>Nueva publicación
+            </button>
+          </div>
         </div>
 
         {/* Stats */}
@@ -5994,11 +6032,11 @@ function FeedbackDetailView({ postId, onBack, onUpdate, isAdmin, currentUserId }
     setReplyStatus(tpl.status);
   }
 
-  async function handleRespond() {
+  async function handleRespond(draft) {
     if (!replyBody.trim()) return;
     setSending(true);
     try {
-      const result = await CrmApi.respondFeedback(post.id, replyBody, replyStatus);
+      const result = await CrmApi.respondFeedback(post.id, replyBody, replyStatus, draft);
       setPost(prev => ({
         ...prev,
         status: result.newStatus || prev.status,
@@ -6367,7 +6405,12 @@ function FeedbackDetailView({ postId, onBack, onUpdate, isAdmin, currentUserId }
                       className="px-3 py-1.5 border border-slate-200 text-slate-600 rounded-lg text-sm hover:bg-slate-50">
                       Cancelar
                     </button>
-                    <button onClick={handleRespond} disabled={sending || !replyBody.trim()}
+                    <button onClick={() => handleRespond(true)} disabled={sending || !replyBody.trim()}
+                      title="Se guarda sin publicar: no cambia el estado ni avisa por mail"
+                      className="px-3 py-1.5 border border-amber-300 text-amber-700 bg-amber-50 rounded-lg text-sm font-medium hover:bg-amber-100 disabled:opacity-50">
+                      Guardar borrador
+                    </button>
+                    <button onClick={() => handleRespond(false)} disabled={sending || !replyBody.trim()}
                       className="px-4 py-1.5 bg-brand text-white rounded-lg text-sm font-medium hover:bg-brand/90 disabled:opacity-50 flex items-center gap-2">
                       {sending ? <><Icon name="loader" size={13} className="animate-spin"/>Enviando…</> : 'Responder y cambiar estado'}
                     </button>
@@ -6444,6 +6487,7 @@ function FeedbackView() {
     isAdmin={isAdmin}
     currentUserId={currentUserId}
     lastForoCheck={meta.lastForoCheck}
+    onReload={loadPosts}
     onNew={() => setView('new')}
     onOpen={(id) => { setPostId(id); setView('detail'); }}
   />;

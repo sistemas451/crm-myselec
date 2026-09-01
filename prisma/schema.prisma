@@ -348,6 +348,12 @@ model FeedbackPost {
 model FeedbackResponse {
   id        String       @id @default(uuid())
   body      String       @db.Text
+  // Borradores: se escriben ahora y se publican después, todos juntos.
+  // published=false -> no se ve en el hilo (salvo para quien lo escribió), no
+  // manda mail y no cambia el estado del caso. draftStatus guarda el estado que
+  // se va a aplicar al publicarlo.
+  published   Boolean    @default(true)
+  draftStatus String?
   userId    String
   user      User         @relation("FeedbackResponder", fields: [userId], references: [id])
   postId    String
