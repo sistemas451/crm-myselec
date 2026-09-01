@@ -328,16 +328,22 @@ function tryParseNewFormatItem(line, expectedNum) {
   if (!bnd || !bnd.desc || bnd.desc.length < 3) return null;
 
   const cq = splitCodeQty(pre, total, unitPrice);
-  const isNC = /NO COTIZA/i.test(bnd.desc);
+  // La leyenda puede caer en la descripcion o del lado del codigo, segun como
+  // pdf-parse corte la linea. Mirando solo la descripcion quedaban items con
+  // sku "NO COTIZANC" contados como cotizados.
+  const isNC = /NO\s*COTIZA/i.test(bnd.desc) || /NO\s*COTIZA/i.test(pre) || /NO\s*COTIZA/i.test(cq.sku || '');
+
+  // Idem formato viejo: sin precio no esta cotizado
+  const sinPrecio = !isNC && !unitPrice && !total;
 
   return {
     sku:         isNC ? null : (cq.sku || null),
     description: isNC ? 'NO COTIZA' : bnd.desc,
     quantity:    cq.qty,
     unit:        null,
-    unitPrice:   isNC ? null : unitPrice,
-    total:       isNC ? null : total,
-    accepted:    !isNC,
+    unitPrice:   (isNC || sinPrecio) ? null : unitPrice,
+    total:       (isNC || sinPrecio) ? null : total,
+    accepted:    !isNC && !sinPrecio,
     sortOrder:   bnd.itemNum - 1,
     brand:       bnd.brand || null,
   };
@@ -386,16 +392,44 @@ function parseItems(lines, catalog) {
     const brand    = m[4].trim();
     const sortOrder= parseInt(m[5], 10) - 1;
 
-    const isNC = /NO COTIZA/i.test(rawDesc);
+    const isNC = /NO\s*COTIZA/i.test(rawDesc);
 
     // rawDesc = "{descripción}{código}{cantidad}" concatenado sin separadores.
     // Estrategia: calcular qty por ratio de precios, stripear del final,
     // luego extraer el código.
-    let qty = extractQty(rawDesc, total, unitPrice);
+    // Antes esto usaba extractQty(), que exigia que total/unitario diera un
+    // entero con 0,01 de tolerancia y, si no, devolvia 1 en silencio. Flexxus
+    // redondea el unitario a 2 decimales, asi que con cantidades grandes el
+    // cociente nunca daba justo: 8276,80 / 22,99 = 360,017 quedaba en qty=1 y
+    // ademas el "360" se pegaba al codigo (44865-000360). splitCodeQty ya
+    // resuelve lo mismo con tolerancia relativa y validando los digitos
+    // finales contra los precios — se usa la misma en los dos formatos.
+    let qty  = extractQty(rawDesc, total, unitPrice);
     let text = rawDesc;
-    const qtyStr = String(qty);
-    if (qty > 0 && text.endsWith(qtyStr)) {
-      text = text.slice(0, -qtyStr.length);
+
+    // extractQty exige que total/unitario de un entero con 0,01 de tolerancia y,
+    // si no, devuelve 1 en silencio. Flexxus redondea el unitario a 2 decimales,
+    // asi que con cantidades grandes nunca da justo: 8276,80 / 22,99 = 360,017
+    // quedaba en cantidad 1 y el "360" pegado al codigo (44865-000360).
+    // splitCodeQty resuelve lo mismo con tolerancia relativa, pero recorta el
+    // texto de otra forma y eso descolocaba la extraccion del codigo en los
+    // casos que ya funcionaban. Por eso solo se usa cuando el metodo viejo se
+    // rindio: cantidad 1 con un total que no coincide con el unitario.
+    const seRindio = qty === 1 && unitPrice > 0 &&
+                     Math.abs(total - unitPrice) > Math.max(0.05, total * 0.02);
+    if (seRindio) {
+      const cq = splitCodeQty(rawDesc, total, unitPrice);
+      const cuadra = cq.qty > 1 &&
+                     Math.abs(cq.qty * unitPrice - total) <= Math.max(0.05, total * 0.02);
+      if (cuadra) {
+        qty  = cq.qty;
+        text = cq.sku || rawDesc;
+      }
+    }
+
+    // Si no intervino splitCodeQty, se saca la cantidad del final como antes
+    if (text === rawDesc && qty > 0 && text.endsWith(String(qty))) {
+      text = text.slice(0, -String(qty).length);
     }
 
     let sku = null;
@@ -411,14 +445,19 @@ function parseItems(lines, catalog) {
       cleanDesc = extracted.description;
     }
 
+    // Flexxus lista en 0,00 lo que no cotiza aunque no escriba la leyenda. Si se
+    // deja como aceptado, la ficha lo muestra entre los items cotizados con el
+    // precio vacio y no se entiende por que (MYS-0019).
+    const sinPrecio = !isNC && !unitPrice && !total;
+
     items.push({
       sku,
       description: cleanDesc,
       quantity:    qty,
       unit:        null,
-      unitPrice:   isNC ? null : unitPrice,
-      total:       isNC ? null : total,
-      accepted:    !isNC,
+      unitPrice:   (isNC || sinPrecio) ? null : unitPrice,
+      total:       (isNC || sinPrecio) ? null : total,
+      accepted:    !isNC && !sinPrecio,
       sortOrder,
       brand:       brand || null,
     });
