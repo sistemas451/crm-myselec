@@ -312,7 +312,7 @@ function splitCodeQty(pre, total, unitPrice) {
  * no coincide (y se debe intentar con el formato viejo).
  */
 function tryParseNewFormatItem(line, expectedNum) {
-  const m = line.match(/^(.*?)U\$S\s*([\d.]+,\d{2})\s*U\$S\s*([\d.]+,\d{2})(.+)$/);
+  const m = line.match(/^(.*?)(?:U\$S|\$)\s*([\d.]+,\d{2})\s*(?:U\$S|\$)\s*([\d.]+,\d{2})(.+)$/);
   if (!m) return null;
 
   const pre = m[1].trim();
@@ -362,7 +362,10 @@ function parseItems(lines, catalog) {
 
   for (let li = 0; li < lines.length; li++) {
     const line = lines[li];
-    if ((line.match(/U\$S/g) || []).length < 2) continue;
+    // Flexxus emite casi siempre en dolares, pero cuando factura en pesos usa
+    // "$". Buscando solo "U$S" el presupuesto entero quedaba sin items
+    // (COT-2026-090). El parser de notas de pedido ya aceptaba las dos.
+    if ((line.match(/(?:U\$S|\$)\s*[\d.]+,\d{2}/g) || []).length < 2) continue;
 
     // ── 1) Formato NUEVO (código primero) ──────────────────────────────────
     const newItem = tryParseNewFormatItem(line, items.length + 1);
@@ -382,7 +385,7 @@ function parseItems(lines, catalog) {
     //   {desc}{code}{qty}U$S {total}U$S {unitPrice}{brand}{itemNum}
     // Usamos [\d.]+,\d{2} para precios (evita capturar dígitos de la marca)
     const m = line.match(
-      /^(.+?)U\$S\s*([\d.]+,\d{2})\s*U\$S\s*([\d.]+,\d{2})(.+?)(\d+)$/
+      /^(.+?)(?:U\$S|\$)\s*([\d.]+,\d{2})\s*(?:U\$S|\$)\s*([\d.]+,\d{2})(.+?)(\d+)$/
     );
     if (!m) continue;
 
@@ -742,6 +745,29 @@ function parseNotaPedidoItems(lines, catalog) {
     return { sku, leftover: '' };
   }
 
+  // En las NP sin valorizar no hay precios contra los que deducir la cantidad,
+  // asi que queda pegada al codigo ("EN9518-00060"). El catalogo permite
+  // separarlos sin adivinar: se busca el codigo real como prefijo y lo que
+  // sobra es "{cantidad}{remitida}". Verificado sobre 20 lineas de NP
+  // valorizadas: en las 20 el PDF escribe la remitida como un 0 al final.
+  function separarCodigoYCantidad(texto) {
+    if (!texto || !catalog || !catalog.length) return null;
+    let mejor = null;
+    for (const art of catalog) {
+      const code = String(art.code || '').trim();
+      if (code.length < 4) continue;
+      if (texto.startsWith(code) && texto.length > code.length) {
+        if (!mejor || code.length > mejor.length) mejor = code;
+      }
+    }
+    if (!mejor) return null;
+    const sobra = texto.slice(mejor.length);
+    if (!/^\d{2,}$/.test(sobra) || !sobra.endsWith('0')) return null;
+    const cant = parseInt(sobra.slice(0, -1), 10);
+    if (!(cant > 0)) return null;
+    return { sku: mejor, qty: cant };
+  }
+
   const items = [];
   for (const line of lines) {
     const priceM = line.match(PRICE_PAIR_RE);
@@ -752,8 +778,13 @@ function parseNotaPedidoItems(lines, catalog) {
 
     const total     = parseArFloat(priceM[1]); // primero = total
     const unitPrice = parseArFloat(priceM[2]); // segundo = unitario
-    const qty       = (unitPrice > 0 && total > 0) ? Math.round(total / unitPrice) : 0;
-    if (total === 0) continue;
+    let   qty       = (unitPrice > 0 && total > 0) ? Math.round(total / unitPrice) : 0;
+
+    // Hay notas de pedido internas que salen sin valorizar, con todos los
+    // precios en 0,00. Antes se descartaba la linea entera y la NP quedaba sin
+    // ningun articulo (MYS-0019). El pedido existe igual: se guarda con la
+    // descripcion y el codigo, y el precio en blanco.
+    const sinValorizar = total === 0 && unitPrice === 0;
 
     let sku         = null;
     let description = beforePrices;
@@ -878,6 +909,12 @@ function parseNotaPedidoItems(lines, catalog) {
           description = textForCascade;
         }
       }
+    }
+
+    // NP sin valorizar: recuperar la cantidad que quedo pegada al codigo
+    if (sinValorizar && sku) {
+      const sep = separarCodigoYCantidad(sku);
+      if (sep) { sku = sep.sku; qty = sep.qty; }
     }
 
     items.push({
