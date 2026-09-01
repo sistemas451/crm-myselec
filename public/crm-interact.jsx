@@ -16,6 +16,16 @@ const PROVINCES = [
 const ZONES = ['AMBA Norte','AMBA Sur','Interior Oeste','Interior Norte','Interior Este','Interior Sur','Cuyo','Patagonia'];
 const ACTIVITIES = ['Constructora','Industrias','Contratista','Distribuidor Materiales','Casa de Electricidad/Ferretería','Fibra Óptica','Solar','Tableros eléctricos','Obras eléctricas','Distribución eléctrica','Cooperativa eléctrica'];
 const ORIGINS = ['Mail','WhatsApp','Portal de licitación','Teléfono'];
+// Antes solo se traducían Mail y WhatsApp: "Teléfono" y "Portal de licitación"
+// caían los dos en MANUAL y se perdía por dónde había entrado el pedido.
+// Fecha de hoy para un <input type="date">. Ojo: toISOString() devuelve UTC, asi
+// que despues de las 21hs argentinas ya daba el dia siguiente.
+function hoyInput() {
+  const d = new Date();
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+const SOURCE_MAP = { 'Mail': 'EMAIL', 'WhatsApp': 'WHATSAPP', 'Teléfono': 'PHONE', 'Portal de licitación': 'WEB' };
 const REJECT_REASONS = ['Precio','Plazo de entrega','Condición de pago','Competencia','Sin respuesta','Otro'];
 
 function AppProvider({ children }) {
@@ -295,7 +305,7 @@ function AppProvider({ children }) {
         client: partial.client,
         seller: partial.seller,
         stage: 'recibida',
-        ingreso: partial.ingreso || new Date().toISOString().slice(0,10),
+        ingreso: partial.ingreso || hoyInput(),
         dias: 0,
         monto: partial.monto || null,
         adj: partial.file ? 1 : 0,
@@ -320,7 +330,7 @@ function AppProvider({ children }) {
         stage: STAGES_F2[0]?.id || 'oc',
         fromQuote: partial.fromQuote,
         flexxus: partial.flexxus || '—',
-        fecha: partial.fecha || new Date().toISOString().slice(0,10),
+        fecha: partial.fecha || hoyInput(),
         ocCliente: partial.ocCliente,
       };
       pushToast(`Orden de compra ${code} creada`);
@@ -551,10 +561,15 @@ function ModalHost() {
 // --- 1. Nueva Cotización ---
 function NewQuoteModal({ defaultClient }) {
   const { closeModal, addQuote, clients, users, setQuotes, pushToast, currentUserId } = useApp();
+  // Paso 0: elegir qué se está cargando. Una Solicitud es un pedido que entró por
+  // otro canal (teléfono, WhatsApp, web) y todavía hay que cotizar; un Presupuesto
+  // es uno que el vendedor ya armó y mandó por fuera del CRM.
+  const [tipo, setTipo] = useS(null);
+  const esSolicitud = tipo === 'SOLICITUD';
   const [form, setForm] = useS({
     client: defaultClient || '',
     seller: currentUserId || '',
-    ingreso: new Date().toISOString().slice(0,10),
+    ingreso: hoyInput(),
     monto: '',
     currency: 'USD',
     origin: 'Mail',
@@ -566,12 +581,17 @@ function NewQuoteModal({ defaultClient }) {
   const [parseResult, setParseResult] = useS(null);
   const fileRef = React.useRef();
   const set = (k,v) => setForm(f => ({...f, [k]: v}));
-  const canSubmit = form.client && form.seller;
+  // En una solicitud el vendedor es opcional: puede entrar "Sin asignar" igual que
+  // las que llegan por mail, y después el vendedor se la auto-asigna.
+  const canSubmit = form.client && (esSolicitud || form.seller);
 
   const handleFile = async (file) => {
     if (!file) return;
     setPdfFile(file);
     setParseResult(null);
+    // El parser lee presupuestos de Flexxus — en una solicitud el PDF es del
+    // cliente, así que se adjunta sin intentar interpretarlo.
+    if (esSolicitud) return;
     if (!file.name.toLowerCase().endsWith('.pdf')) return;
     setParsing(true);
     try {
@@ -598,16 +618,18 @@ function NewQuoteModal({ defaultClient }) {
 
   const submit = async () => {
     const client = clients.find(c => c.code === form.client);
-    const sourceMap = { 'Mail': 'EMAIL', 'WhatsApp': 'WHATSAPP' };
-    const source = sourceMap[form.origin] || 'MANUAL';
+    const source = SOURCE_MAP[form.origin] || 'MANUAL';
     setSaving(true);
     try {
       const created = await CrmApi.createQuote({
+        type: tipo,
         clientId: client?.id || null,
         sellerId: form.seller || null,
-        amount: form.monto ? parseFloat(form.monto) : null,
+        amount: esSolicitud ? null : (form.monto ? parseFloat(form.monto) : null),
         currency: form.currency,
         source,
+        ingreso: form.ingreso || null,
+        notes: form.observaciones || null,
       });
       if (pdfFile && created?.id) {
         try {
@@ -618,24 +640,59 @@ function NewQuoteModal({ defaultClient }) {
       }
       const freshQuotes = await CrmApi.getQuotes();
       setQuotes(freshQuotes);
-      pushToast('Cotización creada correctamente');
+      pushToast(`${esSolicitud ? 'Solicitud' : 'Presupuesto'} ${created?.code || ''} creada correctamente`);
       closeModal();
     } catch (err) {
-      pushToast(err.message || 'Error al crear cotización', 'bad');
+      pushToast(err.message || 'Error al crear', 'bad');
     } finally {
       setSaving(false);
     }
   };
 
+  // ── Paso 0: qué querés cargar ──
+  if (!tipo) {
+    const opciones = [
+      { id: 'SOLICITUD',   icon: 'inbox',     titulo: 'Solicitud de cotización',
+        desc: 'Un pedido que entró por teléfono, WhatsApp, web o licitación y todavía hay que cotizar.',
+        pie: 'Entra al tablero como Solicitud, con fecha límite de armado.' },
+      { id: 'PRESUPUESTO', icon: 'file-text', titulo: 'Presupuesto ya enviado',
+        desc: 'Un presupuesto que el vendedor ya armó y le mandó al cliente por fuera del CRM.',
+        pie: 'Entra directo en la etapa Enviado, con seguimiento automático.' },
+    ];
+    return (
+      <Modal onClose={closeModal} title="Nuevo" subtitle="¿Qué querés cargar?" width={620}
+        footer={<button className="btn-ghost" onClick={closeModal}>Cancelar</button>}>
+        <div className="space-y-3">
+          {opciones.map(o => (
+            <button key={o.id} onClick={() => setTipo(o.id)}
+              className="w-full text-left flex items-start gap-4 p-4 rounded-xl border-2 border-line hover:border-brand hover:bg-brandSoft/15 transition-colors">
+              <span className="shrink-0 w-10 h-10 rounded-lg bg-brandSoft/40 flex items-center justify-center text-brand">
+                <Icon name={o.icon} size={19}/>
+              </span>
+              <span className="min-w-0">
+                <span className="block text-[14px] font-semibold text-ink-900">{o.titulo}</span>
+                <span className="block text-[12.5px] text-ink-600 mt-0.5 leading-snug">{o.desc}</span>
+                <span className="block text-[11.5px] text-ink-400 mt-1.5">{o.pie}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      </Modal>
+    );
+  }
+
   return (
-    <Modal onClose={closeModal} subtitle="Fase 1 · Presupuesto ya armado y enviado" title="Nueva cotización" width={620}
+    <Modal onClose={closeModal}
+      subtitle={esSolicitud ? 'Fase 1 · Pedido a cotizar' : 'Fase 1 · Presupuesto ya armado y enviado'}
+      title={esSolicitud ? 'Nueva solicitud' : 'Nuevo presupuesto'} width={620}
       footer={
         <>
+          <button className="btn-ghost" onClick={() => setTipo(null)} disabled={saving}>← Volver</button>
           <button className="btn-ghost" onClick={closeModal} disabled={saving}>Cancelar</button>
           <button className="btn-primary" disabled={!canSubmit || saving || parsing} onClick={submit}
             style={!canSubmit || saving || parsing ? {opacity:.45, cursor:'not-allowed'} : {}}>
             <Icon name={saving ? 'loader' : 'plus'} size={13}/>
-            {saving ? 'Guardando…' : 'Crear cotización'}
+            {saving ? 'Guardando…' : esSolicitud ? 'Crear solicitud' : 'Crear presupuesto'}
           </button>
         </>
       }
@@ -645,7 +702,10 @@ function NewQuoteModal({ defaultClient }) {
         {/* ── Upload PDF (primero) ── */}
         <div className="col-span-2">
           <label className="block text-[11px] font-semibold text-ink-500 uppercase tracking-wide mb-1.5">
-            Adjuntar PDF Flexxus <span className="font-normal text-ink-400 normal-case">(opcional — auto-completa los campos)</span>
+            {esSolicitud ? 'Adjuntar archivo' : 'Adjuntar PDF Flexxus'}
+            <span className="font-normal text-ink-400 normal-case">
+              {esSolicitud ? ' (opcional — el pedido del cliente)' : ' (opcional — auto-completa los campos)'}
+            </span>
           </label>
           <div
             onClick={() => fileRef.current?.click()}
@@ -662,7 +722,9 @@ function NewQuoteModal({ defaultClient }) {
               ) : pdfFile ? (
                 <span className="text-[13px] text-ink-700 font-medium truncate">{pdfFile.name}</span>
               ) : (
-                <span className="text-[13px] text-ink-400">Hacé clic para subir un PDF de presupuesto o solicitud</span>
+                <span className="text-[13px] text-ink-400">
+                  {esSolicitud ? 'Hacé clic para adjuntar el pedido del cliente' : 'Hacé clic para subir un PDF de presupuesto'}
+                </span>
               )}
             </div>
             {pdfFile && !parsing && (
@@ -703,8 +765,10 @@ function NewQuoteModal({ defaultClient }) {
           <Select value={form.client} onChange={v=>set('client',v)} placeholder="Buscar cliente…"
             options={clients.map(c => ({ value:c.code, label:`${c.name} — ${c.city}, ${c.prov}` }))}/>
         </FormGroup>
-        <FormGroup label="Vendedor asignado" required>
+        <FormGroup label="Vendedor asignado" required={!esSolicitud}
+          hint={esSolicitud ? 'Opcional — si lo dejás vacío queda "Sin asignar"' : undefined}>
           <Select value={form.seller} onChange={v=>set('seller',v)}
+            placeholder={esSolicitud ? 'Sin asignar' : undefined}
             options={users.filter(u=>u.role==='Vendedor'||u.role==='Administrador').map(u => ({ value:u.id, label:u.name }))}/>
         </FormGroup>
         <FormGroup label="Origen">
@@ -713,7 +777,7 @@ function NewQuoteModal({ defaultClient }) {
         <FormGroup label="Fecha de ingreso" cols={2}>
           <input type="date" className="inp w-full" value={form.ingreso} onChange={e=>set('ingreso',e.target.value)}/>
         </FormGroup>
-        <FormGroup label="Monto" hint="Opcional" cols={2}>
+        {!esSolicitud && <FormGroup label="Monto" hint="Opcional" cols={2}>
           <div className="flex gap-2">
             <select className="inp w-24 shrink-0" value={form.currency} onChange={e=>set('currency',e.target.value)}>
               <option value="USD">U$S</option>
@@ -721,10 +785,11 @@ function NewQuoteModal({ defaultClient }) {
             </select>
             <input type="number" className="inp flex-1" placeholder="Ej: 45200" value={form.monto} onChange={e=>set('monto',e.target.value)}/>
           </div>
-        </FormGroup>
+        </FormGroup>}
         <FormGroup label="Observaciones" cols={2}>
           <textarea rows="3" className="inp w-full resize-none" placeholder="Contexto del pedido, urgencia, condiciones particulares…"
             value={form.observaciones} onChange={e=>set('observaciones',e.target.value)}/>
+          <p className="text-[11px] text-ink-400 mt-1">Se guarda como la primera nota del caso.</p>
         </FormGroup>
       </div>
     </Modal>
@@ -740,7 +805,7 @@ function NewOrderModal() {
     clientId:  '',
     ocCliente: '',
     flexxus:   '',
-    fecha:     new Date().toISOString().slice(0,10),
+    fecha:     hoyInput(),
   });
   const [saving,   setSaving]   = useS(false);
   const [parsing,  setParsing]  = useS(false);

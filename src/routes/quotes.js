@@ -279,41 +279,76 @@ router.get('/send-accounts', authMiddleware, async (req, res) => {
 // POST /api/quotes - Create new quote
 router.post('/', authMiddleware, async (req, res) => {
   try {
-    const { clientId, sellerId, amount, source, notes, currency } = req.body;
+    const { clientId, sellerId, amount, source, notes, currency, type, ingreso } = req.body;
 
-    // Generate next code
-    const code = await nextCode(prisma.quote, 'COT-2026');
+    // type: 'SOLICITUD' (pedido que entra por otro canal y hay que cotizar) o
+    // 'PRESUPUESTO' (ya armado y enviado por fuera del CRM). Default PRESUPUESTO
+    // por compatibilidad con lo que hacía este endpoint antes.
+    const esSolicitud = type === 'SOLICITUD';
+    const year = new Date().getFullYear();
+    const code = await nextCode(prisma.quote, esSolicitud ? `SOL-${year}` : `COT-${year}`);
 
-    // followUpDate: hoy + follow_up_days (igual que cuando se cambia a etapa "enviado")
-    const fudSetting = await prisma.appSetting.findUnique({ where: { key: 'follow_up_days' } });
-    const fudDays    = Math.max(1, parseInt(fudSetting?.value || '4'));
-    const followUpDate = new Date();
-    followUpDate.setDate(followUpDate.getDate() + fudDays);
+    const data = {
+      code,
+      clientId,
+      sellerId: sellerId || null,
+      source: source || 'MANUAL',
+      currency: currency === 'ARS' ? 'ARS' : 'USD',
+    };
 
-    // No lleva deadline: la creación manual siempre es un presupuesto ya armado y enviado
+    // Fecha de ingreso: permite cargar algo que entró ayer. Si eligen hoy (o una
+    // fecha futura) se deja la hora real de creación en vez de forzar el mediodía.
+    const hoy = hoyEnArgentina();
+    const hoyStr = `${hoy.y}-${String(hoy.m + 1).padStart(2, '0')}-${String(hoy.d).padStart(2, '0')}`;
+    const ingresoStr = ingreso ? String(ingreso).slice(0, 10) : null;
+    if (ingresoStr && /^\d{4}-\d{2}-\d{2}$/.test(ingresoStr) && ingresoStr < hoyStr) {
+      data.createdAt = new Date(`${ingresoStr}T12:00:00.000Z`);
+    }
+
+    if (esSolicitud) {
+      // Mismas etapas de entrada que usa mailReader.js al ingresar una solicitud por mail
+      const [sinVendedor, conVendedor, deadlineSetting] = await Promise.all([
+        prisma.appSetting.findUnique({ where: { key: 'default_stage_solicitud' } }),
+        prisma.appSetting.findUnique({ where: { key: 'default_stage_solicitud_con_vendedor' } }),
+        prisma.appSetting.findUnique({ where: { key: 'deadline_days' } }),
+      ]);
+      data.mailType = 'SOLICITUD';
+      data.stage    = sellerId ? (conVendedor?.value || 'asignada') : (sinVendedor?.value || 'recibida');
+      data.stageChangedAt = new Date();
+      // Fecha límite de armado: igual que al asignar vendedor desde el tablero
+      if (sellerId) data.deadline = deadlineInDays(Math.max(1, parseInt(deadlineSetting?.value || '3')));
+    } else {
+      // followUpDate: hoy + follow_up_days (igual que cuando se cambia a etapa "enviado")
+      const fudSetting = await prisma.appSetting.findUnique({ where: { key: 'follow_up_days' } });
+      const fudDays    = Math.max(1, parseInt(fudSetting?.value || '4'));
+      const followUpDate = new Date();
+      followUpDate.setDate(followUpDate.getDate() + fudDays);
+      data.mailType = 'PRESUPUESTO';
+      data.stage    = 'enviado';
+      data.amount   = amount ? parseFloat(amount) : null;
+      data.followUpDate = followUpDate;
+    }
+
     const quote = await prisma.quote.create({
-      data: {
-        code,
-        clientId,
-        sellerId: sellerId || null,
-        amount: amount ? parseFloat(amount) : null,
-        source: source || 'MANUAL',
-        mailType: 'PRESUPUESTO',
-        stage: 'enviado',
-        currency: currency === 'ARS' ? 'ARS' : 'USD',
-        followUpDate,
-      },
+      data,
       include: {
         client: { select: { code: true, name: true } },
         seller: { select: { name: true } },
       },
     });
 
+    // Las observaciones del formulario se guardan como primera nota del caso
+    if (notes && String(notes).trim()) {
+      await prisma.note.create({
+        data: { text: String(notes).trim(), userId: req.user.id, quoteId: quote.id },
+      });
+    }
+
     // Log activity
     await prisma.activity.create({
       data: {
         action: 'CREATED',
-        detail: `Creó cotización ${code} para ${quote.client.name}`,
+        detail: `Creó ${esSolicitud ? 'solicitud' : 'cotización'} ${code} para ${quote.client?.name || 'sin cliente'}`,
         userId: req.user.id,
         quoteId: quote.id,
       },

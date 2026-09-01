@@ -473,6 +473,9 @@ function ReminderFromSelector({ quoteId }) {
 }
 
 // ─── Modal: Enviar presupuesto por email ─────────────────────────────────────
+// Cómo entró el pedido, para mostrarlo en la ficha de los casos cargados a mano
+const SOURCE_LABELS = { EMAIL: 'Mail', WHATSAPP: 'WhatsApp', PHONE: 'Teléfono', WEB: 'Portal de licitación', MANUAL: 'Carga manual' };
+
 function SendEmailModal({ quote, attachments, onClose, onSent, isSolicitud }) {
   const { pushToast } = useApp();
   const [templates, setTemplates]       = React.useState([]);
@@ -989,7 +992,10 @@ function QuoteDetail({ code, onClose, canReassign }) {
   const isSolicitud = q.mailType === 'SOLICITUD' || (q.source === 'EMAIL' && !q.mailType);
   const isOC = q.mailType === 'OC';
   const isManual = q.source !== 'EMAIL';
-  const defaultTab = isSolicitud ? 'mail' : isOC ? 'items' : 'resumen';
+  // Una solicitud cargada a mano (teléfono, WhatsApp, web) no tiene mail detrás:
+  // la pestaña Mail se esconde en vez de mostrarla vacía.
+  const tieneMail = !!q.emailSubject;
+  const defaultTab = isSolicitud ? (tieneMail ? 'mail' : 'notas') : isOC ? 'items' : 'resumen';
   const [tab, setTab] = useState(defaultTab);
   const [stageOpen, setStageOpen] = useState(false);
   const [rejectPending, setRejectPending] = useState(false);
@@ -1714,6 +1720,7 @@ function QuoteDetail({ code, onClose, canReassign }) {
           }/>}
           {!isSolicitud && <Field label="Cod. Flexxus PR" mono value={q.flexxus || '—'}/>}
           {!isSolicitud && <Field label="Zona de entrega" value={cli?.zone || '—'}/>}
+          {!tieneMail && <Field label="Origen" value={SOURCE_LABELS[q.source] || 'Carga manual'}/>}
           <Field label="Contacto">
             {cli?.email
               ? <a href={`mailto:${cli.email}`} className="text-brand hover:underline text-[12.5px] truncate block">{cli.email}</a>
@@ -1872,7 +1879,7 @@ function QuoteDetail({ code, onClose, canReassign }) {
         const nonImageAdj = detailAttachments.filter(a => !a.mimeType?.startsWith('image/'));
         const tabs = isSolicitud
           ? [
-              { id:'mail',     label:'Mail' },
+              ...(tieneMail ? [{ id:'mail', label:'Mail' }] : []),
               { id:'adj',      label:'Adjuntos', count: nonImageAdj.length > 0 ? nonImageAdj.length : null },
               { id:'historial',label:'Historial' },
               { id:'notas',    label:'Notas', count: notes.length > 0 ? notes.length : null },

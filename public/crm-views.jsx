@@ -41,7 +41,7 @@ function MySalesView({ user, initialTab='quotes', onOpen }) {
         description={`Zona asignada: ${user.zone}. Tenés ${activas} cotizaciones activas y ${myOrders.length} órdenes en curso.`}
         actions={
           <>
-            <button className="btn-primary" onClick={() => openModal('newQuote')}><Icon name="plus" size={14}/>Nueva cotización</button>
+            <button className="btn-primary" onClick={() => openModal('newQuote')}><Icon name="plus" size={14}/>Nuevo</button>
           </>
         }
       />
@@ -1525,7 +1525,7 @@ function Clients({ readonly=false }) {
                     Eliminar
                   </button>
                 )}
-                <button className="btn-primary" onClick={()=>openModal('newQuote', { defaultClient: cli.code })}><Icon name="file-plus" size={13}/>Nueva cotización</button>
+                <button className="btn-primary" onClick={()=>openModal('newQuote', { defaultClient: cli.code })}><Icon name="file-plus" size={13}/>Nuevo</button>
               </div>
             )}
           </div>

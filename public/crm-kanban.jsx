@@ -617,7 +617,7 @@ function KanbanQuotes({ onOpen }) {
       actions={
         <>
           <QuoteFiltersBar/>
-          <button className="btn-primary" onClick={()=>openModal('newQuote')}><Icon name="plus" size={14}/>Nueva cotización</button>
+          <button className="btn-primary" onClick={()=>openModal('newQuote')}><Icon name="plus" size={14}/>Nuevo</button>
         </>
       }
     />
