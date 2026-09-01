@@ -648,12 +648,20 @@ router.get('/:id/detail', authMiddleware, async (req, res) => {
     const linkedOrderActivities = (linkedOrder?.activities || [])
       .map(a => ({ ...a, _fromCode: linkedOrder.code, _fromType: 'ORDER' }));
 
+    // El vinculo SOLICITUD<->PRESUPUESTO es bidireccional, asi que la misma
+    // cotizacion llega por linkedQuote Y por linkedBy: sin deduplicar, cada
+    // actividad de la vinculada se mostraba dos veces en el historial.
+    const vistas = new Set();
     const unifiedHistory = [
       ...ownActivities,
       ...linkedQuoteActivities,
       ...linkedByActivities,
       ...linkedOrderActivities,
-    ].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+    ].filter(a => {
+      if (vistas.has(a.id)) return false;
+      vistas.add(a.id);
+      return true;
+    }).sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 
     res.json({ ...quote, unifiedHistory, linkedOrder: linkedOrder || null });
   } catch (err) {
