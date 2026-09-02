@@ -1881,7 +1881,9 @@ function QuoteDetail({ code, onClose, canReassign }) {
 
 
       {(() => {
-        const nonImageAdj = detailAttachments.filter(a => !a.mimeType?.startsWith('image/'));
+        // Antes las imagenes no se contaban porque el sistema no guardaba
+        // ninguna. Ahora sí guarda las que traen el pedido del cliente.
+        const nonImageAdj = detailAttachments;
         const tabs = isSolicitud
           ? [
               { id:'mail',     label: esDeMail ? 'Mail' : 'Pedido' },
@@ -2143,20 +2145,31 @@ function QuoteDetail({ code, onClose, canReassign }) {
       {tab === 'adj' && (
         <div className="p-6 grid grid-cols-2 gap-3">
           {(() => {
-            const visibleAdj = detailAttachments.filter(a => !a.mimeType?.startsWith('image/'));
+            const visibleAdj = detailAttachments;
             if (visibleAdj.length === 0) return (
               <div className="col-span-2 text-[13px] text-ink-400 py-6 text-center">Sin adjuntos</div>
             );
             return visibleAdj.map(a => {
               const ext = extOf(a.filename, a.mimeType);
               const isPdf = ext === 'pdf';
+              // Muchos clientes mandan lo que quieren cotizar como una captura
+              // pegada en el mail: conviene verla, no solo poder bajarla.
+              const isImg = (a.mimeType || '').startsWith('image/');
               const fileUrl = authUrl(`/uploads/attachments/${a.filename}`);
               const displayName = a.originalName || a.filename.replace(/^[0-9a-f-]{36}-(\d{13}-)?/i, '');
               return (
                 <div key={a.id} className="bg-white border border-line rounded-xl p-3 flex items-center gap-3">
-                  <div className={cx('w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold text-[11px] shrink-0', extBg(ext))}>
-                    {ext.toUpperCase().slice(0,4)}
-                  </div>
+                  {isImg ? (
+                    <a href={fileUrl} target="_blank" rel="noopener noreferrer"
+                       className="w-10 h-10 rounded-lg overflow-hidden shrink-0 border border-line bg-surface block"
+                       title="Ver en grande">
+                      <img src={fileUrl} alt={displayName} className="w-full h-full object-cover"/>
+                    </a>
+                  ) : (
+                    <div className={cx('w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold text-[11px] shrink-0', extBg(ext))}>
+                      {ext.toUpperCase().slice(0,4)}
+                    </div>
+                  )}
                   <div className="flex-1 min-w-0">
                     <div className="text-[13px] font-medium text-ink-900 truncate">{displayName}</div>
                     <div className="text-[11px] text-ink-500">
@@ -2171,6 +2184,13 @@ function QuoteDetail({ code, onClose, canReassign }) {
                         title="Ver PDF">
                         <Icon name="eye" size={13}/>Ver
                       </button>
+                    )}
+                    {isImg && (
+                      <a href={fileUrl} target="_blank" rel="noopener noreferrer"
+                        className="h-8 px-2.5 rounded-lg hover:bg-surface text-ink-500 text-[12px] font-medium flex items-center gap-1"
+                        title="Ver la imagen en grande">
+                        <Icon name="eye" size={13}/>Ver
+                      </a>
                     )}
                     <a href={fileUrl} download={displayName}
                       className="w-8 h-8 rounded-lg hover:bg-surface text-ink-500 flex items-center justify-center"
