@@ -130,6 +130,30 @@ function isImageAttachment(att) {
   return true;
 }
 
+// Muchos clientes mandan el pedido como una captura pegada en el cuerpo del mail
+// ("Queria solicitar una cotizacion de los siguientes materiales" + la imagen).
+// Descartar todas las imagenes se llevaba puesto ese pedido, pero guardarlas
+// todas llenaria cada solicitud con los logos de las firmas.
+//
+// Se midieron 301 imagenes de 25 dias de mails reales y la separacion es nitida:
+// los logos, iconos y artefactos de Word pesan menos de 2 KB, mientras que las
+// capturas de listas de materiales arrancan en 98 KB. El corte va en el medio.
+const IMAGEN_CONTENIDO_MIN_BYTES = 40 * 1024;
+
+function esImagenDeContenido(att) {
+  if (!att) return false;
+  const ct = (att.contentType || '').toLowerCase();
+  if (!ct.startsWith('image/')) return false;
+  const bytes = att.size || att.content?.length || 0;
+  return bytes >= IMAGEN_CONTENIDO_MIN_BYTES;
+}
+
+// Adjuntos que vale la pena guardar: los documentos de siempre, mas las imagenes
+// que por su peso son contenido y no una firma.
+function adjuntosAGuardar(attachments) {
+  return (attachments || []).filter(a => !isImageAttachment(a) || esImagenDeContenido(a));
+}
+
 // Copia los ítems aceptados de un PRESUPUESTO a una OC (si la OC no tiene ítems aún)
 async function copyPresupuestoItemsToOC(presupuestoId, ocId) {
   const existing = await prisma.quoteItem.count({ where: { quoteId: ocId } });
@@ -986,7 +1010,7 @@ async function processSentMail(parsed, mailData, imap) {
   }
 
   // Filtrar adjuntos y buscar PDFs Flexxus — si no hay ninguno, ignorar
-  const realAttachments = (parsed.attachments || []).filter(a => !isImageAttachment(a));
+  const realAttachments = adjuntosAGuardar(parsed.attachments);
   const notaPedidoAtt   = realAttachments.find(a => isNotaPedidoPDF(a));
   const flexxusAtt      = realAttachments.find(a => isFlexxusPDF(a));
 
@@ -1547,7 +1571,7 @@ async function processEmail(mailData, imap) {
     originalSender = originalSender.trim();
 
     // ── Filtrar adjuntos reales (ignorar imágenes/firmas) ─────────────────
-    const realAttachments = (parsed.attachments || []).filter(a => !isImageAttachment(a));
+    const realAttachments = adjuntosAGuardar(parsed.attachments);
 
     // ── Nota de Pedido: detectar ANTES que el presupuesto Flexxus ─────────
     // Un NP puede llegar en el inbox (sin label CRM) o con label CRM.
