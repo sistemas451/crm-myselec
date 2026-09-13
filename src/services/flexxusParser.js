@@ -695,8 +695,17 @@ function isNotaPedidoPDF(att) {
   return name.endsWith('.pdf') && name.includes('nota de pedido');
 }
 
-// NP Nota de Pedido: formato "0001-00020728" (4 dígitos, guión, 8+ dígitos)
-const NP_PEDIDO_RE = /^\d{4}-\d{7,}$/;
+// NP Nota de Pedido: formato "0001-00020728" — 4 dígitos, guión, exactamente 8.
+//
+// Ojo con aflojar el "8": el PDF trae el teléfono del cliente con la misma
+// pinta ("0291-4598733") y aparece ANTES en el texto, así que con la versión
+// vieja (/^\d{4}-\d{7,}$/) ganaba el teléfono y el número de la nota de pedido
+// nunca se llegaba a leer. Cinco NP distintas de EDES S.A. quedaron todas con
+// el mismo código NP-4598733, que es su número de teléfono.
+//
+// Lo que las separa es el largo: los teléfonos traen 7 dígitos (fijo) o 9
+// (celular con el 15) después del guión; el número de nota de pedido siempre 8.
+const NP_PEDIDO_RE = /^\d{4}-\d{8}$/;
 
 /**
  * Parsea líneas de ítems de una Nota de Pedido Flexxus.
