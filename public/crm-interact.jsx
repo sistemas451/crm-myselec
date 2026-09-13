@@ -262,7 +262,7 @@ function AppProvider({ children }) {
   }, []);
 
   // Quote-level filters (shared by board)
-  const [quoteFilters, setQuoteFilters] = useS({ seller:'', client:'', period:'30d', zone:'', activity:'', min:'', max:'', sort:'recent' });
+  const [quoteFilters, setQuoteFilters] = useS({ seller:'', client:'', period:'30d', zone:'', activity:'', min:'', max:'', sort:'recent', priority:'' });
   const [orderFilters, setOrderFilters] = useS({ seller:'', client:'', period:'30d', min:'', max:'' });
 
   // Logged-in user (for notes)
@@ -1433,7 +1433,7 @@ function PermissionsModal() {
   const rows = [
     ['Dashboard',            {a:'Ver', v:'—', l:'—'}],
     ['Cotizaciones',         {a:'Ver + editar', v:'Propias', l:'—'}],
-    ['Órdenes de Compra',    {a:'Ver + editar', v:'Propias', l:'Avanzar etapa'}],
+    ['Notas de Pedido',      {a:'Ver + editar', v:'Propias', l:'Avanzar etapa'}],
     ['Clientes',             {a:'Gestionar', v:'Ver', l:'—'}],
     ['Equipo',               {a:'Gestionar', v:'—', l:'—'}],
     ['Configuración',        {a:'Gestionar', v:'—', l:'—'}],
@@ -1840,7 +1840,7 @@ function ExportModal({ exportType }) {
   const TYPES = {
     cotizaciones: { label: 'Cotizaciones', icon: 'clipboard-list' },
     rechazos:     { label: 'Rechazos',     icon: 'x-circle' },
-    ordenes:      { label: 'Órdenes de Compra', icon: 'truck' },
+    ordenes:      { label: 'Notas de Pedido', icon: 'truck' },
   };
   const typeInfo = TYPES[exportType] || TYPES.cotizaciones;
 
@@ -2332,7 +2332,7 @@ function MoreFiltersPopover({ onClose, which='quote' }) {
   const { quoteFilters, setQuoteFilters, orderFilters, setOrderFilters } = useApp();
   const f = which==='quote' ? quoteFilters : orderFilters;
   const set = which==='quote' ? setQuoteFilters : setOrderFilters;
-  const reset = () => set(s => ({ ...s, min:'', max:'', hasNotes:false }));
+  const reset = () => set(s => ({ ...s, min:'', max:'', hasNotes:false, priority:'' }));
   return (
     <>
       <div className="fixed inset-0 z-30" onClick={onClose}/>
@@ -2345,6 +2345,31 @@ function MoreFiltersPopover({ onClose, which='quote' }) {
           <FormGroup label="Monto máximo (ARS)">
             <input type="number" className="inp w-full" value={f.max||''} onChange={e=>set(s=>({...s, max:e.target.value}))} placeholder="Sin límite"/>
           </FormGroup>
+          {which === 'quote' && (
+            <FormGroup label="Seguimiento">
+              <div className="flex flex-wrap gap-1.5">
+                <button onClick={()=>set(s=>({...s, priority:''}))}
+                  className={cx('px-2.5 py-1 rounded-lg text-[12px] border transition-colors',
+                    !f.priority ? 'border-brand bg-brandSoft/40 text-navy-900 font-medium' : 'border-line text-ink-600 hover:bg-surface')}>
+                  Todas
+                </button>
+                {PRIORIDADES.map(p => (
+                  <button key={p.id} title={p.desc}
+                    onClick={()=>set(s=>({...s, priority: f.priority===p.id ? '' : p.id}))}
+                    className={cx('px-2.5 py-1 rounded-lg text-[12px] border flex items-center gap-1.5 transition-colors',
+                      f.priority===p.id ? 'font-medium text-navy-900' : 'border-line text-ink-600 hover:bg-surface')}
+                    style={f.priority===p.id ? { background:p.wash, borderColor:p.line } : {}}>
+                    <span className="w-2 h-2 rounded-full" style={{ background:p.dot }}/>{p.label}
+                  </button>
+                ))}
+                <button onClick={()=>set(s=>({...s, priority: f.priority==='none' ? '' : 'none'}))}
+                  className={cx('px-2.5 py-1 rounded-lg text-[12px] border transition-colors',
+                    f.priority==='none' ? 'border-brand bg-brandSoft/40 text-navy-900 font-medium' : 'border-line text-ink-600 hover:bg-surface')}>
+                  Sin marcar
+                </button>
+              </div>
+            </FormGroup>
+          )}
           {which === 'quote' && (
             <label className="flex items-center gap-2 text-[13px] text-ink-700 cursor-pointer select-none">
               <input type="checkbox" checked={!!f.hasNotes} onChange={e=>set(s=>({...s, hasNotes:e.target.checked}))} className="w-4 h-4 rounded border-line accent-brand"/>
@@ -2379,6 +2404,7 @@ function countActiveFilters(f) {
   if (f.min) n++;
   if (f.max) n++;
   if (f.hasNotes) n++;
+  if (f.priority) n++;
   if (f.delivery) n++;
   if (f.transport) n++;
   return n;
@@ -2387,6 +2413,9 @@ function countActiveFilters(f) {
 function applyQuoteFilters(list, filters, clientsArr) {
   const periodStart = filters.period ? periodStartDate(filters.period) : null;
   return list.filter(q => {
+    // Una anulada fue reemplazada por una revisión: mostrarla sería tener dos
+    // presupuestos vivos del mismo negocio. Se abre desde la ficha de la nueva.
+    if (q.anulada) return false;
     if (filters.seller === 'UNASSIGNED') { if (q.seller) return false; }
     else if (filters.seller && q.seller !== filters.seller) return false;
     if (periodStart && new Date(q.ingreso) < periodStart) return false;
@@ -2399,6 +2428,9 @@ function applyQuoteFilters(list, filters, clientsArr) {
     if (filters.min && (q.monto||0) < parseFloat(filters.min)) return false;
     if (filters.max && (q.monto||0) > parseFloat(filters.max)) return false;
     if (filters.hasNotes && !(q.notas > 0)) return false;
+    // 'none' = las que el vendedor todavía no marcó
+    if (filters.priority === 'none') { if (q.priority) return false; }
+    else if (filters.priority && q.priority !== filters.priority) return false;
     return true;
   });
 }

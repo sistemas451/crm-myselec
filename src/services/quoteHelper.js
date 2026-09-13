@@ -1,90 +1,20 @@
-const prisma = require('../db');
-
-async function nextOrderCode(retries = 3) {
-  const prefix = `OC-${new Date().getFullYear()}`;
-  for (let attempt = 0; attempt < retries; attempt++) {
-    const last = await prisma.order.findFirst({
-      where:   { code: { startsWith: prefix } },
-      orderBy: { code: 'desc' },
-      select:  { code: true },
-    });
-    const num  = last ? (parseInt(last.code.split('-').pop()) || 0) : 0;
-    const code = `${prefix}-${String(num + 1 + attempt).padStart(3, '0')}`;
-    const exists = await prisma.order.findFirst({ where: { code }, select: { code: true } });
-    if (!exists) return code;
-  }
-  return `${prefix}-X${Date.now().toString(36).toUpperCase()}`;
-}
+const { alinearPaquete } = require('./paquete');
 
 /**
- * Cuando una NP se vincula a un presupuesto por código Flexxus exacto:
- * - Si el presupuesto ya está en 'aceptada' → no hace nada (OC ya existe)
- * - Si no → lo mueve a 'aceptada', crea la OC si no existe,
- *   y mueve la SOLICITUD vinculada en paquete
+ * Se llama cuando una Nota de Pedido queda vinculada a un presupuesto.
+ *
+ * Antes esta función movía el presupuesto a 'aceptada' y arrastraba a la
+ * solicitud, con su propia lógica. Ahora delega en el paquete, que es el que
+ * sabe quiénes son los miembros (mirando el vínculo en los dos sentidos) y los
+ * deja a todos en la misma etapa. Si hay Nota de Pedido, esa etapa es 'aceptada'.
+ *
+ * Se mantiene el nombre porque la llaman cuatro lugares distintos: la carga
+ * manual de NP, la subida de PDF a una orden, el ingreso por mail y el vínculo
+ * manual desde la ficha.
  */
 async function autoAcceptPresupuesto(presupuestoId) {
-  const pres = await prisma.quote.findUnique({
-    where:  { id: presupuestoId },
-    select: { id: true, code: true, stage: true, mailType: true,
-              clientId: true, sellerId: true, flexxusCode: true, linkedQuoteId: true },
-  });
-  if (!pres || pres.mailType !== 'PRESUPUESTO') return;
-  if (pres.stage === 'aceptada') return;
-
-  // 1. Mover presupuesto a aceptada + crear OC (si no existe) en transacción
-  await prisma.$transaction(async (tx) => {
-    await tx.quote.update({
-      where: { id: pres.id },
-      data:  { stage: 'aceptada', stageChangedAt: new Date() },
-    });
-    await tx.activity.create({
-      data: { action: 'STAGE_CHANGE', detail: `Movido a aceptada automáticamente al recibir NP vinculada`, quoteId: pres.id },
-    });
-
-    // Buscar OC ya en etapa 'oc' — si no existe, crear el espejo
-    const existingOCOrder = await tx.order.findFirst({ where: { fromQuoteId: pres.id, stage: 'oc' } });
-    if (!existingOCOrder && pres.clientId) {
-      const ocCode = await nextOrderCode();
-      const newOrder = await tx.order.create({
-        data: {
-          code:        ocCode,
-          clientId:    pres.clientId,
-          sellerId:    pres.sellerId || null,
-          fromQuoteId: pres.id,
-          stage:       'oc',
-          flexxusCode: pres.flexxusCode || null,
-        },
-      });
-      await tx.activity.create({
-        data: { action: 'CREATED', detail: `OC ${ocCode} creada automáticamente al recibir NP vinculada a ${pres.code}`, orderId: newOrder.id },
-      });
-      console.log(`   ✅ OC ${ocCode} creada automáticamente para presupuesto ${pres.code}`);
-    }
-  });
-
-  // 2. Mover SOLICITUD vinculada en paquete
-  if (pres.linkedQuoteId) {
-    try {
-      const sol = await prisma.quote.findUnique({
-        where:  { id: pres.linkedQuoteId },
-        select: { id: true, code: true, mailType: true, stage: true },
-      });
-      if (sol && sol.mailType === 'SOLICITUD' && sol.stage !== 'aceptada') {
-        await prisma.quote.update({
-          where: { id: sol.id },
-          data:  { stage: 'aceptada', stageChangedAt: new Date() },
-        });
-        await prisma.activity.create({
-          data: { action: 'STAGE_CHANGE', detail: `Movida a aceptada junto con ${pres.code} (paquete NP)`, quoteId: sol.id },
-        });
-        console.log(`   ✅ Solicitud ${sol.code} movida a aceptada en paquete`);
-      }
-    } catch (e) {
-      console.error('Error moviendo solicitud en paquete:', e.message);
-    }
-  }
-
-  console.log(`   ✅ Presupuesto ${pres.code} auto-aceptado por NP vinculada`);
+  const r = await alinearPaquete(presupuestoId);
+  if (r) console.log(`   ✅ paquete alineado a "${r.destino}": ${r.movidos.join(', ')}`);
 }
 
 module.exports = { autoAcceptPresupuesto };

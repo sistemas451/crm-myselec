@@ -170,7 +170,7 @@ function MySalesView({ user, initialTab='quotes', onOpen }) {
           {tab==='orders' && (
             <table className="tbl w-full">
               <thead><tr>
-                <th>OC</th><th>Cliente</th><th>Etapa</th><th>Entrega</th><th>Transporte</th><th>Desde cotización</th><th>Fecha</th><th></th>
+                <th>Código</th><th>Cliente</th><th>Etapa</th><th>NP Flexxus</th><th>Monto</th><th>Desde cotización</th><th>Fecha</th><th></th>
               </tr></thead>
               <tbody>
                 {myOrders.map(o => {
@@ -181,8 +181,8 @@ function MySalesView({ user, initialTab='quotes', onOpen }) {
                       <td className="mono text-[12px] font-semibold text-navy-900">{o.code}</td>
                       <td className="font-medium">{cli?.name || '—'}</td>
                       <td>{stg ? <Badge tone={stg.tone} dot>{stg.label}</Badge> : o.stage}</td>
-                      <td>{o.entrega ? <Badge tone={o.entrega==='AMBA'?'blue':'purple'}>{o.entrega}</Badge> : '—'}</td>
-                      <td className="text-[12px]">{o.transp || '—'}</td>
+                      <td className="mono text-[12px]">{o.flexxus || '—'}</td>
+                      <td className="mono text-[12px]">{o.monto != null ? fmtMoney(o.monto, o.currency) : '—'}</td>
                       <td className="mono text-[11px] text-ink-500">{o.fromQuote || '—'}</td>
                       <td className="mono text-[12px]">{fmtDate(o.fecha)}</td>
                       <td className="text-right">
@@ -676,7 +676,7 @@ function LogisticsView({ onOpen }) {
               <table className="w-full tbl">
                 <thead>
                   <tr>
-                    <SortTh col="code">OC</SortTh>
+                    <SortTh col="code">Código</SortTh>
                     <SortTh col="client">Cliente</SortTh>
                     {activeTab === 'all' && <SortTh col="stage">Etapa</SortTh>}
                     <SortTh col="entrega">Destino</SortTh>
@@ -985,9 +985,10 @@ function ClientImportModal({ onClose, onDone }) {
           {step === STEP.PREVIEW && preview && (
             <div className="space-y-5">
               {/* KPIs */}
-              <div className="grid grid-cols-4 gap-3">
+              <div className="grid grid-cols-5 gap-3">
                 {[
                   { label: 'Nuevos',      value: preview.summary.toAdd,     color: 'bg-green-50 border-green-200 text-green-700' },
+                  { label: 'Fusiones',    value: preview.summary.toRecode || 0, color: (preview.summary.toRecode||0) > 0 ? 'bg-purple-50 border-purple-200 text-purple-700' : 'bg-surface border-line text-ink-500' },
                   { label: 'Actualizados',value: preview.summary.toUpdate,  color: 'bg-blue-50 border-blue-200 text-blue-700' },
                   { label: 'Sin cambios', value: preview.summary.unchanged, color: 'bg-surface border-line text-ink-500' },
                   { label: 'A eliminar',  value: preview.summary.toRemove,  color: preview.summary.toRemove > 0 ? 'bg-red-50 border-red-200 text-red-700' : 'bg-surface border-line text-ink-500' },
@@ -998,6 +999,22 @@ function ClientImportModal({ onClose, onDone }) {
                   </div>
                 ))}
               </div>
+
+              {/* Fusiones: cliente cargado a mano que Flexxus trae con código nuevo */}
+              {preview.toRecode?.length > 0 && (
+                <div className="bg-purple-50 border border-purple-200 rounded-xl px-4 py-3 text-[12px] text-purple-800">
+                  <div className="font-semibold mb-1.5 flex items-center gap-1.5"><Icon name="git-merge" size={13}/>Se van a fusionar, no duplicar</div>
+                  <div className="text-purple-700 mb-2">Estos clientes ya estaban cargados a mano (mismo CUIT). En vez de crear uno nuevo, se les va a poner el código de Flexxus y quedan con su historial intacto.</div>
+                  <div className="border border-purple-200 bg-white rounded-lg overflow-hidden max-h-40 overflow-y-auto scroll-thin">
+                    {preview.toRecode.map(c => (
+                      <div key={c.code} className="px-3 py-2 border-b border-purple-100 last:border-0 flex gap-3 text-[12px]">
+                        <span className="mono font-semibold text-purple-600 shrink-0">{c._oldCode} → {c.code}</span>
+                        <span className="text-ink-700 flex-1 truncate">{c.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Vendedores matcheados automáticamente */}
               {preview.matchedVendors?.length > 0 && (
@@ -1124,15 +1141,20 @@ function ClientImportModal({ onClose, onDone }) {
                   <div className="font-semibold text-green-800 text-[14px]">Base de clientes actualizada</div>
                   <div className="text-[13px] text-green-700 mt-0.5">
                     {result.upserted.toLocaleString()} clientes procesados
+                    {result.recoded > 0 && ` · ${result.recoded} fusionado${result.recoded !== 1 ? 's' : ''}`}
                     {result.deleted > 0 && ` · ${result.deleted} eliminado${result.deleted !== 1 ? 's' : ''}`}
                     {result.skipped > 0 && ` · ${result.skipped} no eliminado${result.skipped !== 1 ? 's' : ''} (tienen historial)`}
                   </div>
                 </div>
               </div>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-4 gap-3">
                 <div className="bg-surface border border-line rounded-xl p-4 text-center">
                   <div className="text-2xl font-bold text-ink-900">{result.upserted.toLocaleString()}</div>
                   <div className="text-[11px] text-ink-500 mt-0.5">Clientes sincronizados</div>
+                </div>
+                <div className="bg-surface border border-line rounded-xl p-4 text-center">
+                  <div className="text-2xl font-bold text-purple-600">{result.recoded || 0}</div>
+                  <div className="text-[11px] text-ink-500 mt-0.5">Fusionados</div>
                 </div>
                 <div className="bg-surface border border-line rounded-xl p-4 text-center">
                   <div className="text-2xl font-bold text-red-600">{result.deleted}</div>
@@ -1303,7 +1325,10 @@ function Clients({ readonly=false }) {
   }, [cli?.id]);
 
   const cliQuotes = quotes.filter(q => q.client === cli?.code);
-  const cliOrders = orders.filter(o => o.client === cli?.code);
+  // Las Notas de Pedido pasaron a Fase 1, así que ya vienen dentro de cliQuotes.
+  // El tablero de Fase 2 las sigue devolviendo, y sumar las dos listas mostraba
+  // cada una dos veces en el historial (con el mismo código, encima).
+  const cliOrders = orders.filter(o => o.client === cli?.code && o._source !== 'QUOTE');
 
   // Combined history sorted newest-first
   const cliHistory = [
@@ -1311,11 +1336,23 @@ function Clients({ readonly=false }) {
     ...cliOrders.map(o => ({ ...o, _kind: 'order', _date: o.fecha })),
   ].sort((a, b) => new Date(b._date) - new Date(a._date));
 
-  // Totals por moneda
-  const ganadoUSD = cliQuotes.filter(q => q.stage==='aceptada' && q.monto && (q.currency||'USD')!=='ARS').reduce((s,q)=>s+q.monto,0);
-  const ganadoARS = cliQuotes.filter(q => q.stage==='aceptada' && q.monto && q.currency==='ARS').reduce((s,q)=>s+q.monto,0);
-  const cursoUSD  = cliQuotes.filter(q => !['aceptada','rechazada'].includes(q.stage) && q.monto && (q.currency||'USD')!=='ARS').reduce((s,q)=>s+q.monto,0);
-  const cursoARS  = cliQuotes.filter(q => !['aceptada','rechazada'].includes(q.stage) && q.monto && q.currency==='ARS').reduce((s,q)=>s+q.monto,0);
+  // Una Nota de Pedido y su presupuesto son el mismo negocio: sumar los dos lo
+  // contaría dos veces. Ganado = lo que el cliente efectivamente pidió (la NP);
+  // y si un presupuesto se aceptó sin que entrara NP, vale el presupuesto.
+  const esNP    = q => q.mailType === 'NOTA_PEDIDO';
+  const tieneNP = q => !!(q.paquete && (q.paquete.notasPedido || []).length);
+  const cotizaciones = cliQuotes.filter(q => !esNP(q));
+
+  const ganadas = cliQuotes.filter(q => q.stage === 'aceptada' && q.monto
+    && (esNP(q) || (q.mailType !== 'SOLICITUD' && !tieneNP(q))));
+  const enCurso = cliQuotes.filter(q => !['aceptada','rechazada'].includes(q.stage) && q.monto && !esNP(q));
+
+  const porMoneda = (arr, ars) => arr.filter(q => ars ? q.currency === 'ARS' : (q.currency||'USD') !== 'ARS')
+                                     .reduce((s,q) => s + q.monto, 0);
+  const ganadoUSD = porMoneda(ganadas, false);
+  const ganadoARS = porMoneda(ganadas, true);
+  const cursoUSD  = porMoneda(enCurso, false);
+  const cursoARS  = porMoneda(enCurso, true);
   const fmtMulti = (usd,ars,cur) => [usd>0&&fmtMoney(usd,'USD'),ars>0&&fmtMoney(ars,'ARS')].filter(Boolean).join(' + ') || '—';
 
   return (
@@ -1584,21 +1621,21 @@ function Clients({ readonly=false }) {
             {[
               {
                 k: 'Cotizaciones',
-                v: cliQuotes.length,
-                sub: `${cliQuotes.filter(q=>q.stage==='aceptada').length} ganadas · ${cliQuotes.filter(q=>q.stage==='rechazada').length} rechazadas`,
+                v: cotizaciones.length,
+                sub: `${cotizaciones.filter(q=>q.stage==='aceptada').length} ganadas · ${cotizaciones.filter(q=>q.stage==='rechazada').length} rechazadas`,
                 tone: 'blue', icon: 'clipboard-list',
               },
               {
-                k: 'OCs activas',
-                v: cliOrders.filter(o=>o.stage!==STAGES_F2[STAGES_F2.length-1]?.id).length,
-                sub: `${cliOrders.length} órdenes en total`,
-                tone: 'orange', icon: 'truck',
+                k: 'Notas de pedido',
+                v: cliQuotes.filter(esNP).length,
+                sub: 'pedidos ingresados',
+                tone: 'orange', icon: 'clipboard-list',
               },
               {
-                k: STAGES_F2[STAGES_F2.length-1]?.label || 'Completadas',
-                v: cliOrders.filter(o=>o.stage===STAGES_F2[STAGES_F2.length-1]?.id).length,
-                sub: 'historial completo',
-                tone: STAGES_F2[STAGES_F2.length-1]?.tone || 'green', icon: 'check-circle',
+                k: 'Sin presupuesto',
+                v: cliQuotes.filter(q => esNP(q) && !q.paquete?.presupuesto).length,
+                sub: 'NP que no se vincularon',
+                tone: 'amber', icon: 'unlink',
               },
               {
                 k: 'Monto ganado',
@@ -1647,9 +1684,20 @@ function Clients({ readonly=false }) {
                       <tr key={row.code} className="cursor-pointer hover:bg-brandSoft/30"
                         onClick={() => openModal(isQ ? 'quoteDetail' : 'orderDetail', { code: row.code })}>
                         <td>
-                          <Badge tone={isQ ? 'slate' : 'navy'}>{isQ ? 'COT' : 'OC'}</Badge>
+                          {/* Ahora que la NP está en Fase 1 llega por _kind:'quote', así que
+                              el tipo lo tiene que decir el mailType y no de dónde vino. */}
+                          <Badge tone={row.mailType === 'NOTA_PEDIDO' ? 'orange' : row.mailType === 'SOLICITUD' ? 'sky' : 'slate'}>
+                            {row.mailType === 'NOTA_PEDIDO' ? 'NP' : row.mailType === 'SOLICITUD' ? 'SOL' : 'COT'}
+                          </Badge>
                         </td>
-                        <td className="mono font-semibold text-[12px]">{row.code}</td>
+                        <td className="mono font-semibold text-[12px]">
+                          {row.code}
+                          {row.anulada && (
+                            <span className="ml-1.5 text-[9.5px] font-semibold px-1.5 py-0.5 rounded-full bg-ink-100 text-ink-500 border border-line align-middle">
+                              ANULADA
+                            </span>
+                          )}
+                        </td>
                         <td>{stg ? <Badge tone={stg.tone} dot>{stg.label}</Badge> : <span className="text-ink-400">{row.stage}</span>}</td>
                         <td className="text-[12px]">{s?.name?.split(' ')?.[0]||'—'}</td>
                         <td className="mono text-[12px]">{row._date ? fmtDate(row._date) : '—'}</td>
@@ -3146,7 +3194,7 @@ function Config() {
                       ? 'bg-white text-ink-900 shadow-sm'
                       : 'text-ink-500 hover:text-ink-700'
                   )}
-                >Fase 2 · Órdenes de Compra</button>
+                >Fase 2 · Notas de Pedido</button>
               </div>
               <button onClick={() => setNewStage({ label: '', tone: 'gray', phase: activePhase })}
                 className="btn-ghost text-[12px] flex items-center gap-1 text-brand">
@@ -5588,7 +5636,7 @@ function DeveloperSettings() {
 
 // ─── FeedbackView — Foro de soporte interno ────────────────────────────────
 
-const FEEDBACK_MODULES = ['Cotizaciones','Órdenes de Compra','Clientes','Correo / Mail','Notificaciones','Configuración','Otro'];
+const FEEDBACK_MODULES = ['Cotizaciones','Notas de Pedido','Clientes','Correo / Mail','Notificaciones','Configuración','Otro'];
 
 const FEEDBACK_STATUS = {
   OPEN:             { label: 'Abierto',                 dot: 'bg-blue-400',   badge: 'bg-blue-100 text-blue-700 border-blue-200' },

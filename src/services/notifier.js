@@ -283,8 +283,8 @@ async function runStageAlerts() {
 // weekly_report_last_sent y la lista de admins — arma el mismo mail y lo manda
 // únicamente a esa dirección. Pensado para el botón "Enviar de prueba".
 async function runWeeklyReport(opts = {}) {
+  const isTest = !!opts.testEmail;
   try {
-    const isTest = !!opts.testEmail;
     let targetDay = 1, targetHour = 9; // 1 = Lunes, usados solo para el pie del mail
 
     if (!isTest) {
@@ -336,23 +336,23 @@ async function runWeeklyReport(opts = {}) {
     const prevWeekEnd  = new Date(weekStart.getTime() - 1);
     const prevWeekStart= new Date(weekStart.getTime() - 7 * 86400000);
 
+    // Las "órdenes" pasan a ser Notas de Pedido: es lo que realmente entra.
+    // Antes acá había además un findMany sobre Order pidiendo el campo 'amount',
+    // que ese modelo no tiene — Prisma tiraba "Unknown field amount" y el
+    // resumen semanal se caía entero antes de mandarse. El resultado ni se usaba.
     const [
       quotesThisWeek, quotesPrevWeek,
-      ordersThisWeek, ordersPrevWeek,
-      allQuotes, allOrders,
+      npsThisWeek, npsPrevWeek,
+      allQuotes,
       allSellers,
     ] = await Promise.all([
       prisma.quote.count({ where: { createdAt: { gte: weekStart } } }),
       prisma.quote.count({ where: { createdAt: { gte: prevWeekStart, lte: prevWeekEnd } } }),
-      prisma.order.count({ where: { createdAt: { gte: weekStart } } }),
-      prisma.order.count({ where: { createdAt: { gte: prevWeekStart, lte: prevWeekEnd } } }),
+      prisma.quote.count({ where: { mailType: 'NOTA_PEDIDO', createdAt: { gte: weekStart } } }),
+      prisma.quote.count({ where: { mailType: 'NOTA_PEDIDO', createdAt: { gte: prevWeekStart, lte: prevWeekEnd } } }),
       prisma.quote.findMany({
         where: { stage: { notIn: ['rechazada'] }, isDraft: false },
         select: { stage: true, amount: true, sellerId: true, seller: { select: { name: true } } },
-      }),
-      prisma.order.findMany({
-        where: { stage: { notIn: ['cancelada'] } },
-        select: { stage: true, amount: true, sellerId: true },
       }),
       prisma.user.findMany({ where: { role: 'VENDEDOR', active: true }, select: { id: true, name: true } }),
     ]);
@@ -434,9 +434,9 @@ async function runWeeklyReport(opts = {}) {
     body +=   '<div style="font-size:12px;margin-top:4px">' + deltaHtml(wonThisWeek, wonPrevWeek) + ' ganadas vs sem. ant.</div>';
     body += '</div>';
     body += '<div style="background:' + C.bg + ';border-radius:10px;padding:16px">';
-    body +=   '<div style="font-size:11px;color:' + C.grayDark + ';margin-bottom:4px">Órdenes de compra</div>';
-    body +=   '<div style="font-size:26px;font-weight:700;color:' + C.brandDark + '">' + ordersThisWeek + '</div>';
-    body +=   '<div style="font-size:12px;margin-top:2px">' + deltaHtml(ordersThisWeek, ordersPrevWeek) + ' vs sem. ant.</div>';
+    body +=   '<div style="font-size:11px;color:' + C.grayDark + ';margin-bottom:4px">Notas de pedido</div>';
+    body +=   '<div style="font-size:26px;font-weight:700;color:' + C.brandDark + '">' + npsThisWeek + '</div>';
+    body +=   '<div style="font-size:12px;margin-top:2px">' + deltaHtml(npsThisWeek, npsPrevWeek) + ' vs sem. ant.</div>';
     body += '</div>';
     body += '<div style="background:' + C.bg + ';border-radius:10px;padding:16px">';
     body +=   '<div style="font-size:11px;color:' + C.grayDark + ';margin-bottom:4px">Monto total pipeline</div>';
@@ -518,6 +518,14 @@ async function runWeeklyReport(opts = {}) {
 
   } catch (e) {
     console.error('runWeeklyReport error:', e.message);
+    // Antes se quedaba solo en el log. Los dos que llaman a esto son endpoints
+    // HTTP con su propio try/catch, así que sin relanzar el botón "Probar"
+    // respondía { ok: true } y avisaba "enviado" aunque no se hubiera mandado
+    // nada — que es justamente por qué esto estuvo roto tanto tiempo sin que
+    // se notara. Relanzar hace que el error llegue a la pantalla.
+    throw new Error(isTest
+      ? `No se pudo enviar el resumen de prueba: ${e.message}`
+      : `No se pudo enviar el resumen semanal: ${e.message}`);
   }
 }
 

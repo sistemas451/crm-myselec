@@ -28,6 +28,16 @@ function Icon({ name, size = 16, className = '', strokeWidth = 2 }) {
   }, [name, size, strokeWidth]);
   return <span ref={ref} className={cx('inline-flex shrink-0', className)} aria-hidden="true" />;
 }
+// Semáforo de seguimiento: marca manual del vendedor sobre qué tan encima hay que
+// estar de una cotización. A propósito no reusa el rojo/ámbar del borde de la
+// tarjeta, que ya significan "vencido" — esto es otra cosa, la pone el vendedor.
+const PRIORIDADES = [
+  { id:'alta',  label:'Prioritaria',     desc:'Esta la tenemos que ganar',           dot:'#DC2626', wash:'#FEF2F2', line:'#FCA5A5' },
+  { id:'media', label:'Seguir de cerca', desc:'Requiere atención, sin ser crítica',  dot:'#D97706', wash:'#FFFBEB', line:'#FCD34D' },
+  { id:'baja',  label:'Al día',          desc:'Seguimiento hecho, está controlada',  dot:'#059669', wash:'#ECFDF5', line:'#6EE7B7' },
+];
+const prioridadDe = (id) => PRIORIDADES.find(p => p.id === id) || null;
+
 function toPascal(k) {
   return k.split('-').map(s => s[0].toUpperCase() + s.slice(1)).join('');
 }
@@ -129,7 +139,6 @@ const STAGES_F1 = [
 ];
 
 const STAGES_F2 = [
-  { id:'oc',          label:'OC Recibida',         tone:'gray'   },
   { id:'np',          label:'NP en Flexxus',       tone:'blue'   },
   { id:'stock',       label:'Verificando Stock',   tone:'amber'  },
   { id:'proveedor',   label:'Esperando Proveedor', tone:'orange' },
@@ -152,6 +161,7 @@ const CH_MONTHLY    = [];
 // Expose to other scripts
 Object.assign(window, {
   cx, fmtMoney, fmtDate, fmtDateTime, authUrl,
+  PRIORIDADES, prioridadDe,
   Icon, Logo, Avatar, Badge,
   USERS, CLIENTS, QUOTES, ORDERS,
   STAGES_F1, STAGES_F2, ACTIVITY, COMMENTS,

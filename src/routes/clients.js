@@ -27,6 +27,18 @@ function emailDomain(email) {
   return at >= 0 ? email.slice(at + 1).toLowerCase() : null;
 }
 
+// ── Helper: normalizar CUIT para comparar (sin guiones ni espacios) ───────
+// "30-54570591-1" y "30545705911" son el mismo CUIT — comparar tal cual
+// como string ya alcanza en el 99% de los casos reales, pero esto evita
+// falsos negativos por formato.
+function normCuit(cuit) {
+  const d = cuit ? String(cuit).replace(/[^0-9]/g, '') : '';
+  // Un CUIT de verdad tiene 11 dígitos. Hay clientes con "-", un espacio o
+  // basura en el campo: si esos quedaran en cadena vacía matchearían todos
+  // contra todos y se fusionarían clientes que no tienen nada que ver.
+  return d.length >= 10 ? d : null;
+}
+
 // ── Helper: fila cruda (array de columnas) → objeto cliente ───────────────
 // Layout real de Flexxus: Código;Razón Social;C.U.I.T.;Dirección;Teléfono;
 // Localidad;Provincia;Zona;Vendedor;Tipo Actividad;Mail;Código Postal
@@ -242,6 +254,28 @@ router.get('/:id', authMiddleware, async (req, res) => {
 // POST /api/clients
 router.post('/', authMiddleware, async (req, res) => {
   try {
+    const { name, cuit, email, phone, address, city, province,
+            zone, activity, defaultSellerId, postalCode } = req.body;
+
+    // Frenar el duplicado más común: ya existe un cliente con este CUIT
+    // (cargado a mano antes o traído por Flexxus) — no crear otro, avisar
+    // cuál es el que ya está. Esto es lo que pasó en MYS-0020: se creaba a
+    // mano sin buscar primero, y después el import de Flexxus lo duplicaba.
+    const nc = normCuit(cuit);
+    if (nc) {
+      const existentes = await prisma.client.findMany({
+        where: { cuit: { not: null } },
+        select: { id: true, code: true, name: true, cuit: true },
+      });
+      const dup = existentes.find(c => normCuit(c.cuit) === nc);
+      if (dup) {
+        return res.status(409).json({
+          error: `Ya existe un cliente con ese CUIT: ${dup.name} (código ${dup.code}). Buscalo en vez de crear uno nuevo.`,
+          existingClient: dup,
+        });
+      }
+    }
+
     // Solo considerar códigos CLI-NNN para el autoincremental (ignora códigos importados del XLS)
     const allCli = await prisma.client.findMany({
       where: { code: { startsWith: 'CLI-' } },
@@ -253,8 +287,6 @@ router.post('/', authMiddleware, async (req, res) => {
     }, 0);
     const code = `CLI-${String(maxNum + 1).padStart(3, '0')}`;
 
-    const { name, cuit, email, phone, address, city, province,
-            zone, activity, defaultSellerId, postalCode } = req.body;
     const emailDomain = email ? email.split('@')[1] || null : null;
 
     let sellerId = defaultSellerId || null;
@@ -284,6 +316,21 @@ router.put('/:id', authMiddleware, async (req, res) => {
   try {
     const { name, cuit, email, phone, address, city, province,
             zone, activity, defaultSellerId, postalCode } = req.body;
+
+    const nc = normCuit(cuit);
+    if (nc) {
+      const existentes = await prisma.client.findMany({
+        where: { cuit: { not: null }, id: { not: req.params.id } },
+        select: { id: true, code: true, name: true, cuit: true },
+      });
+      const dup = existentes.find(c => normCuit(c.cuit) === nc);
+      if (dup) {
+        return res.status(409).json({
+          error: `Ese CUIT ya lo tiene otro cliente: ${dup.name} (código ${dup.code}).`,
+          existingClient: dup,
+        });
+      }
+    }
 
     const emailDomain = email ? email.split('@')[1] || null : null;
 
@@ -451,6 +498,14 @@ router.post('/preview', authMiddleware, upload.single('file'), async (req, res) 
       select: { code: true, name: true, cuit: true, city: true, province: true, zone: true, phone: true, email: true, address: true, postalCode: true, activity: true },
     });
     const existingMap = new Map(existing.map(c => [c.code, c]));
+    // Por CUIT, solo entre los cargados a mano (CLI-NNN) — es el caso real:
+    // alguien lo cargó manual y Flexxus lo trae después con su código propio.
+    // No se cruza contra clientes ya numerados por Flexxus para no pisar
+    // casos legítimos de un mismo CUIT en varios códigos (ej. depósitos).
+    const manualesPorCuit = new Map(
+      existing.filter(c => c.code.startsWith('CLI-') && normCuit(c.cuit))
+              .map(c => [normCuit(c.cuit), c])
+    );
 
     // 3. Traer usuarios activos para matching de vendedor
     const users = await prisma.user.findMany({
@@ -487,13 +542,20 @@ router.post('/preview', authMiddleware, upload.single('file'), async (req, res) 
     // 5. Clasificar
     const toAdd     = [];
     const toUpdate  = [];
+    const toRecode  = []; // ya existe cargado a mano con otro código — fusionar, no duplicar
     const unchanged = [];
     const toRemove  = [];
 
     for (const [code, row] of incomingMap) {
       const ex = existingMap.get(code);
       if (!ex) {
-        toAdd.push(row);
+        const ncRow  = normCuit(row.cuit);
+        const manual = ncRow ? manualesPorCuit.get(ncRow) : null;
+        if (manual) {
+          toRecode.push({ ...row, _oldCode: manual.code, _oldName: manual.name });
+        } else {
+          toAdd.push(row);
+        }
       } else {
         const changed =
           ex.name        !== row.name     ||
@@ -523,6 +585,9 @@ router.post('/preview', authMiddleware, upload.single('file'), async (req, res) 
       code: r.code, name: r.name, city: r.city, province: r.province,
       _old: r._old, vendorName: r.vendorName,
     }));
+    const previewRecode = toRecode.slice(0, 20).map(r => ({
+      code: r.code, name: r.name, _oldCode: r._oldCode, _oldName: r._oldName,
+    }));
 
     // Pre-run vendor matching to populate unmatchedVendors
     incoming.forEach(r => matchVendor(r.vendorName));
@@ -540,11 +605,13 @@ router.post('/preview', authMiddleware, upload.single('file'), async (req, res) 
       summary: {
         total:     incoming.length,
         toAdd:     toAdd.length,
+        toRecode:  toRecode.length,
         toUpdate:  toUpdate.length,
         unchanged: unchanged.length,
         toRemove:  toRemove.length,
       },
       toAdd:    previewAdd,
+      toRecode: previewRecode,
       toUpdate: previewUpdate,
       toRemove: toRemove.map(c => ({ code: c.code, name: c.name, city: c.city })),
       unmatchedVendors: [...unmatchedCounts.keys()], // compatibilidad hacia atrás
@@ -590,7 +657,21 @@ router.post('/sync', authMiddleware, async (req, res) => {
       return found?.id || null;
     }
 
+    // Clientes cargados a mano (CLI-NNN) que ya existen ahora mismo, por CUIT.
+    // Se recalcula acá (no se usa lo del preview) porque puede haber pasado
+    // tiempo entre preview y confirmar, y los códigos existentes de verdad
+    // importan para no duplicar.
+    const codigosExistentes = new Set(
+      (await prisma.client.findMany({ select: { code: true } })).map(c => c.code)
+    );
+    const manualesPorCuit = new Map(
+      (await prisma.client.findMany({
+        where: { code: { startsWith: 'CLI-' }, cuit: { not: null } },
+      })).filter(c => normCuit(c.cuit)).map(c => [normCuit(c.cuit), c])
+    );
+
     let upserted = 0;
+    let recoded  = 0;
     const BATCH = 50;
 
     for (let i = 0; i < rows.length; i += BATCH) {
@@ -612,11 +693,33 @@ router.post('/sync', authMiddleware, async (req, res) => {
           legacySellerName: defaultSellerId ? null : (r.vendorName || null),
         };
 
-        const client = await prisma.client.upsert({
-          where:  { code: r.code },
-          update: data,
-          create: { code: r.code, ...data, active: true },
-        });
+        let client;
+        const ncRow  = normCuit(r.cuit);
+        const fusion = !codigosExistentes.has(r.code) && ncRow
+          ? manualesPorCuit.get(ncRow) : null;
+
+        if (fusion) {
+          // Ya estaba cargado a mano con este mismo CUIT bajo otro código:
+          // fusionar (pisarle el código, no crear uno nuevo) para no duplicar
+          // el cliente ni partir su historial de cotizaciones/órdenes.
+          // Flexxus manda el dato bueno, pero si viene vacío no se pisa lo que
+          // el vendedor cargó a mano — en la fusión no se pierde nada. Es la
+          // misma regla que usa scripts/migrar-clientes-duplicados.js.
+          const fusionData = { ...data };
+          for (const k of ['address','city','province','zone','postalCode','phone','email','emailDomain','activity','defaultSellerId']) {
+            if (fusionData[k] == null) fusionData[k] = fusion[k];
+          }
+          client = await prisma.client.update({ where: { id: fusion.id }, data: { code: r.code, ...fusionData } });
+          manualesPorCuit.delete(ncRow);
+          codigosExistentes.add(r.code);
+          recoded++;
+        } else {
+          client = await prisma.client.upsert({
+            where:  { code: r.code },
+            update: data,
+            create: { code: r.code, ...data, active: true },
+          });
+        }
 
         // Insertar mails adicionales en ClientEmail (upsert, no duplicar)
         if (r.allMails.length > 0) {
@@ -645,7 +748,7 @@ router.post('/sync', authMiddleware, async (req, res) => {
       }
     }
 
-    res.json({ ok: true, upserted, deleted, skipped });
+    res.json({ ok: true, upserted, recoded, deleted, skipped });
   } catch (err) {
     console.error('clients/sync error:', err);
     res.status(500).json({ error: err.message });

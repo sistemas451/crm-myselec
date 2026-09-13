@@ -1028,7 +1028,6 @@ function QuoteDetail({ code, onClose, canReassign }) {
   const [priceBreakdown, setPriceBreakdown] = useState(null); // { subtotalNeto, ivaAmount, totalPercepciones, total }
   const [emailBodyOpen, setEmailBodyOpen] = useState(false);
   const [linkedQuotes, setLinkedQuotes] = useState({ linkedQuote: null, linkedBy: [] });
-  const [linkedOrder, setLinkedOrder] = useState(null); // OC vinculada a este presupuesto
   const [linkDropOpen, setLinkDropOpen] = useState(false);
   const [linkSaving, setLinkSaving] = useState(false);
   const noteInputRef = React.useRef(null);
@@ -1053,6 +1052,63 @@ function QuoteDetail({ code, onClose, canReassign }) {
   // La fecha límite es un día del calendario: se fija al mediodía UTC para que no
   // se lea un día menos en Argentina (UTC-3). El backend hace lo mismo. MYS-0017.
   const deadlineIso = (dia) => dia ? new Date(dia + 'T12:00:00.000Z').toISOString() : null;
+  // Revisiones. Flexxus no las tiene: recotizar es armar un presupuesto nuevo.
+  // En vez de editar el original y perder lo que se le mandó al cliente, se
+  // copia a uno nuevo y el anterior queda anulado.
+  const [revisarOpen, setRevisarOpen] = useState(false);
+  const [revisarMotivo, setRevisarMotivo] = useState('');
+  const [revisando, setRevisando] = useState(false);
+
+  const reactivar = async () => {
+    const otras = (q.reemplazadaPor ? [q.reemplazadaPor] : []).join(', ');
+    const msg = `¿Reactivar ${q.code}? Vuelve al tablero y a los totales.`
+      + (otras ? `\n\nOjo: ${otras} sigue activa, así que van a quedar las dos.` : '');
+    if (!window.confirm(msg)) return;
+    try {
+      const r = await CrmApi.reactivarQuote(q.id);
+      const fresh = await CrmApi.getQuotes();
+      if (fresh) setQuotes(fresh);
+      pushToast(r.tambienVivas?.length
+        ? `${q.code} reactivada — revisá cuál queda, ${r.tambienVivas.join(', ')} también está activa`
+        : `${q.code} reactivada`);
+    } catch (err) {
+      pushToast(err.message || 'Error al reactivar', 'bad');
+    }
+  };
+
+  const confirmarRevision = async () => {
+    setRevisando(true);
+    try {
+      const r = await CrmApi.revisarQuote(q.id, revisarMotivo);
+      const fresh = await CrmApi.getQuotes();
+      if (fresh) setQuotes(fresh);
+      pushToast(`Revisión ${r.revisionNro} creada como ${r.code}`);
+      setRevisarOpen(false);
+      setRevisarMotivo('');
+      openModal('quoteDetail', { code: r.code });
+    } catch (err) {
+      pushToast(err.message || 'Error al crear la revisión', 'bad');
+    } finally {
+      setRevisando(false);
+    }
+  };
+
+  // Semáforo de seguimiento. Marca manual, no depende de ninguna fecha.
+  const [prioSaving, setPrioSaving] = useState(false);
+  const guardarPrioridad = async (valor) => {
+    setPrioSaving(true);
+    try {
+      const nuevo = q.priority === valor ? null : valor;   // volver a tocar la misma la saca
+      await CrmApi.updateQuotePriority(q.id, nuevo);
+      updateQuote(q.code, { priority: nuevo });
+      pushToast(nuevo ? `Marcada como "${prioridadDe(nuevo).label}"` : 'Marca de seguimiento quitada');
+    } catch (err) {
+      pushToast(err.message || 'Error al guardar', 'bad');
+    } finally {
+      setPrioSaving(false);
+    }
+  };
+
   const guardarDeadline = async (dia) => {
     setDeadlineSaving(true);
     try {
@@ -1210,7 +1266,6 @@ function QuoteDetail({ code, onClose, canReassign }) {
         setDetailAttachments(detail.attachments || []);
         setDetailEmailBody(detail.emailBody || '');
         setLinkedQuotes({ linkedQuote: detail.linkedQuote || null, linkedBy: detail.linkedBy || [] });
-        setLinkedOrder(detail.linkedOrder || null);
         // Breakdown de precios (solo presupuestos Flexxus con datos parseados)
         if (detail.subtotalNeto != null || detail.ivaAmount != null) {
           setPriceBreakdown({
@@ -1275,27 +1330,56 @@ function QuoteDetail({ code, onClose, canReassign }) {
     }
   };
 
+  // Borrado del paquete. Como ahora los tres documentos se mueven juntos,
+  // borrar uno tiene que ser una decisión explícita y no un efecto colateral:
+  // si la cotización es parte de un paquete se abre un selector, y si está
+  // sola se pregunta y listo, como siempre.
+  const [borrarOpen, setBorrarOpen] = useState(false);
+  const [borrarSel,  setBorrarSel]  = useState([]);
+  const [borrando,   setBorrando]   = useState(false);
+
+  const miembrosDelPaquete = () => {
+    const p = q.paquete;
+    if (!p) return [];
+    const m = [];
+    if (p.solicitud)   m.push({ code: p.solicitud.code,   etq: 'Solicitud' });
+    if (p.presupuesto) m.push({ code: p.presupuesto.code, etq: 'Presupuesto' });
+    for (const np of p.notasPedido || []) m.push({ code: np.code, etq: 'Nota de pedido' });
+    return m;
+  };
+
   const handleDelete = async () => {
-    const warnings = [];
-    if (linkedOrder) warnings.push(`La OC ${linkedOrder.code} perderá el vínculo con este presupuesto.`);
-    const linked = linkedQuotes.linkedQuote || linkedQuotes.linkedBy?.[0];
-    if (linked) warnings.push(`Se desvinculará de ${linked.code} (${linked.mailType || 'manual'}).`);
-    const npLinked = (linkedQuotes.linkedBy || []).find(x => x.mailType === 'NOTA_PEDIDO');
-    if (npLinked) warnings.push(`La NP ${npLinked.code} perderá su vínculo.`);
-    const msg = `¿Eliminar la cotización ${q.code}? Esta acción no se puede deshacer.`
-      + (warnings.length ? '\n\n' + warnings.join('\n') : '');
-    if (!window.confirm(msg)) return;
+    const miembros = miembrosDelPaquete();
+    if (miembros.length > 1) {
+      setBorrarSel([q.code]);      // por defecto, solo en la que estás parado
+      setBorrarOpen(true);
+      return;
+    }
+    if (!window.confirm(`¿Eliminar la cotización ${q.code}? Esta acción no se puede deshacer.`)) return;
     try {
       await CrmApi.deleteQuote(q.id);
       setQuotes(qs => qs.filter(x => x.id !== q.id));
-      // Refrescar orders si había una OC vinculada (pierde su fromQuote)
-      if (linkedOrder) {
-        try { const fresh = await CrmApi.getOrders(); setOrders(fresh); } catch(e) {}
-      }
       pushToast('Cotización eliminada');
       closeModal();
     } catch (err) {
       pushToast(err.message || 'Error al eliminar', 'bad');
+    }
+  };
+
+  const confirmarBorrado = async () => {
+    if (!borrarSel.length) return;
+    setBorrando(true);
+    try {
+      const aBorrar = quotes.filter(x => borrarSel.includes(x.code));
+      for (const doc of aBorrar) await CrmApi.deleteQuote(doc.id);
+      setQuotes(qs => qs.filter(x => !borrarSel.includes(x.code)));
+      pushToast(aBorrar.length === 1 ? 'Cotización eliminada' : `${aBorrar.length} documentos eliminados`);
+      setBorrarOpen(false);
+      if (borrarSel.includes(q.code)) closeModal();
+    } catch (err) {
+      pushToast(err.message || 'Error al eliminar', 'bad');
+    } finally {
+      setBorrando(false);
     }
   };
 
@@ -1418,6 +1502,12 @@ function QuoteDetail({ code, onClose, canReassign }) {
           {['ADMIN','DEVELOPER'].includes(CrmAuth.getUser()?.role) && (
             <button className="btn-ghost text-bad hover:bg-red-50 border-red-200" onClick={handleDelete}>
               <Icon name="trash-2" size={13}/>Eliminar
+            </button>
+          )}
+          {q.mailType === 'PRESUPUESTO' && !q.anulada && (
+            <button className="btn-ghost" onClick={() => setRevisarOpen(true)}
+              title="El cliente pidió recotizar: se copia a un presupuesto nuevo y este queda anulado">
+              <Icon name="copy" size={13}/>Nueva revisión
             </button>
           )}
           <input ref={fileInputRef} type="file" multiple className="hidden"
@@ -1594,6 +1684,71 @@ function QuoteDetail({ code, onClose, canReassign }) {
         </div>
       )}
 
+      {/* ── Cadena de revisiones ────────────────────────────────────────────
+           Arriba de todo porque cambia cómo hay que leer el resto de la ficha:
+           si está anulada, lo que se ve acá abajo ya no es lo vigente. */}
+      {q.anulada && (
+        <div className="mx-6 mt-4 flex items-start gap-2.5 px-3.5 py-2.5 rounded-xl bg-ink-100/70 border border-line">
+          <Icon name="archive" size={15} className="text-ink-500 mt-0.5 shrink-0"/>
+          <div className="min-w-0">
+            <div className="text-[12.5px] font-semibold text-ink-700">
+              Anulada{q.reemplazadaPor && <> — la reemplazó{' '}
+                <button className="text-brand hover:underline mono"
+                  onClick={() => openModal('quoteDetail', { code: q.reemplazadaPor })}>{q.reemplazadaPor}</button>
+              </>}
+            </div>
+            <div className="text-[11.5px] text-ink-500 mt-0.5">
+              {q.anuladaMotivo || 'Se armó una revisión de este presupuesto.'} Queda para consulta: no está en el tablero ni suma en los totales.
+            </div>
+            <button onClick={reactivar}
+              className="mt-1.5 text-[11.5px] text-brand hover:underline font-medium">
+              Reactivar — traerla de vuelta al tablero
+            </button>
+            {q.revision?.cadena?.length > 1 && (
+              <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+                {q.revision.cadena.map((paso, i) => (
+                  <React.Fragment key={paso.id}>
+                    {i > 0 && <Icon name="chevron-right" size={12} className="text-ink-300 shrink-0"/>}
+                    {paso.id === q.id
+                      ? <span className="mono text-[11px] font-semibold text-ink-700 px-1.5 py-0.5 rounded-md bg-white border border-line">{paso.code}</span>
+                      : <button onClick={() => openModal('quoteDetail', { code: paso.code })}
+                          className="mono text-[11px] text-ink-500 hover:text-brand hover:underline">{paso.code}</button>}
+                  </React.Fragment>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      {!q.anulada && q.revisionDe && (
+        <div className="mx-6 mt-4 px-3.5 py-2.5 rounded-xl bg-brandSoft/40 border border-brand/25">
+          <div className="flex items-center gap-2.5">
+            <Icon name="copy" size={15} className="text-brand shrink-0"/>
+            <div className="text-[12.5px] font-semibold text-ink-800">
+              Revisión {q.revision?.nro || 2} de este presupuesto
+            </div>
+          </div>
+          {/* La cadena entera: cada revisión cambia el código, así que sin esto
+              se pierde el hilo de por dónde pasó el presupuesto. */}
+          {q.revision?.cadena?.length > 1 && (
+            <div className="mt-2 pl-[25px] flex items-center gap-1.5 flex-wrap">
+              {q.revision.cadena.map((paso, i) => (
+                <React.Fragment key={paso.id}>
+                  {i > 0 && <Icon name="chevron-right" size={12} className="text-ink-300 shrink-0"/>}
+                  {paso.id === q.id
+                    ? <span className="mono text-[11.5px] font-semibold text-navy-900 px-1.5 py-0.5 rounded-md bg-white border border-brand/30">{paso.code}</span>
+                    : <button onClick={() => openModal('quoteDetail', { code: paso.code })}
+                        className="mono text-[11.5px] text-ink-500 hover:text-brand hover:underline line-through decoration-ink-300">
+                        {paso.code}
+                      </button>}
+                </React.Fragment>
+              ))}
+              {!q.revision.completa && <span className="text-[11px] text-ink-400">…</span>}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Pipeline strip */}
       <div className="px-6 pt-5 pb-4 bg-gradient-to-b from-surface to-white">
         <StagePipeline stages={STAGES_F1} currentId={q.stage}/>
@@ -1630,6 +1785,29 @@ function QuoteDetail({ code, onClose, canReassign }) {
           </Field>
           <Field label="Ingreso">
             <span className="mono">{fmtDate(q.ingreso)} <span className="text-ink-500">· hace {q.dias}d</span></span>
+          </Field>
+          <Field label="Seguimiento">
+            {/* Un vendedor solo marca las suyas; admin y developer, cualquiera. */}
+            {(roleKey !== 'seller' || q.seller === currentUserId) ? (
+              <div className={cx('flex items-center gap-1', prioSaving && 'opacity-50 pointer-events-none')}>
+                {PRIORIDADES.map(p => (
+                  <button key={p.id} title={`${p.label} — ${p.desc}`}
+                    onClick={() => guardarPrioridad(p.id)}
+                    className={cx('flex items-center gap-1.5 px-2 py-1 rounded-lg border text-[12px] transition-colors',
+                      q.priority === p.id ? 'font-medium text-navy-900' : 'border-transparent text-ink-500 hover:bg-surface')}
+                    style={q.priority === p.id ? { background:p.wash, borderColor:p.line } : {}}>
+                    <span className="w-2 h-2 rounded-full" style={{ background:p.dot }}/>
+                    {q.priority === p.id ? p.label : ''}
+                  </button>
+                ))}
+                {!q.priority && <span className="text-ink-400 text-[12px] ml-0.5">Sin marcar</span>}
+              </div>
+            ) : prioridadDe(q.priority) ? (
+              <span className="flex items-center gap-1.5 text-[12.5px]">
+                <span className="w-2 h-2 rounded-full" style={{ background: prioridadDe(q.priority).dot }}/>
+                {prioridadDe(q.priority).label}
+              </span>
+            ) : <span className="text-ink-400">Sin marcar</span>}
           </Field>
           {isSolicitud && !q.linkedQuoteId && (
             <Field label={
@@ -1744,21 +1922,108 @@ function QuoteDetail({ code, onClose, canReassign }) {
         </div>
       )}
 
+      {revisarOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy-900/40 p-4"
+             onClick={() => !revisando && setRevisarOpen(false)}>
+          <div className="w-[440px] bg-white rounded-xl shadow-pop border border-line modal-enter overflow-hidden"
+               onClick={e => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-line">
+              <div className="text-[14px] font-semibold text-navy-900">Nueva revisión de {q.code}</div>
+              <div className="text-[12px] text-ink-500 mt-0.5">
+                Se copia a un presupuesto nuevo con los mismos ítems. Este queda anulado.
+              </div>
+            </div>
+            <div className="px-5 py-4 space-y-3">
+              <div className="text-[12.5px] text-ink-600 bg-surface border border-line rounded-lg px-3 py-2.5 space-y-1">
+                <div>· El nuevo arranca en la misma etapa y con los mismos ítems, para editarlos.</div>
+                <div>· {q.code} sale del tablero y de los totales, pero se sigue pudiendo abrir.</div>
+                <div>· Si tiene solicitud o nota de pedido vinculada, pasan al nuevo.</div>
+              </div>
+              <FormGroup label="Motivo (opcional)" hint="Queda en el historial de las dos">
+                <input className="inp w-full" autoFocus value={revisarMotivo}
+                  onChange={e => setRevisarMotivo(e.target.value)}
+                  placeholder="El cliente pidió agregar dos ítems"/>
+              </FormGroup>
+            </div>
+            <div className="px-5 py-3 border-t border-line flex gap-2 justify-end bg-surface/50">
+              <button className="btn-ghost" disabled={revisando}
+                onClick={() => setRevisarOpen(false)}>Cancelar</button>
+              <button className="btn-primary" disabled={revisando} onClick={confirmarRevision}>
+                {revisando ? 'Creando…' : 'Crear la revisión'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {borrarOpen && (() => {
+        const miembros = miembrosDelPaquete();
+        const toggle = (code) => setBorrarSel(s => s.includes(code) ? s.filter(x => x !== code) : [...s, code]);
+        const quedan = miembros.filter(m => !borrarSel.includes(m.code));
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy-900/40 p-4"
+               onClick={() => !borrando && setBorrarOpen(false)}>
+            <div className="w-[420px] bg-white rounded-xl shadow-pop border border-line modal-enter overflow-hidden"
+                 onClick={e => e.stopPropagation()}>
+              <div className="px-5 py-4 border-b border-line">
+                <div className="text-[14px] font-semibold text-navy-900">¿Qué querés eliminar?</div>
+                <div className="text-[12px] text-ink-500 mt-0.5">
+                  Esta cotización es parte de un paquete de {miembros.length} documentos.
+                </div>
+              </div>
+              <div className="px-5 py-3 space-y-1.5">
+                {miembros.map(m => (
+                  <label key={m.code}
+                    className={cx('flex items-center gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer border transition-colors',
+                      borrarSel.includes(m.code) ? 'border-bad/40 bg-red-50/60' : 'border-line hover:bg-surface')}>
+                    <input type="checkbox" checked={borrarSel.includes(m.code)}
+                      onChange={() => toggle(m.code)}
+                      className="w-4 h-4 rounded border-line accent-red-600"/>
+                    <span className="mono text-[12px] font-semibold text-navy-900">{m.code}</span>
+                    <span className="text-[11.5px] text-ink-500">{m.etq}</span>
+                    {m.code === q.code && <span className="ml-auto text-[10.5px] text-ink-400">estás acá</span>}
+                  </label>
+                ))}
+              </div>
+              <div className="px-5 pb-3">
+                <button onClick={() => setBorrarSel(miembros.map(m => m.code))}
+                  className="text-[12px] text-bad hover:underline">Seleccionar el paquete entero</button>
+              </div>
+              {borrarSel.length > 0 && quedan.length > 0 && (
+                <div className="mx-5 mb-3 text-[11.5px] text-ink-600 bg-surface border border-line rounded-lg px-3 py-2">
+                  {quedan.map(m => m.code).join(', ')} {quedan.length === 1 ? 'queda' : 'quedan'} sin el resto del paquete.
+                </div>
+              )}
+              <div className="px-5 py-3 border-t border-line flex gap-2 justify-end bg-surface/50">
+                <button className="btn-ghost" disabled={borrando}
+                  onClick={() => setBorrarOpen(false)}>Cancelar</button>
+                <button className="btn-ghost text-bad hover:bg-red-50 border-red-300 disabled:opacity-50"
+                  disabled={borrando || !borrarSel.length}
+                  onClick={confirmarBorrado}>
+                  {borrando ? 'Eliminando…' : borrarSel.length === miembros.length
+                    ? 'Eliminar el paquete'
+                    : `Eliminar ${borrarSel.length} ${borrarSel.length === 1 ? 'documento' : 'documentos'}`}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {unlinkTarget && (
         <ConfirmUnlinkModal
           ownCode={q.code}
           target={unlinkTarget}
           clientName={cli?.name || q.clientName}
-          warnings={[
-            ...(linkedOrder ? [`La orden ${linkedOrder.code} quedará sin su presupuesto de origen.`] : []),
-            ...((linkedQuotes.linkedBy || []).filter(x => x.mailType === 'NOTA_PEDIDO').map(np => `La Nota de Pedido ${np.code} perderá la referencia.`)),
-          ]}
+          warnings={(linkedQuotes.linkedBy || [])
+            .filter(x => x.mailType === 'NOTA_PEDIDO')
+            .map(np => `La Nota de Pedido ${np.code} perderá la referencia.`)}
           onClose={() => setUnlinkTarget(null)}
           onConfirm={handleUnlinkQuote}
         />
       )}
 
-      {/* ── Vinculaciones: Solicitud / Presupuesto / OC / NP ── */}
+      {/* ── Vinculaciones: Solicitud / Presupuesto / NP ── */}
       {(() => {
         const solicitud   = linkedQuotes.linkedQuote?.mailType === 'SOLICITUD'   ? linkedQuotes.linkedQuote : linkedQuotes.linkedBy?.find(x => x.mailType === 'SOLICITUD');
         const presupuesto = linkedQuotes.linkedQuote?.mailType === 'PRESUPUESTO' ? linkedQuotes.linkedQuote : linkedQuotes.linkedBy?.find(x => x.mailType === 'PRESUPUESTO');
@@ -1766,7 +2031,8 @@ function QuoteDetail({ code, onClose, canReassign }) {
                          || linkedQuotes.linkedBy?.find(x => x.mailType === 'NOTA_PEDIDO');
 
         // Cards: siempre muestran el vínculo primario (con botón vincular si falta),
-        // OC y NP solo aparecen cuando existen
+        // la NP solo aparece cuando existe. La OC salió del paquete: era un espejo
+        // vacío y confundía más de lo que ayudaba.
         const vcards = [];
         if (q.mailType === 'PRESUPUESTO') {
           vcards.push({ label:'Solicitud origen',      icon:'inbox',          bg:'bg-sky-50 text-sky-600',       data: solicitud   || null, modal:'quoteDetail', vincularTarget:'SOLICITUD'   });
@@ -1774,7 +2040,6 @@ function QuoteDetail({ code, onClose, canReassign }) {
         if (q.mailType === 'SOLICITUD') {
           vcards.push({ label:'Presupuesto vinculado', icon:'file-text',      bg:'bg-blue-50 text-blue-600',     data: presupuesto || null, modal:'quoteDetail', vincularTarget:'PRESUPUESTO' });
         }
-        if (linkedOrder) vcards.push({ label:'Orden de Compra',  icon:'package',        bg:'bg-purple-50 text-purple-600', data: { ...linkedOrder, mailType:'OC' }, modal:'orderDetail', vincularTarget: null });
         if (npLink)      vcards.push({ label:'Nota de Pedido',   icon:'clipboard-list', bg:'bg-orange-50 text-orange-600', data: npLink,                            modal:'orderDetail', vincularTarget: null });
 
         if (!vcards.length) return null;
@@ -2268,6 +2533,10 @@ function QuoteDetail({ code, onClose, canReassign }) {
                   REMINDER_SENT:       { name:'bell',           cls:'text-amber-600 bg-amber-50' },
                   PEDIDO_EDITED:       { name:'pencil',         cls:'text-ink-500 bg-surface' },
                   DUPLICATE_MERGED:    { name:'copy',           cls:'text-ink-500 bg-surface' },
+                  PRIORITY_CHANGED:    { name:'activity',       cls:'text-amber-600 bg-amber-50' },
+                  REVISION_CREADA:     { name:'copy',           cls:'text-brand bg-brandSoft' },
+                  ANULADA:             { name:'archive',        cls:'text-ink-500 bg-surface' },
+                  REACTIVADA:          { name:'rotate-ccw',     cls:'text-emerald-600 bg-emerald-50' },
                 };
                 const ic = iconMap[a.action] || { name:'activity', cls:'text-ink-500 bg-surface' };
                 const isLast = i === history.length - 1;
@@ -2741,7 +3010,7 @@ function OrderDetail({ code, onClose, canReassign }) {
   // ── Delete order / NP ──
   const [deleting, setDeleting] = useState(false);
   const handleDeleteOrder = async () => {
-    const label = isNP ? 'Nota de Pedido' : 'Orden de Compra';
+    const label = 'Nota de Pedido';
     const extra = (o.fromQuote || linkedPres?.code)
       ? `\n\nEl presupuesto ${o.fromQuote || linkedPres?.code} volverá a etapa "Enviado".`
       : '';
@@ -2791,7 +3060,7 @@ function OrderDetail({ code, onClose, canReassign }) {
   return (
     <>
     <Drawer onClose={onClose}
-      subtitle={`Fase 2 · ${isNP ? 'Nota de Pedido' : 'Orden de Compra'} · ${stg?.label || o.stage}`}
+      subtitle={`Fase 2 · Nota de Pedido · ${stg?.label || o.stage}`}
       title={`${code}${cli ? ` — ${cli.name}` : ''}`}
       width={960}
       headerExtras={
@@ -3134,7 +3403,7 @@ function OrderDetail({ code, onClose, canReassign }) {
                   <ul className="text-[12.5px] space-y-1.5">
                     <li className="flex justify-between"><span className="text-ink-500">Cliente</span><span className="font-medium">{cli?.name || '—'}</span></li>
                     {npFlexxusCode && <li className="flex justify-between"><span className="text-ink-500">NP Flexxus</span><span className="mono">{npFlexxusCode}</span></li>}
-                    {!isQuoteSource && orderDetail?.clientOCCode && <li className="flex justify-between"><span className="text-ink-500">OC Cliente</span><span className="mono">{orderDetail.clientOCCode}</span></li>}
+                    {(o.clientOCCode || orderDetail?.clientOCCode) && <li className="flex justify-between"><span className="text-ink-500">OC Cliente</span><span className="mono">{o.clientOCCode || orderDetail.clientOCCode}</span></li>}
                     {npBreakdown?.subtotalNeto != null && (
                       <li className="flex justify-between"><span className="text-ink-500">Subtotal neto</span><span className="mono">{fmtMoney(npBreakdown.subtotalNeto, npCurrency, 2)}</span></li>
                     )}

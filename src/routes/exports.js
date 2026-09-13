@@ -132,17 +132,18 @@ router.get('/rechazos', authMiddleware, async (req, res) => {
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// GET /api/exports/ordenes — PDF de órdenes de compra
+// GET /api/exports/ordenes — PDF de notas de pedido
 // ═══════════════════════════════════════════════════════════════════════════════
 
 router.get('/ordenes', authMiddleware, async (req, res) => {
   try {
     const base = buildFilter(req.query);
-    const orders = await prisma.order.findMany({
-      where: base,
+    const orders = await prisma.quote.findMany({
+      where: { ...base, mailType: 'NOTA_PEDIDO' },
       include: {
         client: { select: { name: true, code: true } },
         seller: { select: { name: true } },
+        linkedQuote: { select: { code: true } },
       },
       orderBy: { createdAt: 'desc' },
       take: 500,
@@ -215,9 +216,12 @@ router.post('/send', authMiddleware, async (req, res) => {
       pdf = await generateRechazos(quotes, { filters, style });
       filename = `rechazos_${new Date().toISOString().slice(0, 10)}.pdf`;
     } else {
-      const orders = await prisma.order.findMany({
-        where: base,
-        include: { client: { select: { name: true } }, seller: { select: { name: true } } },
+      const orders = await prisma.quote.findMany({
+        where: { ...base, mailType: 'NOTA_PEDIDO' },
+        include: {
+          client: { select: { name: true } }, seller: { select: { name: true } },
+          linkedQuote: { select: { code: true } },
+        },
         orderBy: { createdAt: 'desc' }, take: 500,
       });
       const stages = await getStages('ORDEN_COMPRA');

@@ -1013,8 +1013,7 @@ function Sidebar({ role, screen, setScreen, user, onProfileOpen, collapsed, onTo
   const effectiveName = user?.name || resolvedUser?.name;
   const navAdmin = [
     { id:'dashboard', label:'Dashboard',             icon:'layout-dashboard' },
-    { id:'quotes',    label:'Cotizaciones',          icon:'clipboard-list', sub:'Fase 1' },
-    { id:'orders',    label:'Órdenes de Compra',     icon:'package',        sub:'Fase 2' },
+    { id:'quotes',    label:'Cotizaciones',          icon:'clipboard-list', sub:'Solicitud · Presupuesto · NP' },
     { id:'clients',   label:'Clientes',              icon:'building-2' },
     { id:'comparativa', label:'Comparativa',           icon:'git-compare', sub:'Pres. vs NP' },
     { id:'team',        label:'Equipo',                icon:'users' },
@@ -1023,9 +1022,7 @@ function Sidebar({ role, screen, setScreen, user, onProfileOpen, collapsed, onTo
   ];
   const navSeller = [
     { id:'my-quotes',   label:'Mis Cotizaciones',      icon:'clipboard-list' },
-    { id:'my-orders',   label:'Mis Órdenes de Compra', icon:'package' },
     { id:'quotes',      label:'Pipeline Cotizaciones', icon:'layout',     sub:'Kanban Fase 1' },
-    { id:'orders',      label:'Pipeline OCs',          icon:'columns',    sub:'Kanban Fase 2' },
     { id:'clients',     label:'Clientes',              icon:'building-2', sub:'solo lectura' },
     { id:'comparativa', label:'Comparativa',           icon:'git-compare', sub:'Pres. vs NP' },
     { id:'feedback',    label:'Foro',                  icon:'message-circle', sub:'Soporte interno' },
@@ -1327,6 +1324,8 @@ function Dashboard({ setScreen }) {
   const [chartsLoading, setChartsLoading] = useState(true);
   const [alerts, setAlerts] = useState([]);
   const [alertsLoading, setAlertsLoading] = useState(true);
+  const [prioridades, setPrioridades] = useState([]);
+  const [prioridadesLoading, setPrioridadesLoading] = useState(true);
 
   // ── Filtros del dashboard ───────────────────────────────────────────────────
   const [filters, setFilters] = useState({ sellerId: '', from: '', to: '' });
@@ -1337,18 +1336,22 @@ function Dashboard({ setScreen }) {
   useEffect(() => {
     setKpisLoading(true);
     setAlertsLoading(true);
+    setPrioridadesLoading(true);
     setChartsLoading(true);
 
-    // Pasada 1: KPIs + Alertas (prioritarios — aparecen primero)
+    // Pasada 1: KPIs + Alertas + Semáforo (prioritarios — aparecen primero)
     Promise.all([
       CrmApi.getDashboard(filters),
       CrmApi.getAlerts({ sellerId: filters.sellerId }),
-    ]).then(([dash, alertsData]) => {
+      CrmApi.getPriorityQuotes({ sellerId: filters.sellerId }),
+    ]).then(([dash, alertsData, prioData]) => {
       setKpisData(dash);
       setAlerts(alertsData || []);
+      setPrioridades(prioData || []);
       setKpisLoading(false);
       setAlertsLoading(false);
-    }).catch(() => { setKpisLoading(false); setAlertsLoading(false); });
+      setPrioridadesLoading(false);
+    }).catch(() => { setKpisLoading(false); setAlertsLoading(false); setPrioridadesLoading(false); });
 
     // Pasada 2: Gráficos (se cargan solos con su loading state)
     Promise.all([
@@ -1387,10 +1390,9 @@ function Dashboard({ setScreen }) {
   };
 
   const kpis = [
-    { label: 'Cotizaciones activas',  value: kv(kpisData?.cotizacionesActivas), sub: 'F1 + NP + OC en curso' },
+    { label: 'Cotizaciones activas',  value: kv(kpisData?.cotizacionesActivas), sub: 'F1 + NP en curso' },
     { label: 'Presupuestos enviados', value: kv(kpisData?.presupuestosEnviados) },
     { label: 'NP en curso',           value: kv(kpisData?.npEnCurso) },
-    { label: 'OC en curso',           value: kv(kpisData?.ocEnCurso) },
     { label: 'Entregas este mes',     value: kv(kpisData?.entregasEsteMes) },
     { label: 'Monto cotizado',        value: kMoney(kpisData?.montoTotalUSD, kpisData?.montoTotalARS), sub: 'presupuestos' },
     { label: 'Monto confirmado',      value: kMoney(kpisData?.montoConfirmadoUSD, kpisData?.montoConfirmadoARS), sub: 'notas de pedido', highlight: true },
@@ -1549,6 +1551,82 @@ function Dashboard({ setScreen }) {
             </div>
           ))}
         </div>
+
+        {/* ── Semáforo de seguimiento ─────────────────────────────────────
+             Lo que el equipo marcó a mano como que hay que empujar. No se
+             muestran las "Al día" ni las ya cerradas: no piden acción. */}
+        {(prioridadesLoading || prioridades.length > 0) && (
+          <div className="bg-white rounded-xl border border-line shadow-card overflow-hidden">
+            <div className="flex items-center gap-2 px-4 py-3 border-b border-line bg-surface">
+              <span className="flex items-center gap-0.5">
+                {PRIORIDADES.slice(0, 2).map(p => (
+                  <span key={p.id} className="w-1.5 h-4 rounded-sm" style={{ background: p.dot }}/>
+                ))}
+              </span>
+              <div className="text-sm font-semibold text-navy-900">Seguimiento marcado</div>
+              {!prioridadesLoading && (
+                <span className="ml-auto flex items-center gap-1.5">
+                  {PRIORIDADES.slice(0, 2).map(p => {
+                    const n = prioridades.filter(x => x.priority === p.id).length;
+                    if (!n) return null;
+                    return (
+                      <span key={p.id} className="text-xs px-2 py-0.5 rounded-full font-semibold"
+                        style={{ background: p.wash, color: p.dot }}>
+                        {n} {p.label.toLowerCase()}
+                      </span>
+                    );
+                  })}
+                </span>
+              )}
+            </div>
+            {prioridadesLoading ? (
+              <div className="px-5 py-4 space-y-3">
+                {[1,2,3].map(i => <div key={i} className="flex items-center gap-4"><span className="skel h-4 w-20"/><span className="skel h-4 w-32"/><span className="skel h-4 w-16"/><span className="skel h-4 w-12 ml-auto"/></div>)}
+              </div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-[11px] uppercase tracking-wider text-ink-400 border-b border-line bg-surface">
+                    <th className="text-left px-4 py-2 font-medium">Código</th>
+                    <th className="text-left px-4 py-2 font-medium">Cliente</th>
+                    <th className="text-left px-4 py-2 font-medium">Vendedor</th>
+                    <th className="text-left px-4 py-2 font-medium">Etapa</th>
+                    <th className="text-right px-4 py-2 font-medium">Monto</th>
+                    <th className="text-right px-4 py-2 font-medium">En la etapa</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {prioridades.map(a => {
+                    const p = prioridadDe(a.priority);
+                    const etapa = STAGES_F1.find(s => s.id === a.stage);
+                    return (
+                      <tr key={a.id} className="border-b border-line last:border-0 hover:bg-surface cursor-pointer transition-colors"
+                          onClick={() => openModal('quoteDetail', { code: a.code })}>
+                        <td className="px-4 py-2.5 font-mono text-[12px] font-semibold text-blue-600"
+                            style={p ? { borderLeft: `4px solid ${p.dot}` } : undefined}
+                            title={p ? p.label : ''}>
+                          {a.code}
+                        </td>
+                        <td className="px-4 py-2.5 text-ink-800 font-medium">{a.clientName}</td>
+                        <td className="px-4 py-2.5 text-ink-500">{a.sellerName}</td>
+                        <td className="px-4 py-2.5 text-ink-500 text-[12.5px]">{etapa?.label || a.stage}</td>
+                        <td className="px-4 py-2.5 text-right text-ink-700 font-mono text-[13px]">
+                          {a.amount ? fmtMoney(a.amount, a.currency) : '—'}
+                        </td>
+                        <td className="px-4 py-2.5 text-right">
+                          <span className="inline-flex items-center text-xs font-bold px-2.5 py-1 rounded-full"
+                            style={{ background: p?.wash || '#F5F6F7', color: p?.dot || '#6B7280' }}>
+                            {a.daysInStage}d
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
 
         {/* ── Alertas: presupuestos enviados sin respuesta ───────────────── */}
         {(alertsLoading || alerts.length > 0) && (

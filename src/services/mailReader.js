@@ -688,71 +688,24 @@ async function processNotaPedido(parsed, mailData, att, imap) {
     });
   }
 
-  // ── Auto-aceptar presupuesto si el match fue por código exacto ──────────
-  if (presupuesto && presupuestoExactMatch) {
-    try {
-      const { autoAcceptPresupuesto } = require('./quoteHelper');
-      await autoAcceptPresupuesto(presupuesto.id);
-    } catch (e) {
-      console.error('Error en auto-accept presupuesto:', e.message);
-    }
-  }
-
-  // ── Buscar o crear Order vinculada al presupuesto ────────────────────────
-  let order = null;
+  // ── El paquete queda en una sola etapa ──────────────────────────────────
+  // Antes esto solo corría cuando el match era por código Flexxus exacto, así
+  // que las NP que vinculaban por hilo de mail o por cliente quedaban ligadas
+  // pero nadie movía el presupuesto: 99 negocios ganados seguían figurando en
+  // "Presupuesto Enviado". Ahora alinea siempre que haya vínculo.
   if (presupuesto) {
-    order = await prisma.order.findFirst({ where: { fromQuoteId: presupuesto.id } });
-
-    if (order) {
-      // Actualizar Order existente: NP, OC cliente y mover a stage "np_enviada"
-      await prisma.order.update({
-        where: { id: order.id },
-        data:  {
-          flexxusCode:  npData.npCode,
-          stage:        'np_enviada',
-          ...(npData.ocNumber ? { clientOCCode: npData.ocNumber } : {}),
-        },
-      });
-      await prisma.activity.create({
-        data: {
-          action:  'STAGE_CHANGE',
-          detail:  `NP ${npData.npCode} capturada — OC movida a NP Enviada${npData.ocNumber ? ` | OC cliente: ${npData.ocNumber}` : ''}`,
-          orderId: order.id,
-        },
-      });
-      console.log(`   🔗 Order ${order.code} → NP Enviada | NP: ${npData.npCode}${npData.ocNumber ? ` | OC: ${npData.ocNumber}` : ''}`);
-    } else {
-      // No existe Order → crearla automáticamente desde el presupuesto
-      const ocCode = await nextCode(prisma.order, `OC-${new Date().getFullYear()}`);
-
-      const clientId = presupuesto.clientId || client?.id || null;
-      if (clientId) {
-        order = await prisma.order.create({
-          data: {
-            code:         ocCode,
-            clientId,
-            // Solo si el vendedor del cliente esta activo: asignar a una cuenta
-            // dada de baja deja la orden huerfana, se ve "Sin asignar" (MYS-0014).
-            sellerId:     presupuesto.sellerId || (client?.defaultSeller?.active ? client.defaultSellerId : null),
-            fromQuoteId:  presupuesto.id,
-            stage:        'np_enviada',
-            flexxusCode:  npData.npCode,
-            ...(npData.ocNumber ? { clientOCCode: npData.ocNumber } : {}),
-          },
-        });
-        await prisma.activity.create({
-          data: {
-            action:  'CREATED',
-            detail:  `OC ${ocCode} creada automáticamente desde NP ${npData.npCode}`,
-            orderId: order.id,
-          },
-        });
-        console.log(`   ✅ Order ${ocCode} creada automáticamente → NP Enviada`);
-      } else {
-        console.log(`   ⚠️  Sin clientId — no se pudo crear Order automáticamente`);
-      }
+    try {
+      const { alinearPaquete } = require('./paquete');
+      const r = await alinearPaquete(presupuesto.id);
+      if (r) console.log(`   📦 paquete alineado a "${r.destino}": ${r.movidos.join(', ')}`);
+    } catch (e) {
+      console.error('Error alineando el paquete:', e.message);
     }
   }
+
+  // Antes acá se creaba una "OC espejo" (modelo Order) para cada NP. Se sacó:
+  // no la usaba nadie y duplicaba en otra tabla datos que ya viven en la NP.
+  // El número de OC del cliente pasa a guardarse en la propia Quote, abajo.
 
   // ── Crear Quote NOTA_PEDIDO ──────────────────────────────────────────────
   const code = await nextCode(prisma.quote, 'NP-2026');
@@ -775,6 +728,9 @@ async function processNotaPedido(parsed, mailData, att, imap) {
         source:         'EMAIL',
         mailType:       'NOTA_PEDIDO',
         flexxusCode:    npData.npCode,
+        // Número de OC que manda el cliente, sacado del PDF. Antes esto se
+        // guardaba en la Order; ahora vive donde corresponde, en la propia NP.
+        clientOCCode:   npData.ocNumber || null,
         amount:         npTotal,
         currency:       npData.currency || 'USD',
         subtotalNeto:       npData.subtotalNeto       ?? null,
@@ -838,7 +794,7 @@ async function processNotaPedido(parsed, mailData, att, imap) {
   await prisma.activity.create({
     data: {
       action:  'CREATED',
-      detail:  `Nota de Pedido ${npData.npCode} capturada desde Enviados${order ? ` → OC ${order.code}` : ''}${presupuesto ? ` | Pres. ${presupuesto.code}` : ''}`,
+      detail:  `Nota de Pedido ${npData.npCode} capturada desde Enviados${npData.ocNumber ? ` | OC cliente: ${npData.ocNumber}` : ''}${presupuesto ? ` | Pres. ${presupuesto.code}` : ''}`,
       quoteId: quote.id,
     },
   });
@@ -850,7 +806,6 @@ async function processNotaPedido(parsed, mailData, att, imap) {
     mailType:    'NOTA_PEDIDO',
     flexxusCode: npData.npCode,
     clientName:  client?.name || null,
-    orderCode:   order?.code || null,
     itemCount:   npData.items?.length || 0,
     date:        date.toISOString(),
   };
@@ -893,6 +848,33 @@ async function heredarVendedorDeSolicitud(presupuestoId, solicitud) {
  * total. Si el total cambio es una revision real del presupuesto y si tiene que
  * entrar como cotizacion nueva.
  */
+/**
+ * Recotización: mismo código de Flexxus, otro total.
+ *
+ * Cuando el cliente pide cambios, el vendedor muchas veces edita el presupuesto
+ * en Flexxus y lo vuelve a mandar, así que el PDF sale con el MISMO número PR
+ * pero distinto importe. Medido sobre la base real: 20 casos en mes y medio,
+ * unas 3 por semana, y los 41 documentos involucrados entraron por mail.
+ *
+ * Hasta ahora eso creaba una cotización nueva y suelta, y quedaban dos tarjetas
+ * vivas del mismo negocio sumando las dos en los montos. Ahora entra como
+ * revisión: la anterior se anula y el paquete se muda.
+ *
+ * Ojo con el orden: esto se consulta DESPUÉS de descartar el reenvío exacto
+ * (mismo código y mismo total), que es otra cosa y se absorbe.
+ */
+async function buscarPresupuestoARevisar(npCode, total) {
+  if (!npCode || total == null) return null;
+  const candidatos = await prisma.quote.findMany({
+    where:   { flexxusCode: npCode, mailType: 'PRESUPUESTO', anuladaAt: null },
+    orderBy: { createdAt: 'desc' },
+    select:  { id: true, code: true, amount: true },
+  });
+  // Distinto importe = lo recotizaron. Si el importe es igual ya lo agarró el
+  // dedupe de reenvíos, así que acá no debería llegar.
+  return candidatos.find(q => q.amount != null && Math.abs(q.amount - total) >= 0.01) || null;
+}
+
 async function buscarPresupuestoDuplicado(npCode, total) {
   if (!npCode) return null;
   const existentes = await prisma.quote.findMany({
@@ -1181,6 +1163,10 @@ async function processSentMail(parsed, mailData, imap) {
     return null;
   }
 
+  // No es reenvío, pero puede ser una recotización: mismo número de Flexxus con
+  // otro importe. Se resuelve después de crear la cotización, más abajo.
+  const aRevisar = await buscarPresupuestoARevisar(flexxusData?.npCode, flexxusGrandTotal);
+
   const code = await nextCode(prisma.quote, 'COT-2026');
 
   const bodyText = parsed.text || (parsed.html ? stripHtml(parsed.html) : '');
@@ -1269,9 +1255,29 @@ async function processSentMail(parsed, mailData, imap) {
       });
       console.log(`   🔗 Vinculado ${quote.code} ↔ ${solicitudTarget.code}${npCode ? ` | NP: ${npCode}` : ''}`);
       await heredarVendedorDeSolicitud(quote.id, solicitudTarget);
+      // La solicitud sube a la etapa del presupuesto: son un paquete
+      const { alinearPaquete } = require('./paquete');
+      const al = await alinearPaquete(quote.id);
+      if (al) console.log(`   📦 paquete alineado a "${al.destino}": ${al.movidos.join(', ')}`);
     }
   } catch (e) {
     console.error('   ❌ Error al auto-vincular (enviado):', e.message);
+  }
+
+  // ── Recotización ────────────────────────────────────────────────────────
+  // Detectada arriba: mismo número de Flexxus con otro importe. La cotización
+  // nueva queda como revisión de la anterior, que se anula y sale del tablero.
+  // Va acá, después de vincular, para que el paquete que herede sea el bueno.
+  if (aRevisar) {
+    try {
+      const { marcarComoRevision } = require('./paquete');
+      const r = await marcarComoRevision(quote.id, aRevisar.id, {
+        motivo: 'Recotización: entró el mismo presupuesto de Flexxus con otro importe',
+      });
+      console.log(`   📄 ${code} es revisión ${r?.revisionNro} de ${aRevisar.code} — ${aRevisar.code} anulada`);
+    } catch (e) {
+      console.error('   ❌ Error marcando la revisión:', e.message);
+    }
   }
 
   // ── Crear ítems Flexxus ───────────────────────────────────────────────────
@@ -1720,6 +1726,7 @@ async function processEmail(mailData, imap) {
 
     // Mismo presupuesto que ya entró, reenviado o respondido de nuevo (MYS-0018).
     // Solo aplica a PRESUPUESTO: una SOLICITUD no tiene código de Flexxus propio.
+    let aRevisar = null;
     if (mailType === 'PRESUPUESTO') {
       const yaExiste = await buscarPresupuestoDuplicado(flexxusData?.npCode, flexxusGrandTotal);
       if (yaExiste) {
@@ -1728,6 +1735,8 @@ async function processEmail(mailData, imap) {
         });
         return null;
       }
+      // Mismo número de Flexxus con otro importe = lo recotizaron
+      aRevisar = await buscarPresupuestoARevisar(flexxusData?.npCode, flexxusGrandTotal);
     }
 
     const year = new Date().getFullYear();
@@ -1856,9 +1865,28 @@ async function processEmail(mailData, imap) {
           });
           console.log(`   🔗 Vinculado ${quote.code} ↔ ${solicitudTarget.code}${npCode ? ` | NP propagado: ${npCode}` : ''}`);
           await heredarVendedorDeSolicitud(quote.id, solicitudTarget);
+          const { alinearPaquete } = require('./paquete');
+          const al = await alinearPaquete(quote.id);
+          if (al) console.log(`   📦 paquete alineado a "${al.destino}": ${al.movidos.join(', ')}`);
         }
       } catch (e) {
         console.error('   ❌ Error al auto-vincular:', e.message);
+      }
+    }
+
+    // ── Recotización ────────────────────────────────────────────────────────
+    // Detectada arriba: mismo número de Flexxus con otro importe. La cotización
+    // nueva queda como revisión de la anterior, que se anula y sale del tablero.
+    // Va acá, después de vincular, para que el paquete que herede sea el bueno.
+    if (aRevisar) {
+      try {
+        const { marcarComoRevision } = require('./paquete');
+        const r = await marcarComoRevision(quote.id, aRevisar.id, {
+          motivo: 'Recotización: entró el mismo presupuesto de Flexxus con otro importe',
+        });
+        console.log(`   📄 ${code} es revisión ${r?.revisionNro} de ${aRevisar.code} — ${aRevisar.code} anulada`);
+      } catch (e) {
+        console.error('   ❌ Error marcando la revisión:', e.message);
       }
     }
 
@@ -2132,4 +2160,4 @@ async function resyncQuoteEmail(quoteId) {
   });
 }
 
-module.exports = { syncMails, syncAccount, listRecentMails, resyncQuoteEmail, heredarVendedorDeSolicitud, buscarPresupuestoDuplicado, absorberEnPresupuesto };
+module.exports = { syncMails, syncAccount, listRecentMails, resyncQuoteEmail, heredarVendedorDeSolicitud, buscarPresupuestoDuplicado, buscarPresupuestoARevisar, absorberEnPresupuesto };

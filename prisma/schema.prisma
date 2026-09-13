@@ -147,6 +147,11 @@ model Quote {
   totalPercepciones Float?                  // Total percepciones ARBA/AGIP
   flexxusCode    String?                    // Código NP de Flexxus
   deadline       DateTime?                  // Fecha límite de armado
+  // Semáforo de seguimiento: marca manual del vendedor sobre qué tan encima hay
+  // que estar de esta cotización. No se calcula solo — es distinto de las
+  // alertas por vencimiento, que ya salen de followUpDate y deadline.
+  // 'alta' | 'media' | 'baja' | null (sin marcar)
+  priority       String?
   ackSentAt      DateTime?                  // Solicitud: confirmación manual de que se mandó el acuse de recibo
   rejectReason   String?                    // Motivo de rechazo
   rejectNotes    String?                    // Observaciones del rechazo
@@ -163,6 +168,16 @@ model Quote {
   linkedQuoteId  String?                    // Vinculación SOLICITUD ↔ PRESUPUESTO
   linkedQuote    Quote?    @relation("QuoteLink", fields: [linkedQuoteId], references: [id])
   linkedBy       Quote[]   @relation("QuoteLink")
+
+  // Revisiones. Flexxus no tiene revisiones de presupuesto, así que cuando el
+  // cliente pide recotizar hay que armar uno nuevo. En vez de editar el original
+  // sin dejar rastro, se hace una copia y el anterior queda anulado: sigue
+  // existiendo y se puede consultar, pero sale del tablero y de los totales.
+  revisionDeId   String?                    // el presupuesto que esta revisión reemplaza
+  revisionDe     Quote?    @relation("QuoteRevision", fields: [revisionDeId], references: [id])
+  revisiones     Quote[]   @relation("QuoteRevision")
+  anuladaAt      DateTime?                  // cuándo quedó reemplazada por una revisión
+  anuladaMotivo  String?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 

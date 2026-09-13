@@ -1,4 +1,5 @@
 const express = require('express');
+const { agruparEnPaquetes, cadenaDeRevisiones } = require('../services/paquete');
 const {authMiddleware, isAdmin } = require('../middleware/auth');
 const prisma = require('../db');
 
@@ -98,22 +99,22 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     const base = buildBaseFilter(req.query);
 
     // Fase 1 "pura": Solicitud/Presupuesto/manuales, excluye NOTA_PEDIDO y OC
-    // legado (mismo filtro que usa el tablero F1). Antes "Cotizaciones activas"
-    // no excluía NOTA_PEDIDO y contaba casi todas las NP activas ahí también,
-    // duplicándolas contra "OC en curso" (que ya las sumaba a propósito).
+    // legado (mismo filtro que usa el tablero F1).
     const F1_ONLY = { OR: [{ mailType: null }, { mailType: { notIn: ['OC', 'NOTA_PEDIDO'] } }] };
+    // Un presupuesto reemplazado por una revisión no es un negocio aparte: si se
+    // contara, el mismo pedido figuraría dos veces en montos y en conversión.
+    const VIVAS = { anuladaAt: null };
 
-    const [f1Active, sentQuotes, activeOrders, deliveredOrders, activeNPs, deliveredNPs] = await Promise.all([
-      prisma.quote.count({ where: { ...base, ...NO_PACKAGE_DUPES, ...F1_ONLY, stage: { notIn: ['aceptada', 'rechazada'] } } }),
-      prisma.quote.count({ where: { ...base, stage: 'enviado' } }),
-      prisma.order.count({ where: { ...base, stage: { notIn: ['entregada'] } } }),
-      prisma.order.count({ where: { ...base, stage: 'entregada' } }),
-      prisma.quote.count({ where: { ...base, mailType: 'NOTA_PEDIDO', stage: { notIn: ['entregada'] } } }),
-      prisma.quote.count({ where: { ...base, mailType: 'NOTA_PEDIDO', stage: 'entregada' } }),
+    const [f1Active, sentQuotes, activeNPs, deliveredNPs] = await Promise.all([
+      prisma.quote.count({ where: { ...base, ...VIVAS, ...NO_PACKAGE_DUPES, ...F1_ONLY, stage: { notIn: ['aceptada', 'rechazada'] } } }),
+      prisma.quote.count({ where: { ...base, ...VIVAS, stage: 'enviado' } }),
+      prisma.quote.count({ where: { ...base, ...VIVAS, mailType: 'NOTA_PEDIDO', stage: { notIn: ['entregada'] } } }),
+      prisma.quote.count({ where: { ...base, ...VIVAS, mailType: 'NOTA_PEDIDO', stage: 'entregada' } }),
     ]);
-    // "Total en el sistema" = todo lo activo de cualquier tipo, cada uno con
-    // su propio criterio de cierre correcto (F1: aceptada/rechazada · NP/OC: entregada)
-    const totalEnSistema = f1Active + activeNPs + activeOrders;
+    // "Total en el sistema" = todo lo activo, con el criterio de cierre de cada
+    // uno (F1: aceptada/rechazada · NP: entregada). Antes sumaba también las OC,
+    // que eran espejos de estas mismas NP — o sea que las contaba dos veces.
+    const totalEnSistema = f1Active + activeNPs;
 
     const PRESUPUESTO_ONLY = { OR: [{ mailType: 'PRESUPUESTO' }, { mailType: null }] };
 
@@ -123,25 +124,25 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     const [totalAmount, montoConfirmado, totalAmountARS, montoConfirmadoARS] = await Promise.all([
       prisma.quote.aggregate({
         _sum:  { amount: true },
-        where: { ...base, ...NO_PACKAGE_DUPES, ...PRESUPUESTO_ONLY, amount: { not: null }, currency: { not: 'ARS' } },
+        where: { ...base, ...VIVAS, ...NO_PACKAGE_DUPES, ...PRESUPUESTO_ONLY, amount: { not: null }, currency: { not: 'ARS' } },
       }),
       prisma.quote.aggregate({
         _sum:  { amount: true },
-        where: { ...base, mailType: 'NOTA_PEDIDO', amount: { not: null }, currency: { not: 'ARS' } },
+        where: { ...base, ...VIVAS, mailType: 'NOTA_PEDIDO', amount: { not: null }, currency: { not: 'ARS' } },
       }),
       prisma.quote.aggregate({
         _sum:  { amount: true },
-        where: { ...base, ...NO_PACKAGE_DUPES, ...PRESUPUESTO_ONLY, amount: { not: null }, currency: 'ARS' },
+        where: { ...base, ...VIVAS, ...NO_PACKAGE_DUPES, ...PRESUPUESTO_ONLY, amount: { not: null }, currency: 'ARS' },
       }),
       prisma.quote.aggregate({
         _sum:  { amount: true },
-        where: { ...base, mailType: 'NOTA_PEDIDO', amount: { not: null }, currency: 'ARS' },
+        where: { ...base, ...VIVAS, mailType: 'NOTA_PEDIDO', amount: { not: null }, currency: 'ARS' },
       }),
     ]);
 
     const [accepted, totalInPeriod] = await Promise.all([
-      prisma.quote.count({ where: { ...base, ...NO_PACKAGE_DUPES, ...PRESUPUESTO_ONLY, stage: 'aceptada' } }),
-      prisma.quote.count({ where: { ...base, ...NO_PACKAGE_DUPES, ...PRESUPUESTO_ONLY } }),
+      prisma.quote.count({ where: { ...base, ...VIVAS, ...NO_PACKAGE_DUPES, ...PRESUPUESTO_ONLY, stage: 'aceptada' } }),
+      prisma.quote.count({ where: { ...base, ...VIVAS, ...NO_PACKAGE_DUPES, ...PRESUPUESTO_ONLY } }),
     ]);
     const conversionRate = totalInPeriod > 0 ? Math.round((accepted / totalInPeriod) * 100) : 0;
 
@@ -176,8 +177,7 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
       cotizacionesActivas:  totalEnSistema,   // panorama general: F1 + NP + OC activos
       presupuestosEnviados: sentQuotes,
       npEnCurso:            activeNPs,
-      ocEnCurso:            activeOrders,     // solo Order — ya no suma NP (queda en su propia tarjeta)
-      entregasEsteMes:      deliveredOrders + deliveredNPs,
+      entregasEsteMes:      deliveredNPs,
       montoTotalUSD:        totalAmount._sum.amount    || 0,
       montoConfirmadoUSD:   montoConfirmado._sum.amount || 0,
       montoTotalARS:        totalAmountARS._sum.amount    || 0,
@@ -461,6 +461,53 @@ router.get('/alerts', authMiddleware, async (req, res) => {
         ? Math.floor((now - new Date(q.followUpDate)) / (1000 * 60 * 60 * 24))
         : 0,
     })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /data/priority — cotizaciones marcadas con el semáforo de seguimiento.
+// Solo las que piden acción ('alta' y 'media'); las 'baja' (Al día) ya están
+// controladas y no tienen por qué ocupar lugar en el dashboard. Tampoco entran
+// las cerradas: si se aceptó o se rechazó, la marca ya no significa nada.
+// Acepta: ?sellerId=
+router.get('/priority', authMiddleware, async (req, res) => {
+  try {
+    const { sellerId } = req.query;
+    const where = {
+      priority: { in: ['alta', 'media'] },
+      stage: { notIn: ['aceptada', 'rechazada'] },
+    };
+    if (sellerId) where.sellerId = sellerId;
+    if (req.user.role === 'VENDEDOR') where.sellerId = req.user.id;
+
+    const quotes = await prisma.quote.findMany({
+      where,
+      include: {
+        client: { select: { name: true } },
+        seller: { select: { name: true } },
+      },
+      take: 40,
+    });
+
+    const now = new Date();
+    const orden = { alta: 0, media: 1 };
+    const rows = quotes.map(q => ({
+      id:         q.id,
+      code:       q.code,
+      clientName: q.client?.name || q.emailSubject || '—',
+      sellerName: q.seller?.name || 'Sin asignar',
+      amount:     q.amount,
+      currency:   q.currency || 'USD',
+      stage:      q.stage,
+      priority:   q.priority,
+      // Días parado en la etapa actual: es lo que dice si la marca se está
+      // cumpliendo o quedó puesta y nadie la tocó.
+      daysInStage: Math.floor((now - new Date(q.stageChangedAt || q.createdAt)) / (1000 * 60 * 60 * 24)),
+    }));
+    // Primero las prioritarias, y dentro de cada grupo las más frenadas arriba.
+    rows.sort((a, b) => (orden[a.priority] - orden[b.priority]) || (b.daysInStage - a.daysInStage));
+    res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -777,7 +824,7 @@ router.get('/sync', authMiddleware, async (req, res) => {
     const isVendedor = req.user.role === 'VENDEDOR';
 
     // Quotes (F1): exclude OC / NOTA_PEDIDO
-    const quoteMailFilter = { OR: [{ mailType: null }, { mailType: { notIn: ['OC', 'NOTA_PEDIDO'] } }] };
+    const quoteMailFilter = { OR: [{ mailType: null }, { mailType: { not: 'OC' } }] };
     const quoteWhere = { updatedAt: { gte: since } };
     if (isVendedor) {
       quoteWhere.AND = [
@@ -814,6 +861,9 @@ router.get('/sync', authMiddleware, async (req, res) => {
           client: { select: { id: true, code: true, name: true, city: true, province: true, zone: true } },
           seller: { select: { id: true, name: true, email: true, zone: true } },
           linkedQuote: { select: { id: true, code: true, mailType: true, stage: true, flexxusCode: true } },
+          linkedBy:    { select: { id: true, code: true, mailType: true, flexxusCode: true } },
+          revisionDe:  { select: { code: true } },
+          revisiones:  { select: { code: true }, orderBy: { createdAt: 'asc' }, take: 1 },
           _count: { select: { notes: true, attachments: true } },
         },
         orderBy: { updatedAt: 'desc' },
@@ -857,6 +907,58 @@ router.get('/sync', authMiddleware, async (req, res) => {
     ]);
 
     // ── Format (matches GET /quotes format) ──
+    // El sync devuelve solo lo que cambió. Si un miembro del paquete no entró
+    // en el delta, agrupar sobre esa lista sola daría "documento suelto" y la
+    // tarjeta se partiría en dos a los 25 segundos. Traemos los que faltan.
+    const idsDelta   = new Set(quotes.map(q => q.id));
+    const idsFaltan  = new Set();
+    for (const q of quotes) {
+      if (q.linkedQuoteId && !idsDelta.has(q.linkedQuoteId)) idsFaltan.add(q.linkedQuoteId);
+      for (const lb of q.linkedBy || []) if (!idsDelta.has(lb.id)) idsFaltan.add(lb.id);
+    }
+    const vinculados = idsFaltan.size
+      ? await prisma.quote.findMany({
+          where:  { id: { in: [...idsFaltan] } },
+          select: { id: true, code: true, mailType: true, amount: true, currency: true,
+                    linkedQuoteId: true, linkedBy: { select: { id: true } } },
+        })
+      : [];
+    // Igual que con el paquete: para armar la cadena de revisiones hacen falta
+    // los eslabones anteriores, que pueden no haber cambiado en estos 25 segundos.
+    const idsRev = new Set();
+    const juntar = (arr) => { for (const q of arr) if (q.revisionDeId && !idsDelta.has(q.revisionDeId)) idsRev.add(q.revisionDeId); };
+    juntar(quotes);
+    let ancestros = [];
+    for (let vuelta = 0; vuelta < 5 && idsRev.size; vuelta++) {
+      const traidos = await prisma.quote.findMany({
+        where:  { id: { in: [...idsRev] } },
+        select: { id: true, code: true, revisionDeId: true, anuladaAt: true },
+      });
+      ancestros = [...ancestros, ...traidos];
+      const yaTengo = new Set([...idsDelta, ...ancestros.map(a => a.id)]);
+      idsRev.clear();
+      for (const a of traidos) if (a.revisionDeId && !yaTengo.has(a.revisionDeId)) idsRev.add(a.revisionDeId);
+    }
+
+    // Y las revisiones posteriores, que tampoco tienen por qué haber cambiado
+    // en estos 25 segundos. Sin esto, el primero de la cadena no ve a los que
+    // vinieron después y la ficha no puede llevarte a la vigente.
+    let descendientes = [];
+    let padres = [...idsDelta];
+    for (let vuelta = 0; vuelta < 5 && padres.length; vuelta++) {
+      const hijos = await prisma.quote.findMany({
+        where:  { revisionDeId: { in: padres } },
+        select: { id: true, code: true, revisionDeId: true, anuladaAt: true },
+      });
+      const nuevos = hijos.filter(h => !idsDelta.has(h.id) && !descendientes.some(d => d.id === h.id));
+      if (!nuevos.length) break;
+      descendientes = [...descendientes, ...nuevos];
+      padres = nuevos.map(h => h.id);
+    }
+
+    const paquetes = agruparEnPaquetes([...quotes, ...vinculados]);
+    const cadenas  = cadenaDeRevisiones([...quotes, ...ancestros, ...descendientes]);
+
     const fmtQuotes = quotes.map(q => ({
       id: q.id, code: q.code,
       client: q.client?.code || '', clientName: q.client?.name || '',
@@ -878,12 +980,25 @@ router.get('/sync', authMiddleware, async (req, res) => {
       // (era el "queda en blanco" de MYS-0017). Mantener alineado con GET /quotes.
       deadline: q.deadline?.toISOString() || null,
       ackSentAt: q.ackSentAt?.toISOString() || null,
+      priority: q.priority || null,
       rejectReason: q.rejectReason,
       linkedQuoteId: q.linkedQuoteId || null,
       linkedQuoteCode: q.linkedQuote?.code || null,
       linkedQuoteType: q.linkedQuote?.mailType || null,
       linkedQuoteStage: q.linkedQuote?.stage || null,
       linkedQuoteFlexxus: q.linkedQuote?.flexxusCode || null,
+      // Nota de Pedido vinculada, mirando los dos sentidos del vínculo. Es lo que
+      // le da sentido a la etapa "Aceptada": está aceptada porque entró la NP.
+      npCode:    [q.linkedQuote, ...(q.linkedBy || [])].find(x => x && x.mailType === 'NOTA_PEDIDO')?.code    || null,
+      npFlexxus: [q.linkedQuote, ...(q.linkedBy || [])].find(x => x && x.mailType === 'NOTA_PEDIDO')?.flexxusCode || null,
+      paquete:   paquetes.get(q.id) || null,
+      // Anulada = reemplazada por una revisión. El tablero no la muestra, pero
+      // se puede abrir desde la ficha de la que la reemplazó.
+      anulada:        !!q.anuladaAt,
+      anuladaMotivo:  q.anuladaMotivo || null,
+      revisionDe:     q.revisionDe?.code || null,
+      reemplazadaPor: q.revisiones?.[0]?.code || null,
+      revision:       cadenas.get(q.id) || null,
     }));
 
     // ── Format orders (matches GET /orders format) ──

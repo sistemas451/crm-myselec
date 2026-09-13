@@ -45,19 +45,34 @@ function QuoteCard({ q, onOpen, compact }) {
     : 0;
   const displayName = cli?.name || q.emailSubject || 'Sin cliente asignado';
   const displaySub  = cli ? `${cli.city || ''}${cli.city && cli.prov ? ', ' : ''}${cli.prov || ''}` : 'Cliente por asignar';
+  // El semáforo pinta la tarjeta con una barra a la izquierda y un fondo suave.
+  // El borde queda libre a propósito: ahí van las alertas automáticas (🚩 y ⏰),
+  // que son otra cosa — si compartieran el mismo lugar no se distinguirían.
+  const prio = prioridadDe(q.priority);
   return (
     <div
       onClick={onOpen}
-      className={cx('kcard bg-white border rounded-xl p-3.5 cursor-pointer',
+      className={cx('kcard border rounded-xl p-3.5 cursor-pointer',
+        !prio && 'bg-white',
         deadlineOverdue ? 'border-red-300 ring-1 ring-red-100' :
         followUpOverdue ? 'border-amber-300 ring-1 ring-amber-100' : 'border-line/80'
       )}
+      style={prio ? { background: prio.wash, borderLeft: `4px solid ${prio.dot}` } : undefined}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="mono text-[11px] font-semibold text-navy-900">{q.code}</div>
         <div className="flex items-center gap-1">
           {q.mailType === 'SOLICITUD'   && <Badge tone="sky">SOL</Badge>}
           {q.mailType === 'PRESUPUESTO' && <Badge tone="blue">PRES</Badge>}
+          {q.mailType === 'NOTA_PEDIDO'  && <Badge tone="orange">NP</Badge>}
+          {/* Sello de revisión: este presupuesto ya se recotizó al menos una vez.
+              Chico a propósito — el detalle está en la ficha. */}
+          {q.revision?.nro > 1 && (
+            <span title={`Revisión ${q.revision.nro}${q.revisionDe ? ` — reemplaza a ${q.revisionDe}` : ''}`}
+              className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-surface text-ink-600 border border-line">
+              R{q.revision.nro}
+            </span>
+          )}
           {q.mailType === 'OC'          && <Badge tone="purple">OC</Badge>}
           {q.flexxus && <Badge tone="slate">{q.flexxus}</Badge>}
           {deadlineOverdue && (
@@ -80,6 +95,23 @@ function QuoteCard({ q, onOpen, compact }) {
 
       {q.monto != null && (
         <div className="mt-2.5 mono text-[13px] font-bold text-ink-900">{fmtMoney(q.monto, q.currency)}</div>
+      )}
+
+      {/* Un presupuesto está en Aceptada porque entró la Nota de Pedido. Mostrarla
+          hace que la columna diga lo que significa, y deja a la vista las pocas
+          que se aceptaron a mano y todavía no tienen NP. */}
+      {q.stage === 'aceptada' && q.mailType === 'PRESUPUESTO' && (
+        (q.npFlexxus || q.npCode) ? (
+          <div className="mt-2 inline-flex items-center gap-1 text-[10.5px] font-semibold px-1.5 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200"
+               title={`Nota de Pedido ${q.npCode || ''}`}>
+            <Icon name="clipboard-list" size={10}/>{q.npFlexxus || q.npCode}
+          </div>
+        ) : (
+          <div className="mt-2 inline-flex items-center gap-1 text-[10.5px] font-semibold px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200"
+               title="Se aceptó sin que entrara la Nota de Pedido">
+            <Icon name="clipboard-list" size={10}/>Sin nota de pedido
+          </div>
+        )
       )}
 
       {!compact && sel && (
@@ -112,59 +144,84 @@ function QuoteCard({ q, onOpen, compact }) {
 }
 
 // Tarjeta combinada: PRESUPUESTO (arriba, grande) + SOLICITUD vinculada (abajo, chica)
-function PairedQuoteCard({ pres, sol, onOpenPres, onOpenSol }) {
+// Tarjeta de paquete: una sola tarjeta para Solicitud + Presupuesto + Nota de
+// Pedido. Cada documento en su renglón, con el monto a la derecha. El renglón
+// que falta no se dibuja, así el hueco también dice algo: se ve de un vistazo
+// qué le falta al negocio.
+//
+// A propósito sin colores propios: el color de la tarjeta ya lo usa el semáforo
+// de seguimiento, y meter un segundo código de color acá los haría competir.
+function PaqueteCard({ q, paquete, onOpen }) {
   const { clients, allUsers } = useApp();
-  const cli = clients.find(c => c.code === pres.client);
-  const sel = allUsers.find(u => u.id === pres.seller);
-  const displayName = cli?.name || pres.emailSubject || 'Sin cliente asignado';
+  const cli = clients.find(c => c.code === q.client);
+  const sel = allUsers.find(u => u.id === q.seller);
+  const prio = prioridadDe(q.priority);
+
+  const displayName = cli?.name || q.clientName || q.emailSubject || 'Sin cliente asignado';
   const displaySub  = cli ? `${cli.city || ''}${cli.city && cli.prov ? ', ' : ''}${cli.prov || ''}` : '';
+
+  // Un presupuesto puede tener varias notas de pedido (el cliente compra por
+  // tandas). Cuando hay más de una, en vez de apilar renglones se muestra
+  // cuántas son y la suma, que es el dato que importa: cuánto de lo cotizado
+  // terminó comprando.
+  const nps = paquete.notasPedido || [];
+  const filas = [
+    paquete.solicitud   && { etq: 'SOL',  code: paquete.solicitud.code },
+    paquete.presupuesto && { etq: 'PRES', code: paquete.presupuesto.code, monto: paquete.presupuesto.amount, cur: paquete.presupuesto.currency },
+    nps.length === 1 && { etq: 'NP',  code: nps[0].code, monto: nps[0].amount, cur: nps[0].currency, fuerte: true },
+    // Con varias, el monto va por moneda: si el paquete mezcla pesos y dólares,
+    // sumarlos en una sola cifra sería juntar peras con manzanas.
+    nps.length > 1   && { etq: 'NP',  code: `${nps.length} notas de pedido`, fuerte: true,
+                          montos: paquete.npTotales || {},
+                          titulo: nps.map(n => n.code).join(' · ') },
+  ].filter(Boolean);
+
   return (
-    <div className="rounded-xl border border-brand/30 overflow-hidden shadow-sm">
-      {/* ── PRESUPUESTO (main) ── */}
-      <div onClick={onOpenPres} className="kcard bg-white p-3 cursor-pointer">
-        <div className="flex items-start justify-between gap-2">
-          <div className="mono text-[11px] font-semibold text-navy-900">{pres.code}</div>
-          <div className="flex items-center gap-1">
-            <Badge tone="blue">PRES</Badge>
-            {pres.flexxus && <Badge tone="slate">{pres.flexxus}</Badge>}
-            {pres.rejectReason && (
-              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-red-50 text-red-600 border border-red-200">
-                {pres.rejectReason}
+    <div
+      onClick={onOpen}
+      className={cx('kcard border rounded-xl p-3.5 cursor-pointer border-line/80', !prio && 'bg-white')}
+      style={prio ? { background: prio.wash, borderLeft: `4px solid ${prio.dot}` } : undefined}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="text-[13px] font-semibold text-ink-900 leading-snug truncate">{displayName}</div>
+        <span className="shrink-0 inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-brandSoft text-brand border border-brand/25">
+          <Icon name="link" size={9}/>{filas.length}
+        </span>
+      </div>
+      {displaySub && <div className="text-[11px] text-ink-500 truncate">{displaySub}</div>}
+
+      <div className="mt-2.5 pt-2 border-t border-line/70 space-y-1">
+        {filas.map(f => (
+          <div key={f.etq} className="flex items-baseline gap-2" title={f.titulo || ''}>
+            <span className="w-8 shrink-0 text-[9.5px] font-semibold tracking-wide text-ink-400">{f.etq}</span>
+            <span className={cx('text-[11px] truncate', nps.length > 1 && f.etq === 'NP' ? '' : 'mono', f.fuerte ? 'text-navy-900 font-semibold' : 'text-ink-600')}>{f.code}</span>
+            {f.monto != null && (
+              <span className={cx('ml-auto mono shrink-0', f.fuerte ? 'text-[12px] font-bold text-ink-900' : 'text-[11px] text-ink-600')}>
+                {fmtMoney(f.monto, f.cur)}
+              </span>
+            )}
+            {f.montos && Object.keys(f.montos).length > 0 && (
+              <span className="ml-auto mono shrink-0 text-[12px] font-bold text-ink-900 text-right">
+                {Object.entries(f.montos).map(([cur, monto], i) => (
+                  <span key={cur} className={i > 0 ? 'block text-[11px] font-semibold text-ink-600' : ''}>
+                    {fmtMoney(monto, cur)}
+                  </span>
+                ))}
               </span>
             )}
           </div>
-        </div>
-        <div className="text-[13px] font-semibold text-ink-900 mt-1 leading-snug truncate">{displayName}</div>
-        {displaySub && <div className="text-[11px] text-ink-500 truncate">{displaySub}</div>}
-        {pres.monto != null && (
-          <div className="mt-2 mono text-[13px] font-bold text-ink-900">{fmtMoney(pres.monto, pres.currency)}</div>
-        )}
-        {sel && (
-          <div className="mt-2.5 flex items-center justify-between">
-            <div className="flex items-center gap-1.5">
-              <Avatar name={sel.name} size={20}/>
-              <span className="text-[11px] text-ink-600">{sel.name.split(' ')[0]}</span>
-            </div>
-            <span className="text-[11px] text-ink-400">{fmtDate(pres.ingreso)}</span>
+        ))}
+      </div>
+
+      {sel && (
+        <div className="mt-2.5 flex items-center justify-between">
+          <div className="flex items-center gap-1.5">
+            <Avatar name={sel.name} size={20}/>
+            <span className="text-[11px] text-ink-600">{sel.name.split(' ')[0]}</span>
           </div>
-        )}
-      </div>
-      {/* ── Divisor con etiqueta ── */}
-      <div className="flex items-center gap-2 px-3 py-1 bg-brand/5 border-y border-brand/20">
-        <Icon name="link" size={10} className="text-brand/60 shrink-0"/>
-        <span className="text-[10px] text-brand/70 font-medium">Solicitud vinculada</span>
-      </div>
-      {/* ── SOLICITUD (companion, más chica) ── */}
-      <div onClick={onOpenSol} className="kcard bg-surface/60 px-3 py-2 cursor-pointer flex items-center justify-between gap-2">
-        <div className="min-w-0">
-          <div className="mono text-[10.5px] font-semibold text-ink-600">{sol.code}</div>
-          <div className="text-[11px] text-ink-500 truncate">{sol.emailSubject || 'Solicitud de cotización'}</div>
+          <span className="text-[11px] text-ink-400">{fmtDate(q.ingreso)}</span>
         </div>
-        <div className="flex items-center gap-1 shrink-0">
-          <Badge tone="sky">SOL</Badge>
-          <span className="text-[10px] text-ink-400">{fmtDate(sol.ingreso)}</span>
-        </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -322,15 +379,24 @@ function KanbanBoard({ stages, items, kind, onOpen, title, subtitle, actions, lo
     else pushToast('Ya está en la última etapa', 'warn');
   };
 
-  // ── Pares globales: PRESUPUESTO con SOLICITUD vinculada en cualquier columna ──
-  const pairedSolIds  = new Set();
-  const presToSolMap  = new Map();
+  // ── Paquetes ────────────────────────────────────────────────────────────────
+  // Quién va con quién lo resuelve el backend (campo `paquete`), no el tablero:
+  // el vínculo puede estar guardado de cualquiera de los dos lados y resolverlo
+  // acá mal era lo que hacía aparecer y desaparecer tarjetas según el filtro.
+  //
+  // Un miembro se absorbe en la tarjeta del principal solo si está en la MISMA
+  // etapa. Si quedó en otra (datos viejos, antes de que el paquete se moviera
+  // junto), se dibuja igual por su cuenta: nunca escondemos una tarjeta que no
+  // esté representada en otro lado.
+  const ocultos = new Set();
   if (kind === 'quote') {
+    const etapaDelPrincipal = new Map();
     for (const it of items) {
-      if (it.mailType === 'PRESUPUESTO' && it.linkedQuoteId) {
-        const sol = items.find(q => q.id === it.linkedQuoteId && q.mailType === 'SOLICITUD');
-        if (sol) { pairedSolIds.add(sol.id); presToSolMap.set(it.id, sol); }
-      }
+      if (it.paquete && it.paquete.principal === it.id) etapaDelPrincipal.set(it.id, it.stage);
+    }
+    for (const it of items) {
+      const p = it.paquete;
+      if (p && p.principal !== it.id && etapaDelPrincipal.get(p.principal) === it.stage) ocultos.add(it.id);
     }
   }
 
@@ -349,7 +415,7 @@ function KanbanBoard({ stages, items, kind, onOpen, title, subtitle, actions, lo
       <div className="flex-1 min-h-0 overflow-x-auto scroll-thin px-6 pb-6 pt-4 bg-surface">
         <div className="flex gap-3 h-full min-w-max">
           {stages.map(st => {
-            const list  = items.filter(i => i.stage === st.id && !pairedSolIds.has(i.id));
+            const list  = items.filter(i => i.stage === st.id && !ocultos.has(i.id));
             const totalUSD = list.filter(i => (i.currency||'USD') !== 'ARS').reduce((a,b) => a + (b.monto||0), 0);
             const totalARS = list.filter(i => i.currency === 'ARS').reduce((a,b) => a + (b.monto||0), 0);
             const isDropTarget = dragCode && overStage === st.id && (!dragItem || dragItem.stage !== st.id);
@@ -375,7 +441,7 @@ function KanbanBoard({ stages, items, kind, onOpen, title, subtitle, actions, lo
                   {list.length === 0 && <EmptyCol/>}
                   {kind === 'quote'
                     ? list.map(it => {
-                        const sol = presToSolMap.get(it.id);
+                        const enPaquete = it.paquete && it.paquete.principal === it.id;
                         return (
                           <div key={it.code} draggable
                             onDragStart={(e) => onCardDragStart(e, it)}
@@ -384,10 +450,8 @@ function KanbanBoard({ stages, items, kind, onOpen, title, subtitle, actions, lo
                               dragCode === it.code && 'drag-source',
                               justDropped === it.code && 'card-drop-in'
                             )}>
-                            {sol
-                              ? <PairedQuoteCard pres={it} sol={sol}
-                                  onOpenPres={() => onOpen(it.code)}
-                                  onOpenSol={() => onOpen(sol.code)}/>
+                            {enPaquete
+                              ? <PaqueteCard q={it} paquete={it.paquete} onOpen={() => onOpen(it.code)}/>
                               : <QuoteCard q={it} onOpen={() => onOpen(it.code)}/>
                             }
                           </div>
@@ -478,6 +542,23 @@ function BadgeLegendButton() {
               <div className="flex items-start gap-2">
                 <span className="shrink-0"><Badge tone="red" dot>Nd</Badge></span>
                 <span className="text-[12px] text-ink-600 leading-snug">Lleva <b>demasiado tiempo</b> en la etapa actual (más de lo esperado).</span>
+              </div>
+              {/* El semáforo es lo único que no calcula el sistema: lo marca el vendedor. */}
+              <div className="pt-2.5 border-t border-line">
+                <div className="flex items-start gap-2">
+                  <span className="shrink-0 flex items-center gap-0.5 pt-0.5">
+                    {PRIORIDADES.map(p => <span key={p.id} className="w-1.5 h-4 rounded-sm" style={{ background:p.dot }}/>)}
+                  </span>
+                  <span className="text-[12px] text-ink-600 leading-snug">
+                    <b>Semáforo de seguimiento</b>: pinta la tarjeta entera, con una barra del color sobre el borde izquierdo. Lo pone el vendedor a mano, no lo calcula el sistema:
+                    {PRIORIDADES.map(p => (
+                      <span key={p.id} className="block mt-1 rounded-md px-1.5 py-0.5"
+                        style={{ background:p.wash, borderLeft:`3px solid ${p.dot}` }}>
+                        <b>{p.label}</b> — {p.desc}.
+                      </span>
+                    ))}
+                  </span>
+                </div>
               </div>
             </div>
           </div>
@@ -612,7 +693,7 @@ function KanbanQuotes({ onOpen }) {
   return (
     <KanbanBoard
       title="Cotizaciones"
-      subtitle="Fase 1 · del mail de solicitud al presupuesto enviado"
+      subtitle="De la solicitud a la nota de pedido"
       stages={STAGES_F1} items={filtered} kind="quote" onOpen={onOpen}
       actions={
         <>
@@ -631,8 +712,8 @@ function KanbanOrders({ onOpen, logisticsMode }) {
   const handleOpen = (code) => onOpen(code, 'order');
   return (
     <KanbanBoard
-      title={logisticsMode ? 'Órdenes en operación' : 'Órdenes de Compra'}
-      subtitle="Fase 2 · del OC recibido al remito conformado"
+      title={logisticsMode ? 'Pedidos en operación' : 'Notas de Pedido'}
+      subtitle="Fase 2 · de la nota de pedido al remito conformado"
       stages={STAGES_F2} items={filtered} kind="order" onOpen={handleOpen}
       logisticsActions={logisticsMode}
       actions={

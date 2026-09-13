@@ -486,17 +486,6 @@ router.get('/inbox', authMiddleware, async (req, res) => {
         }
       }
 
-      // 2. OCs en etapa inicial (pendientes de procesar)
-      const pendingOrders = await prisma.order.count({
-        where: { stage: { notIn: ['entregada'] } },
-      });
-      if (pendingOrders > 0) alerts.push({
-        id: 'pending-orders', type: 'PENDING_ORDERS', severity: 'low', icon: 'clipboard-list',
-        title: `${pendingOrders} orden${pendingOrders > 1 ? 'es' : ''} en curso`,
-        description: 'Órdenes de compra activas en el tablero de logística.',
-        action: { label: 'Ver órdenes', view: 'orders' },
-        count: pendingOrders,
-      });
     }
 
     res.json(alerts);

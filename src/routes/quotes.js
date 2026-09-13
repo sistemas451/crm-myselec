@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const {authMiddleware, isAdmin } = require('../middleware/auth');
 const { onStageChange } = require('../services/notifier');
+const { moverResto, alinearPaquete, agruparEnPaquetes, cadenaDeRevisiones, marcarComoRevision } = require('../services/paquete');
 const { resyncQuoteEmail } = require('../services/mailReader');
 const multer = require('multer');
 const { parseFlexxusPDF, parseNotaPedidoPDF } = require('../services/flexxusParser');
@@ -166,12 +167,14 @@ router.post('/create-np', authMiddleware, memUpload.single('file'), async (req, 
 // GET /api/quotes - All quotes (admin sees all, seller sees own)
 router.get('/', authMiddleware, async (req, res) => {
   try {
-    // Excluir OC y NOTA_PEDIDO — esas van en el board de Fase 2 (órdenes)
+    // Fase 2 quedó desactivada: la Nota de Pedido pasa a ser un documento más
+    // de Fase 1, en la columna Aceptada junto a su presupuesto y su solicitud.
+    // Solo se excluye la OC legado, que ya no se crea.
     // Nota: mailType null (manuales) debe incluirse — OR para manejar nulls en PG
     const mailTypeFilter = {
       OR: [
         { mailType: null },
-        { mailType: { notIn: ['OC', 'NOTA_PEDIDO'] } },
+        { mailType: { not: 'OC' } },
       ],
     };
     const where = { ...mailTypeFilter };
@@ -201,11 +204,40 @@ router.get('/', authMiddleware, async (req, res) => {
         client: { select: { id: true, code: true, name: true, city: true, province: true, zone: true } },
         seller: { select: { id: true, name: true, email: true, zone: true } },
         linkedQuote: { select: { id: true, code: true, mailType: true, stage: true, flexxusCode: true } },
+        linkedBy:    { select: { id: true, code: true, mailType: true, flexxusCode: true } },
+        revisionDe:  { select: { code: true } },
+        revisiones:  { select: { code: true }, orderBy: { createdAt: 'asc' }, take: 1 },
         _count: { select: { notes: true, attachments: true } },
       },
       orderBy: { createdAt: 'desc' },
       take: 1000,  // límite de seguridad — la paginación real puede venir después
     });
+
+    // Agrupar en paquetes acá y no en el frontend: el vínculo puede estar
+    // guardado de cualquiera de los dos lados y resolverlo mal es justo lo que
+    // hacía que una solicitud apareciera o desapareciera según el filtro.
+    //
+    // El take de 1000 corta por fecha, sin mirar los vínculos, así que puede
+    // dejar a un miembro adentro y a otro afuera: medido sobre la base real,
+    // 35 paquetes quedaban partidos y se dibujaban como tarjetas sueltas.
+    // Se traen los miembros que faltan solo para armar el grupo — no se agregan
+    // a la respuesta, porque el paquete ya lleva adentro código y monto de cada
+    // documento y con eso alcanza para dibujar la tarjeta.
+    const idsPagina  = new Set(quotes.map(q => q.id));
+    const idsFaltan  = new Set();
+    for (const q of quotes) {
+      if (q.linkedQuoteId && !idsPagina.has(q.linkedQuoteId)) idsFaltan.add(q.linkedQuoteId);
+      for (const lb of q.linkedBy || []) if (!idsPagina.has(lb.id)) idsFaltan.add(lb.id);
+    }
+    const faltantes = idsFaltan.size
+      ? await prisma.quote.findMany({
+          where:  { id: { in: [...idsFaltan] } },
+          select: { id: true, code: true, mailType: true, amount: true, currency: true,
+                    linkedQuoteId: true, linkedBy: { select: { id: true } } },
+        })
+      : [];
+    const paquetes = agruparEnPaquetes([...quotes, ...faltantes]);
+    const cadenas  = cadenaDeRevisiones(quotes);
 
     // Format for frontend compatibility
     const formatted = quotes.map(q => ({
@@ -234,12 +266,27 @@ router.get('/', authMiddleware, async (req, res) => {
       followUpDate: q.followUpDate?.toISOString() || null,
       deadline: q.deadline?.toISOString() || null,
       ackSentAt: q.ackSentAt?.toISOString() || null,
+      priority: q.priority || null,
       rejectReason: q.rejectReason,
       linkedQuoteId:   q.linkedQuoteId || null,
       linkedQuoteCode: q.linkedQuote?.code || null,
       linkedQuoteType: q.linkedQuote?.mailType || null,
       linkedQuoteStage: q.linkedQuote?.stage || null,
       linkedQuoteFlexxus: q.linkedQuote?.flexxusCode || null,
+      // Nota de Pedido vinculada, mirando los dos sentidos del vínculo. Es lo que
+      // le da sentido a la etapa "Aceptada": está aceptada porque entró la NP.
+      npCode:    [q.linkedQuote, ...(q.linkedBy || [])].find(x => x && x.mailType === 'NOTA_PEDIDO')?.code    || null,
+      npFlexxus: [q.linkedQuote, ...(q.linkedBy || [])].find(x => x && x.mailType === 'NOTA_PEDIDO')?.flexxusCode || null,
+      paquete:   paquetes.get(q.id) || null,
+      // Anulada = reemplazada por una revisión. El tablero no la muestra, pero
+      // se puede abrir desde la ficha de la que la reemplazó.
+      anulada:        !!q.anuladaAt,
+      anuladaMotivo:  q.anuladaMotivo || null,
+      revisionDe:     q.revisionDe?.code || null,
+      reemplazadaPor: q.revisiones?.[0]?.code || null,
+      // En qué número de revisión va y la cadena entera, para el sello "R2" del
+      // tablero y para mostrar el recorrido completo en la ficha.
+      revision:       cadenas.get(q.id) || null,
     }));
 
     res.json(formatted);
@@ -449,8 +496,7 @@ router.patch('/:id/stage', authMiddleware, async (req, res) => {
       updateData.followUpDate = d;
     }
 
-    // ── Ejecutar el cambio de etapa (y creación de OC si aplica) en una transacción
-    // para que si falla el order.create la quote no quede en 'aceptada' sin OC.
+    // ── Ejecutar el cambio de etapa en una transacción ──────────────────────
     let updated;
     await prisma.$transaction(async (tx) => {
       updated = await tx.quote.update({
@@ -467,60 +513,22 @@ router.patch('/:id/stage', authMiddleware, async (req, res) => {
         },
       });
 
-      // Si se acepta, crear OC en espejo si no existe ya una en stage 'oc'
-      if (stage === 'aceptada') {
-        const existingOrder = await tx.order.findFirst({ where: { fromQuoteId: quote.id, stage: 'oc' } });
-        if (existingOrder) {
-          console.log(`ℹ️  OC en 'oc' ya existe para ${quote.code}: ${existingOrder.code}`);
-        } else {
-          const ocCode = await nextCode(prisma.order, 'OC-2026');
-          await tx.order.create({
-            data: {
-              code:        ocCode,
-              clientId:    quote.clientId,
-              sellerId:    quote.sellerId,
-              fromQuoteId: quote.id,
-              stage:       'oc',
-              flexxusCode: quote.flexxusCode,
-            },
-          });
-          await tx.activity.create({
-            data: {
-              action:  'CREATED',
-              detail:  `OC ${ocCode} creada automáticamente desde ${quote.code}`,
-              userId:  req.user.id,
-              quoteId: quote.id,
-            },
-          });
-        }
-      }
+      // Antes acá, al pasar a 'aceptada', se creaba una OC espejo (modelo Order).
+      // Se sacó: nadie la usaba y sumaba una tarjeta vacía al paquete. El flujo
+      // real es Solicitud → Presupuesto → Nota de Pedido.
     });
 
-    // ── Movimiento en paquete: si es PRESUPUESTO → mover SOLICITUD vinculada también ──
-    if ((stage === 'aceptada' || stage === 'rechazada') && quote.mailType === 'PRESUPUESTO' && quote.linkedQuoteId) {
-      try {
-        const solicitud = await prisma.quote.findUnique({
-          where: { id: quote.linkedQuoteId },
-          select: { id: true, code: true, mailType: true, stage: true },
-        });
-        if (solicitud && solicitud.mailType === 'SOLICITUD' && solicitud.stage !== stage) {
-          await prisma.quote.update({
-            where: { id: solicitud.id },
-            data: { stage, stageChangedAt: new Date(), followUpDate: null,
-                    ...(stage === 'rechazada' && rejectReason ? { rejectReason, rejectNotes: rejectNotes || null } : {}) },
-          });
-          await prisma.activity.create({
-            data: {
-              action: 'STAGE_CHANGE',
-              detail: `Movió ${solicitud.code} a ${stage} junto con ${quote.code} (paquete)`,
-              userId: req.user.id,
-              quoteId: solicitud.id,
-            },
-          });
-        }
-      } catch (e) {
-        console.error('Package move error:', e.message);
-      }
+    // ── Movimiento en paquete ────────────────────────────────────────────────
+    // Antes esto solo pasaba en un caso: presupuesto → aceptada o rechazada, y
+    // arrastraba únicamente a la solicitud. Ahora el paquete es una sola cosa:
+    // se mueva el documento que se mueva, y a la etapa que sea, van todos.
+    try {
+      const movidos = await moverResto(quote, stage, {
+        userId: req.user.id, rejectReason, rejectNotes,
+      });
+      if (movidos.length) console.log(`   📦 ${quote.code} → ${stage} | arrastró: ${movidos.join(', ')}`);
+    } catch (e) {
+      console.error('Error moviendo el paquete:', e.message);
     }
 
     // Disparar notificaciones fuera de la transacción (no bloquea ni revierte)
@@ -625,24 +633,19 @@ router.get('/:id/detail', authMiddleware, async (req, res) => {
           },
           take: 5,
         },
+        // Cadena de revisiones: a quién reemplaza esta y quién la reemplazó
+        revisionDe: { select: { id: true, code: true, amount: true, currency: true, anuladaAt: true, anuladaMotivo: true, createdAt: true } },
+        revisiones: { select: { id: true, code: true, amount: true, currency: true, createdAt: true }, orderBy: { createdAt: 'asc' } },
       },
     });
     if (!quote) return res.status(404).json({ error: 'No encontrada' });
 
-    // ── Orden de Compra vinculada ─────────────────────────────────────────
-    const linkedOrder = await prisma.order.findFirst({
-      where: { fromQuoteId: quote.id },
-      select: {
-        id: true, code: true, stage: true, createdAt: true,
-        activities: { include: { user: { select: { name: true } } }, orderBy: { createdAt: 'asc' } },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-
     // ── Historial unificado: mezclar actividades de TODOS los documentos vinculados ──
-    // PRESUPUESTO: linkedQuote(SOLICITUD) + linkedBy[](NP) + linkedOrder(OC)
+    // PRESUPUESTO: linkedQuote(SOLICITUD) + linkedBy[](NP)
     // SOLICITUD:   linkedQuote(PRESUPUESTO)
     // NP Quote:    linkedQuote(PRESUPUESTO)
+    // La OC salió del paquete: era un espejo sin datos y su actividad
+    // ("OC creada automáticamente...") solo ensuciaba el historial.
     const ownActivities = (quote.activities || [])
       .map(a => ({ ...a, _fromCode: quote.code, _fromType: quote.mailType }));
 
@@ -653,9 +656,6 @@ router.get('/:id/detail', authMiddleware, async (req, res) => {
       (lb.activities || []).map(a => ({ ...a, _fromCode: lb.code, _fromType: lb.mailType }))
     );
 
-    const linkedOrderActivities = (linkedOrder?.activities || [])
-      .map(a => ({ ...a, _fromCode: linkedOrder.code, _fromType: 'ORDER' }));
-
     // El vinculo SOLICITUD<->PRESUPUESTO es bidireccional, asi que la misma
     // cotizacion llega por linkedQuote Y por linkedBy: sin deduplicar, cada
     // actividad de la vinculada se mostraba dos veces en el historial.
@@ -664,14 +664,13 @@ router.get('/:id/detail', authMiddleware, async (req, res) => {
       ...ownActivities,
       ...linkedQuoteActivities,
       ...linkedByActivities,
-      ...linkedOrderActivities,
     ].filter(a => {
       if (vistas.has(a.id)) return false;
       vistas.add(a.id);
       return true;
     }).sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 
-    res.json({ ...quote, unifiedHistory, linkedOrder: linkedOrder || null });
+    res.json({ ...quote, unifiedHistory });
   } catch (err) {
     console.error('Error en detail endpoint:', err);
     res.status(500).json({ error: 'Error' });
@@ -1129,6 +1128,173 @@ router.patch('/:id/deadline', authMiddleware, async (req, res) => {
   }
 });
 
+// POST /api/quotes/:id/revisar — nueva revisión de un presupuesto
+//
+// Flexxus no tiene revisiones: si el cliente pide agregar un ítem o cambiar
+// cantidades, hay que armar un presupuesto nuevo. Antes eso se resolvía editando
+// el original, y no quedaba registro de qué se le había mandado primero.
+//
+// Ahora se copia a uno nuevo y el anterior queda anulado: no se borra, sigue
+// consultable con sus ítems y su historial, pero sale del tablero y de los
+// totales para que no haya dos presupuestos vivos del mismo negocio.
+router.post('/:id/revisar', authMiddleware, async (req, res) => {
+  try {
+    const { motivo } = req.body;
+
+    const original = await prisma.quote.findUnique({
+      where: { id: req.params.id },
+      include: { items: { orderBy: { sortOrder: 'asc' } }, client: { select: { name: true } } },
+    });
+    if (!original) return res.status(404).json({ error: 'Cotización no encontrada' });
+    if (original.mailType && original.mailType !== 'PRESUPUESTO') {
+      return res.status(400).json({ error: 'Solo se pueden revisar presupuestos' });
+    }
+    if (original.anuladaAt) {
+      return res.status(400).json({ error: 'Esta cotización ya fue reemplazada por una revisión' });
+    }
+    if (req.user.role === 'VENDEDOR' && original.sellerId !== req.user.id) {
+      return res.status(403).json({ error: 'Sin permiso sobre esta cotización' });
+    }
+
+    const code = await nextCode(prisma.quote, `COT-${new Date().getFullYear()}`);
+
+    const revision = await prisma.quote.create({
+      data: {
+        code,
+        clientId:     original.clientId,
+        sellerId:     original.sellerId,
+        stage:        original.stage,
+        source:       original.source,
+        mailType:     original.mailType,
+        currency:     original.currency || 'USD',
+        amount:       original.amount,
+        subtotalNeto: original.subtotalNeto,
+        ivaAmount:    original.ivaAmount,
+        totalPercepciones: original.totalPercepciones,
+        emailSubject: original.emailSubject,
+        emailFrom:    original.emailFrom,
+        priority:     original.priority,
+        deadline:     original.deadline,
+      },
+      include: { client: { select: { code: true, name: true } }, seller: { select: { name: true } } },
+    });
+
+    if (original.items.length) {
+      await prisma.quoteItem.createMany({
+        data: original.items.map((it, i) => ({
+          quoteId: revision.id,
+          sku: it.sku, description: it.description, quantity: it.quantity,
+          unit: it.unit, unitPrice: it.unitPrice, total: it.total,
+          accepted: it.accepted, checked: true, sortOrder: i,
+        })),
+      });
+    }
+
+    // Engancha la cadena, muda el paquete y anula el anterior. Es el mismo
+    // helper que usa el ingreso por mail, así que los dos caminos hacen lo mismo.
+    const r = await marcarComoRevision(revision.id, original.id, {
+      motivo: (motivo || '').trim() || null,
+      userId: req.user.id,
+    });
+
+    console.log(`   📄 ${original.code} → revisión ${code} (nivel ${r?.revisionNro})`);
+    res.json({ id: revision.id, code, revisionNro: r?.revisionNro || 2, reemplaza: original.code });
+  } catch (err) {
+    console.error('Error creando la revisión:', err);
+    res.status(500).json({ error: 'Error al crear la revisión' });
+  }
+});
+
+// POST /api/quotes/:id/reactivar — deshacer una anulación
+//
+// Anular saca un presupuesto del tablero y de todos los totales. Mientras lo
+// hace una persona a propósito eso está bien, pero el ingreso por mail también
+// anula solo cuando detecta una recotización, y ahí puede equivocarse: por
+// ejemplo si el parser leyó mal un monto y por eso pareció otra cotización.
+// Sin esto no habría forma de traer de vuelta un presupuesto bueno.
+router.post('/:id/reactivar', authMiddleware, async (req, res) => {
+  try {
+    const quote = await prisma.quote.findUnique({
+      where:  { id: req.params.id },
+      select: { id: true, code: true, sellerId: true, anuladaAt: true },
+    });
+    if (!quote) return res.status(404).json({ error: 'Cotización no encontrada' });
+    if (!quote.anuladaAt) return res.status(400).json({ error: 'Esta cotización no está anulada' });
+    if (req.user.role === 'VENDEDOR' && quote.sellerId !== req.user.id) {
+      return res.status(403).json({ error: 'Sin permiso sobre esta cotización' });
+    }
+
+    await prisma.quote.update({
+      where: { id: quote.id },
+      data:  { anuladaAt: null, anuladaMotivo: null },
+    });
+    await prisma.activity.create({
+      data: {
+        action: 'REACTIVADA',
+        detail: `Reactivada — vuelve al tablero`,
+        userId: req.user.id, quoteId: quote.id,
+      },
+    });
+
+    // Si alguna de las que vinieron después sigue viva, ahora hay dos del mismo
+    // negocio. Hay que recorrer toda la descendencia y no solo el hijo directo:
+    // si esta se revisó dos veces, la viva es la nieta, no la hija.
+    const vivas = [];
+    let cursor = quote.id, guarda = 0;
+    while (guarda++ < 20) {
+      const hijo = await prisma.quote.findFirst({
+        where:  { revisionDeId: cursor },
+        select: { id: true, code: true, anuladaAt: true },
+      });
+      if (!hijo) break;
+      if (!hijo.anuladaAt) vivas.push(hijo.code);
+      cursor = hijo.id;
+    }
+    res.json({ ok: true, code: quote.code, tambienVivas: vivas });
+  } catch (err) {
+    console.error('Error reactivando:', err);
+    res.status(500).json({ error: 'Error al reactivar' });
+  }
+});
+
+// PATCH /api/quotes/:id/priority — semáforo de seguimiento
+// Marca manual: la pone y la saca el vendedor, no depende de ninguna fecha.
+router.patch('/:id/priority', authMiddleware, async (req, res) => {
+  try {
+    const { priority } = req.body;
+    const VALIDAS = ['alta', 'media', 'baja'];
+    const valor = VALIDAS.includes(priority) ? priority : null;
+
+    const quote = await prisma.quote.findUnique({
+      where:  { id: req.params.id },
+      select: { id: true, code: true, sellerId: true, priority: true },
+    });
+    if (!quote) return res.status(404).json({ error: 'Cotización no encontrada' });
+    if (req.user.role === 'VENDEDOR' && quote.sellerId !== req.user.id) {
+      return res.status(403).json({ error: 'Sin permiso sobre esta cotización' });
+    }
+    if (quote.priority === valor) return res.json({ priority: valor });
+
+    await prisma.quote.update({ where: { id: quote.id }, data: { priority: valor } });
+
+    const NOMBRE = { alta: 'Prioritaria', media: 'Seguir de cerca', baja: 'Al día' };
+    await prisma.activity.create({
+      data: {
+        action:  'PRIORITY_CHANGED',
+        detail:  valor
+          ? `Marcó ${quote.code} como "${NOMBRE[valor]}"`
+          : `Sacó la marca de seguimiento de ${quote.code}`,
+        userId:  req.user.id,
+        quoteId: quote.id,
+      },
+    });
+    res.json({ priority: valor });
+  } catch (err) {
+    console.error('Error al cambiar la prioridad:', err);
+    res.status(500).json({ error: 'Error al guardar la marca de seguimiento' });
+  }
+});
+
 // PATCH /api/quotes/:id/pedido — editar el pedido de una solicitud cargada a mano.
 // Solo para las manuales: si vino por correo (emailMessageId), el cuerpo es el
 // mail real y no se toca.
@@ -1263,14 +1429,15 @@ router.patch('/:id/link', authMiddleware, async (req, res) => {
       });
     }
 
-    // Auto-aceptar presupuesto cuando una NP se vincula manualmente a él
-    const npQuote = quote.mailType === 'NOTA_PEDIDO' ? quote : (target?.mailType === 'NOTA_PEDIDO' ? target : null);
-    if (npQuote && presupuesto && linkedQuoteId) {
+    // Recién vinculados: el paquete pasa a tener una sola etapa, la del
+    // documento más avanzado (o "aceptada" si ya entró la nota de pedido).
+    // Reemplaza al auto-aceptar que solo cubría el caso NP → presupuesto.
+    if (linkedQuoteId) {
       try {
-        const { autoAcceptPresupuesto } = require('../services/quoteHelper');
-        await autoAcceptPresupuesto(presupuesto.id);
+        const r = await alinearPaquete(req.params.id, { userId: req.user.id });
+        if (r) console.log(`   📦 paquete alineado a "${r.destino}": ${r.movidos.join(', ')}`);
       } catch (e) {
-        console.error('Error en auto-accept presupuesto (link):', e.message);
+        console.error('Error alineando el paquete:', e.message);
       }
     }
 

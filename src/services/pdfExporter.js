@@ -433,7 +433,9 @@ async function generateRechazos(quotes, { filters, style } = {}) {
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// REPORTE 3: Órdenes de Compra
+// REPORTE 3: Notas de Pedido
+// Antes leía el modelo Order (la "OC espejo"). Ahora lee las Notas de Pedido,
+// que es lo que realmente entra: la OC nunca tuvo datos de logística cargados.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 async function generateOrdenes(orders, { filters, stages, style } = {}) {
@@ -442,39 +444,46 @@ async function generateOrdenes(orders, { filters, stages, style } = {}) {
   const doc = new PDFDocument({ size: [pg.width, pg.height], margin: pg.margin, autoFirstPage: true, bufferPages: true });
   const buffers = []; doc.on('data', b => buffers.push(b));
 
-  let y = (exec ? poHeader : laHeader)(doc, 'Reporte de Órdenes de Compra', `${orders.length} órdenes`, filters);
+  let y = (exec ? poHeader : laHeader)(doc, 'Reporte de Notas de Pedido', `${orders.length} notas de pedido`, filters);
 
   const stageMap = {};
   if (stages) stages.forEach(s => { stageMap[s.stageKey] = s.label; });
   const lastStage = stages?.[stages.length - 1]?.stageKey;
   const entregadas = orders.filter(o => o.stage === lastStage).length;
   const enCurso = orders.filter(o => o.stage !== lastStage).length;
-  const conTracking = orders.filter(o => o.trackingNumber).length;
+  // La NP sí trae monto — la OC nunca lo tuvo, por eso acá antes iba "con tracking".
+  const montoUSD = orders.filter(o => (o.currency || 'USD') !== 'ARS').reduce((s, o) => s + (o.amount || 0), 0);
+  const montoARS = orders.filter(o => o.currency === 'ARS').reduce((s, o) => s + (o.amount || 0), 0);
+  const montoLabel = [
+    montoUSD ? `U$S ${Math.round(montoUSD / 1000)}k` : null,
+    montoARS ? `AR$ ${Math.round(montoARS / 1000)}k` : null,
+  ].filter(Boolean).join(' + ') || '—';
 
   y = (exec ? poKPIs : laKPIs)(doc, y, [
-    { label: 'Total órdenes', value: String(orders.length) },
+    { label: 'Total notas de pedido', value: String(orders.length) },
     { label: 'En curso', value: String(enCurso), accent: '#D4A017' },
     { label: 'Entregadas', value: String(entregadas), accent: C.success },
-    { label: 'Con tracking', value: String(conTracking) },
+    { label: 'Monto confirmado', value: montoLabel },
   ]);
 
   const trun = exec ? 18 : 25;
   const columns = [
-    { header: 'Código OC', key: 'code', flex: 1.1, mono: true, bold: true },
-    { header: 'Cliente',   key: r => truncate(r.clientName, trun), flex: 2.2 },
-    { header: 'Vendedor',  key: r => truncate(r.sellerName, exec ? 10 : 14), flex: 1.2 },
-    { header: 'Etapa',     key: r => stageMap[r.stage] || r.stage, flex: 1.3 },
-    { header: 'OC Cliente',key: r => r.clientOCCode || '—', flex: 1, mono: true },
+    { header: 'Código',      key: 'code', flex: 1.1, mono: true, bold: true },
+    { header: 'Cliente',     key: r => truncate(r.clientName, trun), flex: 2.2 },
+    { header: 'Vendedor',    key: r => truncate(r.sellerName, exec ? 10 : 14), flex: 1.2 },
+    { header: 'Etapa',       key: r => stageMap[r.stage] || r.stage, flex: 1.3 },
+    { header: 'OC Cliente',  key: r => r.clientOCCode || '—', flex: 1, mono: true },
     ...(!exec ? [{ header: 'NP Flexxus', key: r => r.flexxusCode || '—', flex: 1, mono: true }] : []),
-    { header: 'Transporte',key: r => truncate(r.carrier, exec ? 12 : 16), flex: 1.1 },
-    { header: 'Tracking',  key: r => r.trackingNumber || '—', flex: 1.1, mono: true },
-    { header: 'Creada',    key: r => fmtDateShort(r.createdAt), flex: 0.8, align: 'right' },
+    { header: 'Presupuesto', key: r => r.presupuesto || '—', flex: 1.1, mono: true },
+    { header: 'Monto',       key: r => r.amount ? fmtMoney(r.amount, r.currency) : '—', flex: 1.3, mono: true, align: 'right' },
+    { header: 'Ingreso',     key: r => fmtDateShort(r.createdAt), flex: 0.8, align: 'right' },
   ];
 
   const rows = orders.map(o => ({
     code: o.code, clientName: o.client?.name || '—', sellerName: o.seller?.name || '—',
     stage: o.stage, clientOCCode: o.clientOCCode, flexxusCode: o.flexxusCode,
-    carrier: o.carrier, trackingNumber: o.trackingNumber, createdAt: o.createdAt,
+    presupuesto: o.linkedQuote?.code || null,
+    amount: o.amount, currency: o.currency || 'USD', createdAt: o.createdAt,
   }));
 
   y = (exec ? poTable : laTable)(doc, y, columns, rows);
@@ -483,6 +492,7 @@ async function generateOrdenes(orders, { filters, stages, style } = {}) {
     { label: 'Total', value: String(orders.length) },
     { label: 'En curso', value: String(enCurso) },
     { label: 'Entregadas', value: String(entregadas) },
+    { label: 'Monto', value: montoLabel },
   ]);
 
   (exec ? poFinalize : laFinalize)(doc);

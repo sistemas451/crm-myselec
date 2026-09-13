@@ -150,6 +150,19 @@ const CrmApi = {
   updateQuoteDeadline: (id, deadline) => apiFetch(`/quotes/${id}/deadline`, {
     method: 'PATCH', body: JSON.stringify({ deadline })
   }),
+  updateQuotePriority: (id, priority) => apiFetch(`/quotes/${id}/priority`, {
+    method: 'PATCH', body: JSON.stringify({ priority })
+  }),
+  revisarQuote: (id, motivo) => apiFetch(`/quotes/${id}/revisar`, {
+    method: 'POST', body: JSON.stringify({ motivo })
+  }),
+  reactivarQuote: (id) => apiFetch(`/quotes/${id}/reactivar`, { method: 'POST' }),
+  getPriorityQuotes: (filters = {}) => {
+    const qs = new URLSearchParams();
+    if (filters.sellerId) qs.set('sellerId', filters.sellerId);
+    const s = qs.toString();
+    return apiFetch(`/data/priority${s ? '?' + s : ''}`);
+  },
   createNP: (formData) => {
     const token = CrmAuth.getToken();
     return fetch(`${API_BASE}/quotes/create-np`, {

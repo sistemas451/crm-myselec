@@ -76,11 +76,13 @@ router.get('/', authMiddleware, async (req, res) => {
       entrega: q.source || 'EMAIL',
       transp: '—',
       flexxus: q.flexxusCode || '',
+      clientOCCode: q.clientOCCode || '',
       fecha: q.createdAt.toISOString(),
       guia: '',
       invoiceIssued: false,
       waybillReceived: false,
       monto: q.amount || null,
+      currency: q.currency || 'USD',
       emailSubject: q.emailSubject || '',
       _source: 'QUOTE',
     }));
