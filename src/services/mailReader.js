@@ -701,21 +701,6 @@ async function processNotaPedido(parsed, mailData, att, imap) {
     });
   }
 
-  // ── El paquete queda en una sola etapa ──────────────────────────────────
-  // Antes esto solo corría cuando el match era por código Flexxus exacto, así
-  // que las NP que vinculaban por hilo de mail o por cliente quedaban ligadas
-  // pero nadie movía el presupuesto: 99 negocios ganados seguían figurando en
-  // "Presupuesto Enviado". Ahora alinea siempre que haya vínculo.
-  if (presupuesto) {
-    try {
-      const { alinearPaquete } = require('./paquete');
-      const r = await alinearPaquete(presupuesto.id);
-      if (r) console.log(`   📦 paquete alineado a "${r.destino}": ${r.movidos.join(', ')}`);
-    } catch (e) {
-      console.error('Error alineando el paquete:', e.message);
-    }
-  }
-
   // Antes acá se creaba una "OC espejo" (modelo Order) para cada NP. Se sacó:
   // no la usaba nadie y duplicaba en otra tabla datos que ya viven en la NP.
   // El número de OC del cliente pasa a guardarse en la propia Quote, abajo.
@@ -770,6 +755,24 @@ async function processNotaPedido(parsed, mailData, att, imap) {
       where: { id: presupuesto.id },
       data:  { linkedQuoteId: quote.id },
     });
+  }
+
+  // ── El paquete queda en una sola etapa ──────────────────────────────────
+  // Va acá y NO antes de crear la NP. Alineando primero, el paquete todavía es
+  // solo {solicitud, presupuesto}: sin NP a la vista el destino que se calcula
+  // es la etapa más avanzada de esos dos ("enviado"), así que no movía nada y
+  // el negocio ganado seguía figurando como pendiente — justo lo que el paquete
+  // venía a resolver. Con la NP ya creada y vinculada, el destino es "aceptada"
+  // y arrastra a todo el paquete. Es el mismo orden que usa el camino de los
+  // presupuestos, que llama a alinearPaquete con la cotización ya creada.
+  if (presupuesto) {
+    try {
+      const { alinearPaquete } = require('./paquete');
+      const r = await alinearPaquete(quote.id);
+      if (r) console.log(`   📦 paquete alineado a "${r.destino}": ${r.movidos.join(', ')}`);
+    } catch (e) {
+      console.error('Error alineando el paquete:', e.message);
+    }
   }
 
   // ── Crear ítems ──────────────────────────────────────────────────────────
