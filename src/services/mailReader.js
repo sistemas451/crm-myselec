@@ -632,6 +632,19 @@ async function processNotaPedido(parsed, mailData, att, imap) {
     return null;
   }
 
+  const npTotal = npData.total || (npData.items.reduce((s, i) => s + (i.total || 0), 0) || null);
+
+  // ¿Es la misma NP que ya entró, reenviada? Va acá arriba a propósito: antes
+  // de buscar el presupuesto y de alinear el paquete, para que un reenvío no
+  // vuelva a mover etapas de documentos que ya estaban donde debían.
+  const npRepetida = await buscarNotaPedidoDuplicada(npData.npCode, npTotal);
+  if (npRepetida) {
+    await absorberEnCotizacion(npRepetida, {
+      subject, messageId, attachments: [att], flexxusData: npData, tipo: 'nota de pedido',
+    });
+    return null;
+  }
+
   // ── Buscar presupuesto de referencia ────────────────────────────────────
   let presupuesto = null;
   let presupuestoExactMatch = false;
@@ -709,7 +722,6 @@ async function processNotaPedido(parsed, mailData, att, imap) {
 
   // ── Crear Quote NOTA_PEDIDO ──────────────────────────────────────────────
   const code = await nextCode(prisma.quote, 'NP-2026');
-  const npTotal = npData.total || (npData.items.reduce((s, i) => s + (i.total || 0), 0) || null);
 
   // Etapa de entrada configurable para NP
   const npStageSetting = await prisma.appSetting.findUnique({ where: { key: 'default_stage_nota_pedido' } });
@@ -891,12 +903,36 @@ async function buscarPresupuestoDuplicado(npCode, total) {
 }
 
 /**
+ * Lo mismo para las notas de pedido. Faltaba: las NP solo se deduplicaban por
+ * emailMessageId, que no sirve cuando alguien REENVÍA el mail — es otro mail,
+ * con otro id, pero el mismo PDF. Así entraron 7 NP duplicadas (todas con el
+ * asunto "Fwd:"), sumando la misma venta dos veces en los totales.
+ */
+async function buscarNotaPedidoDuplicada(npCode, total) {
+  if (!npCode) return null;
+  const existentes = await prisma.quote.findMany({
+    where:   { flexxusCode: npCode, mailType: 'NOTA_PEDIDO' },
+    orderBy: { createdAt: 'asc' },
+    include: { _count: { select: { items: true, attachments: true } } },
+  });
+  if (!existentes.length) return null;
+  const mismoTotal = (a, b) => {
+    if (a == null || b == null) return a == null && b == null;
+    return Math.abs(a - b) < 0.01;
+  };
+  // Mismo número y mismo importe = es el mismo documento. Con otro importe se
+  // deja pasar a propósito: puede ser una NP corregida ("***modificada**"), y
+  // decidir cuál vale no es algo que deba resolver el lector de mails solo.
+  return existentes.find(q => mismoTotal(q.amount, total)) || null;
+}
+
+/**
  * Cuando se detecta el reenvio, no se descarta el mail: lo que traiga de nuevo se
  * suma a la cotizacion que ya existe, para no perder nada. Adjuntos que no esten,
  * items si la original quedo sin ellos, y siempre una actividad con el asunto y
  * el identificador del mail para que quede el rastro.
  */
-async function absorberEnPresupuesto(existente, { subject, messageId, attachments = [], flexxusData }) {
+async function absorberEnCotizacion(existente, { subject, messageId, attachments = [], flexxusData, tipo = 'presupuesto' }) {
   // El mail reenviado no queda guardado en ninguna Quote, asi que sin esta marca
   // cada sincronizacion volveria a absorberlo y a duplicar adjuntos y actividades.
   if (messageId) {
@@ -970,11 +1006,11 @@ async function absorberEnPresupuesto(existente, { subject, messageId, attachment
   await prisma.activity.create({
     data: {
       action:  'DUPLICATE_MERGED',
-      detail:  `Se recibió de nuevo el mismo presupuesto ${existente.flexxusCode} ("${(subject || '').substring(0, 120)}") — no se creó una cotización duplicada${extra ? `. Se sumó: ${extra}` : ''}. [${messageId || 'sin id'}]`,
+      detail:  `Se recibió de nuevo ${tipo === 'presupuesto' ? 'el mismo presupuesto' : 'la misma nota de pedido'} ${existente.flexxusCode} ("${(subject || '').substring(0, 120)}") — no se creó una cotización duplicada${extra ? `. Se sumó: ${extra}` : ''}. [${messageId || 'sin id'}]`,
       quoteId: existente.id,
     },
   });
-  console.log(`   ♻️  Reenvio del mismo presupuesto — absorbido en ${existente.code}${extra ? ` (${extra})` : ''}`);
+  console.log(`   ♻️  Reenvio ${tipo === 'presupuesto' ? 'del mismo presupuesto' : 'de la misma nota de pedido'} — absorbido en ${existente.code}${extra ? ` (${extra})` : ''}`);
 }
 
 async function processSentMail(parsed, mailData, imap) {
@@ -1157,7 +1193,7 @@ async function processSentMail(parsed, mailData, imap) {
   // ¿Es el mismo presupuesto que ya entró, reenviado? (MYS-0018)
   const yaExiste = await buscarPresupuestoDuplicado(flexxusData?.npCode, flexxusGrandTotal);
   if (yaExiste) {
-    await absorberEnPresupuesto(yaExiste, {
+    await absorberEnCotizacion(yaExiste, {
       subject, messageId, attachments: realAttachments, flexxusData,
     });
     return null;
@@ -1730,7 +1766,7 @@ async function processEmail(mailData, imap) {
     if (mailType === 'PRESUPUESTO') {
       const yaExiste = await buscarPresupuestoDuplicado(flexxusData?.npCode, flexxusGrandTotal);
       if (yaExiste) {
-        await absorberEnPresupuesto(yaExiste, {
+        await absorberEnCotizacion(yaExiste, {
           subject, messageId, attachments: realAttachments, flexxusData,
         });
         return null;
@@ -2160,4 +2196,4 @@ async function resyncQuoteEmail(quoteId) {
   });
 }
 
-module.exports = { syncMails, syncAccount, listRecentMails, resyncQuoteEmail, heredarVendedorDeSolicitud, buscarPresupuestoDuplicado, buscarPresupuestoARevisar, absorberEnPresupuesto };
+module.exports = { syncMails, syncAccount, listRecentMails, resyncQuoteEmail, heredarVendedorDeSolicitud, buscarPresupuestoDuplicado, buscarPresupuestoARevisar, buscarNotaPedidoDuplicada, absorberEnCotizacion };
