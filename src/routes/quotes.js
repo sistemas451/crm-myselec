@@ -193,31 +193,38 @@ router.get('/', authMiddleware, async (req, res) => {
       // Limpiar la condición OR del nivel superior para evitar duplicación
       delete where.OR;
     }
-    // Filtro de fecha (opcional — carga inicial usa últimos 12 meses)
+    // Las abiertas se traen TODAS, sin tope ni filtro de fecha: son el trabajo
+    // pendiente y ninguna puede faltar en el tablero. Con un solo take de 1000
+    // ordenado por fecha, las más viejas quedaban afuera — medido sobre la base
+    // real, 167 abiertas (USD 4,28 M) no se veían. El tope y el filtro de fecha
+    // (la carga inicial pide los últimos 12 meses) quedan solo para las
+    // cerradas, que son las que crecen sin parar.
+    const CERRADAS = ['aceptada', 'rechazada', 'no_cotiza'];
+    const whereCerradas = { AND: [where, { stage: { in: CERRADAS } }] };
     if (req.query.since) {
-      where.createdAt = { gte: new Date(req.query.since) };
+      whereCerradas.AND.push({ createdAt: { gte: new Date(req.query.since) } });
     }
 
-    const quotes = await prisma.quote.findMany({
-      where,
-      include: {
-        client: { select: { id: true, code: true, name: true, city: true, province: true, zone: true } },
-        seller: { select: { id: true, name: true, email: true, zone: true } },
-        linkedQuote: { select: { id: true, code: true, mailType: true, stage: true, flexxusCode: true } },
-        linkedBy:    { select: { id: true, code: true, mailType: true, flexxusCode: true } },
-        revisionDe:  { select: { code: true } },
-        revisiones:  { select: { code: true }, orderBy: { createdAt: 'asc' }, take: 1 },
-        _count: { select: { notes: true, attachments: true } },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 1000,  // límite de seguridad — la paginación real puede venir después
-    });
+    const include = {
+      client: { select: { id: true, code: true, name: true, city: true, province: true, zone: true } },
+      seller: { select: { id: true, name: true, email: true, zone: true } },
+      linkedQuote: { select: { id: true, code: true, mailType: true, stage: true, flexxusCode: true } },
+      linkedBy:    { select: { id: true, code: true, mailType: true, flexxusCode: true } },
+      revisionDe:  { select: { code: true } },
+      revisiones:  { select: { code: true }, orderBy: { createdAt: 'asc' }, take: 1 },
+      _count: { select: { notes: true, attachments: true } },
+    };
+    const [abiertas, cerradas] = await Promise.all([
+      prisma.quote.findMany({ where: { AND: [where, { stage: { notIn: CERRADAS } }] }, include }),
+      prisma.quote.findMany({ where: whereCerradas, include, orderBy: { createdAt: 'desc' }, take: 1000 }),
+    ]);
+    const quotes = [...abiertas, ...cerradas].sort((x, y) => y.createdAt - x.createdAt);
 
     // Agrupar en paquetes acá y no en el frontend: el vínculo puede estar
     // guardado de cualquiera de los dos lados y resolverlo mal es justo lo que
     // hacía que una solicitud apareciera o desapareciera según el filtro.
     //
-    // El take de 1000 corta por fecha, sin mirar los vínculos, así que puede
+    // El take de 1000 de las cerradas corta por fecha, sin mirar los vínculos, así que puede
     // dejar a un miembro adentro y a otro afuera: medido sobre la base real,
     // 35 paquetes quedaban partidos y se dibujaban como tarjetas sueltas.
     // Se traen los miembros que faltan solo para armar el grupo — no se agregan

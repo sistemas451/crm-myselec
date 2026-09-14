@@ -569,7 +569,9 @@ function BadgeLegendButton() {
 }
 
 // ---------- Quote filters toolbar ----------
-function QuoteFiltersBar() {
+// hidePeriod / hideSort: la vista detallada agrupa por antigüedad y ordena por
+// su cuenta, así que esos dos controles ahí sobran y confundirían.
+function QuoteFiltersBar({ hidePeriod, hideSort } = {}) {
   const { quoteFilters, setQuoteFilters, users, roleKey, currentUserId } = useApp();
   const [moreOpen, setMoreOpen] = useS(false);
   const active = countActiveFilters(quoteFilters);
@@ -618,21 +620,21 @@ function QuoteFiltersBar() {
           value={quoteFilters.client}
           onChange={e=>setQuoteFilters(s=>({...s, client:e.target.value}))}/>
       </div>
-      <PopoverButton icon="calendar"
+      {!hidePeriod && <PopoverButton icon="calendar"
         label={periodOptions.find(p=>p.value===quoteFilters.period)?.label || 'Período'}
         value={quoteFilters.period}
         active={quoteFilters.period !== '30d'}
         onChange={(v)=>setQuoteFilters(s=>({...s, period:v}))}
         options={periodOptions}
-      />
-      <PopoverButton icon="arrow-down-wide-narrow"
+      />}
+      {!hideSort && <PopoverButton icon="arrow-down-wide-narrow"
         label={sortOptions.find(o=>o.value===(quoteFilters.sort||'recent'))?.label || 'Ordenar'}
         value={quoteFilters.sort || 'recent'}
         active={!!quoteFilters.sort && quoteFilters.sort !== 'recent'}
         onChange={(v)=>setQuoteFilters(s=>({...s, sort:v}))}
         onClear={()=>setQuoteFilters(s=>({...s, sort:'recent'}))}
         options={sortOptions}
-      />
+      />}
       <div className="w-px h-6 bg-line mx-1"/>
       <div className="relative">
         <button onClick={()=>setMoreOpen(o=>!o)}
@@ -705,6 +707,354 @@ function KanbanQuotes({ onOpen }) {
   );
 }
 
+// ---------- Vista detallada: una etapa a la vez, en lista ----------
+// Secundaria al tablero, no lo reemplaza. Existe porque con 600+ tarjetas en
+// "Presupuesto Enviado" la columna del tablero deja de servir para trabajar:
+// acá se ve una etapa sola, un renglón por negocio, agrupada por antigüedad y
+// con atajos para lo que hay que hacer hoy (seguimientos vencidos, etc.).
+//
+// Usa los mismos filtros que el tablero (vendedor, cliente, Más filtros) salvo
+// el período: la agrupación por antigüedad ya cumple esa función, y con el
+// período de 30 días del tablero quedarían afuera justo las que más atención
+// necesitan.
+const EDADES = [
+  { id: '0-15',  label: 'Últimos 15 días', hasta: 15 },
+  { id: '15-30', label: 'De 15 a 30 días', hasta: 30 },
+  { id: '30-60', label: 'De 30 a 60 días', hasta: 60 },
+  { id: '60+',   label: 'Más de 60 días',  hasta: Infinity },
+];
+const DIA_MS = 86400000;
+const DETALLE_ETAPA_KEY = 'crm_vista_detallada_etapa';
+const POR_GRUPO = 50;
+
+// Un renglón por negocio, con la misma regla que el tablero: un documento del
+// paquete se absorbe en el renglón del principal solo si está en su misma etapa.
+function armarFilas(lista) {
+  const principales = new Map();
+  for (const q of lista) if (q.paquete && q.paquete.principal === q.id) principales.set(q.id, q);
+  const miembros = new Map();
+  const filas = [];
+  for (const q of lista) {
+    const p = q.paquete;
+    const pr = p && p.principal !== q.id ? principales.get(p.principal) : null;
+    if (pr && pr.stage === q.stage) {
+      if (!miembros.has(pr.id)) miembros.set(pr.id, []);
+      miembros.get(pr.id).push(q);
+    } else {
+      filas.push(q);
+    }
+  }
+  const ahora = Date.now();
+  return filas.map(q => {
+    const docs = [q, ...(miembros.get(q.id) || [])];
+    // Un miembro que quedó en otra etapa que su principal se muestra suelto,
+    // igual que en el tablero: con su código y su monto, no los del paquete.
+    const p = q.paquete && q.paquete.principal === q.id ? q.paquete : null;
+    // Seguimiento: manda el del presupuesto; si no hay, el más próximo del grupo
+    const pres = docs.find(d => d.mailType === 'PRESUPUESTO' && d.followUpDate);
+    const fechas = docs.map(d => d.followUpDate).filter(Boolean).sort();
+    const followUp = q.stage === 'enviado' ? (pres?.followUpDate || fechas[0] || null) : null;
+    const seg = followUp ? Math.ceil((new Date(followUp) - ahora) / DIA_MS) : null;
+    // Fecha límite de armado: misma condición que la tarjeta del tablero
+    const sol = docs.find(d => d.mailType === 'SOLICITUD' && d.deadline && !d.linkedQuoteId
+      && !['enviado', 'aceptada', 'rechazada'].includes(d.stage));
+    const limite = sol ? Math.ceil((new Date(sol.deadline) - ahora) / DIA_MS) : null;
+    // Monto: lo comprado si ya hay nota de pedido; si no, lo cotizado
+    const nps = p?.notasPedido || [];
+    let montos;
+    if (nps.length && p.npTotales && Object.keys(p.npTotales).length) {
+      montos = Object.entries(p.npTotales).map(([cur, v]) => ({ v, cur }));
+    } else if (p?.presupuesto?.amount != null) {
+      montos = [{ v: p.presupuesto.amount, cur: p.presupuesto.currency }];
+    } else {
+      montos = q.monto != null ? [{ v: q.monto, cur: q.currency || 'USD' }] : [];
+    }
+    const etiquetas = p
+      ? [p.solicitud && { etq: 'SOL', code: p.solicitud.code },
+         p.presupuesto && { etq: 'PRES', code: p.presupuesto.code },
+         ...nps.map(n => ({ etq: 'NP', code: n.code }))].filter(Boolean)
+      : [{ etq: { SOLICITUD: 'SOL', PRESUPUESTO: 'PRES', NOTA_PEDIDO: 'NP' }[q.mailType] || 'COT', code: q.code }];
+    return {
+      q, etiquetas, montos, followUp, seg, limite,
+      edad: Math.max(0, Math.floor((ahora - new Date(q.ingreso)) / DIA_MS)),
+      notas: docs.reduce((s, d) => s + (d.notas || 0), 0),
+      adj:   docs.reduce((s, d) => s + (d.adj || 0), 0),
+      sinPresupuesto: q.mailType === 'SOLICITUD' && !q.paquete?.presupuesto,
+    };
+  });
+}
+
+const ATAJOS = [
+  { id: 'vencido',     label: 'Seguimiento vencido',       icon: 'alarm-clock',    test: f => f.seg != null && f.seg <= 0 },
+  { id: 'semana',      label: 'Vence en 7 días',           icon: 'calendar-clock', test: f => f.seg != null && f.seg > 0 && f.seg <= 7 },
+  { id: 'limite',      label: 'Fecha límite vencida',      icon: 'flag',           test: f => f.limite != null && f.limite <= 0 },
+  { id: 'prioritaria', label: 'Prioritarias',              icon: 'star',           test: f => f.q.priority === 'alta' },
+  { id: 'sinmarcar',   label: 'Sin semáforo',              icon: 'circle-dashed',  test: f => !f.q.priority },
+  { id: 'sinpres',     label: 'Solicitud sin presupuesto', icon: 'file-question',  test: f => f.sinPresupuesto },
+];
+
+const ORDENES = [
+  { value: 'seguimiento', label: 'Seguimiento más urgente', icon: 'alarm-clock' },
+  { value: 'monto',       label: 'Mayor monto',             icon: 'arrow-down-wide-narrow' },
+  { value: 'antiguas',    label: 'Más antiguas primero',    icon: 'history' },
+  { value: 'recientes',   label: 'Más recientes primero',   icon: 'clock' },
+];
+
+function ordenarFilas(filas, orden) {
+  const porEdad = (a, b) => b.edad - a.edad;
+  const nulo = v => (v == null ? Infinity : v);
+  const cmp = {
+    // Sin fecha de seguimiento van al final; entre iguales, la más vieja primero
+    seguimiento: (a, b) => (nulo(a.seg) - nulo(b.seg)) || (nulo(a.limite) - nulo(b.limite)) || porEdad(a, b),
+    // Dólares y pesos no se comparan entre sí: primero dólares, después pesos
+    monto: (a, b) => {
+      const ma = a.montos[0], mb = b.montos[0];
+      if (!ma || !mb) return ma ? -1 : mb ? 1 : porEdad(a, b);
+      if ((ma.cur === 'ARS') !== (mb.cur === 'ARS')) return ma.cur === 'ARS' ? 1 : -1;
+      return mb.v - ma.v;
+    },
+    antiguas:  porEdad,
+    recientes: (a, b) => a.edad - b.edad,
+  }[orden] || porEdad;
+  // Infinity - Infinity da NaN: se normaliza a 0 para que el sort no se rompa
+  return [...filas].sort((a, b) => cmp(a, b) || 0);
+}
+
+function totalesPorMoneda(filas) {
+  const t = {};
+  for (const f of filas) for (const m of f.montos) {
+    const cur = m.cur || 'USD';
+    t[cur] = (t[cur] || 0) + (m.v || 0);
+  }
+  return Object.entries(t).sort(([a], [b]) => (a === 'ARS') - (b === 'ARS'));
+}
+
+function CeldaSeguimiento({ f }) {
+  const { q } = f;
+  if (f.limite != null) {
+    const vencida = f.limite <= 0;
+    return (
+      <span className={cx('inline-flex items-center gap-1 text-[11.5px] font-semibold', vencida ? 'text-red-700' : f.limite <= 1 ? 'text-amber-600' : 'text-ink-500')}
+        title="Fecha límite para armar el presupuesto">
+        <Icon name="flag" size={12}/>{vencida ? `Límite vencido hace ${-f.limite}d` : `Límite en ${f.limite}d`}
+      </span>
+    );
+  }
+  if (f.seg != null) {
+    const vencido = f.seg <= 0;
+    return (
+      <span className={cx('inline-flex items-center gap-1 text-[11.5px] font-semibold', vencido ? 'text-amber-700' : f.seg <= 7 ? 'text-ink-700' : 'text-ink-400')}
+        title={`Seguimiento: ${fmtDate(f.followUp)}`}>
+        <Icon name="alarm-clock" size={12}/>
+        {vencido ? (f.seg === 0 ? 'Vence hoy' : `Vencido hace ${-f.seg}d`) : `En ${f.seg}d`}
+      </span>
+    );
+  }
+  if (q.stage === 'aceptada' && q.mailType === 'PRESUPUESTO' && !(q.npFlexxus || q.npCode)) {
+    return <span className="text-[11.5px] font-semibold text-amber-700">Sin nota de pedido</span>;
+  }
+  if (q.stage === 'rechazada' && q.rejectReason) {
+    return <span className="text-[11.5px] text-bad truncate block max-w-[180px]" title={q.rejectReason}>{q.rejectReason}</span>;
+  }
+  return <span className="text-[11.5px] text-ink-300">—</span>;
+}
+
+function FilaNegocio({ f, onOpen }) {
+  const { clients, allUsers } = useApp();
+  const { q } = f;
+  const cli = clients.find(c => c.code === q.client);
+  const sel = allUsers.find(u => u.id === q.seller);
+  const prio = prioridadDe(q.priority);
+  const nombre = cli?.name || q.clientName || q.emailSubject || 'Sin cliente asignado';
+  const lugar  = cli ? [cli.city, cli.prov].filter(Boolean).join(', ') : '';
+  return (
+    <tr onClick={() => onOpen(q.code)} className="cursor-pointer border-t border-line/70 hover:bg-brandSoft/30 transition-colors">
+      <td className="pl-3 pr-3 py-2.5 align-top">
+        <div className="flex gap-3">
+          <span className="w-1 self-stretch rounded-full shrink-0" style={{ background: prio ? prio.dot : 'transparent' }}
+            title={prio ? prio.label : 'Sin semáforo'}/>
+          <div className="min-w-0">
+            <div className="text-[13px] font-semibold text-ink-900 truncate max-w-[340px]" title={nombre}>{nombre}</div>
+            <div className="flex items-center gap-x-2 gap-y-0.5 flex-wrap mt-0.5">
+              {f.etiquetas.map(e => (
+                <span key={e.code} className="inline-flex items-baseline gap-1">
+                  <span className="text-[9.5px] font-semibold tracking-wide text-ink-400">{e.etq}</span>
+                  <span className="mono text-[11px] text-ink-600">{e.code}</span>
+                </span>
+              ))}
+              {q.revision?.nro > 1 && (
+                <span className="text-[10px] font-semibold px-1.5 rounded-full bg-surface text-ink-600 border border-line">R{q.revision.nro}</span>
+              )}
+              {lugar && <span className="text-[11px] text-ink-400 truncate">· {lugar}</span>}
+            </div>
+          </div>
+        </div>
+      </td>
+      <td className="px-3 py-2.5 align-top whitespace-nowrap">
+        {sel ? (
+          <div className="flex items-center gap-1.5">
+            <Avatar name={sel.name} size={20}/>
+            <span className="text-[12px] text-ink-700">{sel.name.split(' ')[0]}</span>
+          </div>
+        ) : <span className="text-[12px] text-ink-400">Sin asignar</span>}
+      </td>
+      <td className="px-3 py-2.5 align-top text-right whitespace-nowrap">
+        {f.montos.length ? f.montos.map((m, i) => (
+          <div key={m.cur} className={cx('mono', i === 0 ? 'text-[13px] font-bold text-ink-900' : 'text-[11px] font-semibold text-ink-600')}>
+            {fmtMoney(m.v, m.cur)}
+          </div>
+        )) : <span className="text-[12px] text-ink-300">—</span>}
+      </td>
+      <td className="px-3 py-2.5 align-top whitespace-nowrap">
+        <div className="text-[12px] font-semibold text-ink-700">{f.edad}d</div>
+        <div className="text-[11px] text-ink-400">{fmtDate(q.ingreso)}</div>
+      </td>
+      <td className="px-3 py-2.5 align-top whitespace-nowrap"><CeldaSeguimiento f={f}/></td>
+      <td className="pl-3 pr-4 py-2.5 align-top whitespace-nowrap text-[11px] text-ink-500">
+        <div className="flex items-center justify-end gap-2">
+          {f.adj > 0 && <span className="inline-flex items-center gap-0.5"><Icon name="paperclip" size={11}/>{f.adj}</span>}
+          {f.notas > 0 && <span className="inline-flex items-center gap-0.5"><Icon name="message-square" size={11}/>{f.notas}</span>}
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+function QuotesByStage({ onOpen }) {
+  const { quotes, clients, quoteFilters, openModal } = useApp();
+  const [etapa, setEtapaRaw] = useS(() => { try { return localStorage.getItem(DETALLE_ETAPA_KEY) || 'enviado'; } catch { return 'enviado'; } });
+  const [atajo, setAtajo]   = useS('');
+  const [orden, setOrden]   = useS('seguimiento');
+  const [plegados, setPlegados]   = useS({});
+  const [completos, setCompletos] = useS({});
+  const setEtapa = (id) => {
+    setEtapaRaw(id); setAtajo(''); setCompletos({});
+    try { localStorage.setItem(DETALLE_ETAPA_KEY, id); } catch {}
+  };
+
+  const filas = React.useMemo(
+    () => armarFilas(applyQuoteFilters(quotes, { ...quoteFilters, period: '' }, clients)),
+    [quotes, quoteFilters, clients]
+  );
+  const porEtapa = {};
+  for (const f of filas) (porEtapa[f.q.stage] = porEtapa[f.q.stage] || []).push(f);
+
+  const etapas = STAGES_F1;
+  const actual = etapas.find(s => s.id === etapa) || etapas[0];
+  const deEtapa = porEtapa[actual?.id] || [];
+  const atajos = ATAJOS.map(a => ({ ...a, n: deEtapa.filter(a.test).length })).filter(a => a.n > 0 || a.id === atajo);
+  const def = ATAJOS.find(a => a.id === atajo);
+  const visibles = ordenarFilas(def ? deEtapa.filter(def.test) : deEtapa, orden);
+  const grupos = EDADES.map((g, i) => ({
+    ...g, filas: visibles.filter(f => f.edad >= (i ? EDADES[i - 1].hasta : 0) && f.edad < g.hasta),
+  }));
+  const totales = totalesPorMoneda(visibles);
+
+  return (
+    <div className="flex flex-col h-[calc(100vh-56px)]">
+      <div className="px-6 pt-5 pb-4 flex items-end justify-between gap-4 flex-wrap border-b border-line bg-white page-head">
+        <div>
+          <div className="page-head-sub">Cotizaciones · una etapa a la vez, todas las fechas</div>
+          <h2 className="page-head-title mt-0.5">Vista detallada</h2>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          <QuoteFiltersBar hidePeriod hideSort/>
+          <button className="btn-primary" onClick={() => openModal('newQuote')}><Icon name="plus" size={14}/>Nuevo</button>
+        </div>
+      </div>
+
+      {/* Etapas */}
+      <div className="bg-white border-b border-line px-6 overflow-x-auto scroll-thin">
+        <div className="flex gap-1 min-w-max">
+          {etapas.map(st => {
+            const n = (porEtapa[st.id] || []).length;
+            const on = st.id === actual?.id;
+            return (
+              <button key={st.id} onClick={() => setEtapa(st.id)}
+                className={cx('flex items-center gap-2 px-3 py-2.5 text-[12.5px] border-b-2 -mb-px transition-colors whitespace-nowrap',
+                  on ? 'border-brand text-navy-900 font-semibold' : 'border-transparent text-ink-500 hover:text-ink-900')}>
+                <StageDot tone={st.tone}/>{st.label}
+                <span className={cx('text-[11px] font-semibold rounded-md px-1.5 py-0.5 border',
+                  on ? 'bg-brandSoft text-brand border-brand/25' : 'bg-surface text-ink-500 border-line')}>{n}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="flex-1 min-h-0 overflow-y-auto scroll-thin bg-surface px-6 py-4">
+        {/* Atajos + orden */}
+        <div className="flex items-center gap-2 flex-wrap mb-3">
+          {atajos.map(a => (
+            <button key={a.id} onClick={() => setAtajo(atajo === a.id ? '' : a.id)}
+              className={cx('inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] border transition-colors',
+                atajo === a.id ? 'bg-navy-900 text-white border-navy-900' : 'bg-white text-ink-700 border-line hover:border-brand/40')}>
+              <Icon name={a.icon} size={12}/>{a.label}
+              <span className={cx('text-[11px] font-semibold', atajo === a.id ? 'text-white/80' : 'text-ink-400')}>{a.n}</span>
+            </button>
+          ))}
+          <div className="ml-auto flex items-center gap-3 flex-wrap">
+            <span className="text-[12px] text-ink-500">
+              {visibles.length} {visibles.length === 1 ? 'negocio' : 'negocios'}
+              {totales.map(([cur, v]) => <span key={cur} className="mono font-semibold text-ink-700"> · {fmtMoney(v, cur)}</span>)}
+            </span>
+            <PopoverButton icon="arrow-down-wide-narrow"
+              label={ORDENES.find(o => o.value === orden)?.label}
+              value={orden} active={orden !== 'seguimiento'}
+              onChange={setOrden} onClear={() => setOrden('seguimiento')}
+              options={ORDENES}/>
+          </div>
+        </div>
+
+        {visibles.length === 0 ? (
+          <div className="bg-white border border-line rounded-xl p-2"><EmptyCol/></div>
+        ) : grupos.filter(g => g.filas.length).map(g => {
+          const plegado = !!plegados[g.id];
+          const mostradas = completos[g.id] ? g.filas : g.filas.slice(0, POR_GRUPO);
+          return (
+            <div key={g.id} className="bg-white border border-line rounded-xl shadow-xs mb-3 overflow-hidden">
+              <button onClick={() => setPlegados(s => ({ ...s, [g.id]: !plegado }))}
+                className="w-full flex items-center gap-2 flex-wrap px-4 py-2.5 text-left hover:bg-surface/60">
+                <Icon name={plegado ? 'chevron-right' : 'chevron-down'} size={14} className="text-ink-400"/>
+                <span className="text-[12.5px] font-semibold text-ink-900">{g.label}</span>
+                <span className="text-[11px] font-semibold text-ink-500 bg-surface border border-line rounded-md px-1.5 py-0.5">{g.filas.length}</span>
+                <span className="ml-auto text-[11.5px] text-ink-500">
+                  {totalesPorMoneda(g.filas).map(([cur, v], i) => <span key={cur} className="mono">{i ? ' · ' : ''}{fmtMoney(v, cur)}</span>)}
+                </span>
+              </button>
+              {!plegado && (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[860px] border-collapse">
+                    <thead>
+                      <tr className="text-[10.5px] uppercase tracking-wide text-ink-400 text-left">
+                        <th className="pl-7 pr-3 py-1.5 font-semibold">Cliente y documentos</th>
+                        <th className="px-3 py-1.5 font-semibold">Vendedor</th>
+                        <th className="px-3 py-1.5 font-semibold text-right">Monto</th>
+                        <th className="px-3 py-1.5 font-semibold">Antigüedad</th>
+                        <th className="px-3 py-1.5 font-semibold">Seguimiento</th>
+                        <th className="pl-3 pr-4 py-1.5"/>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {mostradas.map(f => <FilaNegocio key={f.q.id} f={f} onOpen={onOpen}/>)}
+                    </tbody>
+                  </table>
+                  {g.filas.length > mostradas.length && (
+                    <button onClick={() => setCompletos(s => ({ ...s, [g.id]: true }))}
+                      className="w-full py-2 text-[12px] font-semibold text-brand border-t border-line hover:bg-brandSoft/30">
+                      Mostrar {g.filas.length - mostradas.length} más
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function KanbanOrders({ onOpen, logisticsMode }) {
   const { orders, clients, orderFilters, openModal } = useApp();
   const filtered = applyOrderFilters(orders, orderFilters, clients);
@@ -728,4 +1078,4 @@ function KanbanOrders({ onOpen, logisticsMode }) {
   );
 }
 
-Object.assign(window, { KanbanQuotes, KanbanOrders, StageDot, STAGE_DOT });
+Object.assign(window, { KanbanQuotes, QuotesByStage, KanbanOrders, StageDot, STAGE_DOT });

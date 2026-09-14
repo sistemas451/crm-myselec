@@ -16,6 +16,29 @@ function isDuplicateEmailError(err) {
   return err?.code === 'P2002' && (err?.meta?.target || []).includes('emailMessageId');
 }
 
+// El Message-ID se guarda tal como lo da mailparser, con los signos <…>, pero el
+// In-Reply-To se limpia. Compararlos directo no coincidía nunca, así que el
+// vínculo por hilo de mail no funcionó hasta el 14/09/2026 (195 presupuestos
+// quedaron sueltos de su solicitud). Se busca con y sin <>, sin tocar lo que ya
+// está guardado: cambiar el formato guardado rompería la deduplicación de mails.
+const mismoMensaje = id => ({ in: [id, `<${id}>`] });
+
+// Busca la solicitud a cuyo mail responde un presupuesto. Si el presupuesto ya
+// tiene cliente y la solicitud es de otro, no se vinculan: pasa cuando el
+// vendedor responde en el hilo con un presupuesto a otro cliente (por ejemplo al
+// depósito propio), y un vínculo entre clientes distintos arma un paquete falso.
+async function solicitudDelHilo(inReplyTo, clientId) {
+  if (!inReplyTo) return null;
+  const sol = await prisma.quote.findFirst({
+    where: { emailMessageId: mismoMensaje(inReplyTo), mailType: 'SOLICITUD', linkedQuoteId: null, anuladaAt: null },
+  });
+  if (sol && clientId && sol.clientId && sol.clientId !== clientId) {
+    console.log(`   ⚠️  Hilo email → ${sol.code}, pero es de otro cliente — no se vincula`);
+    return null;
+  }
+  return sol;
+}
+
 // ── Catálogo de artículos (cacheado en memoria por proceso) ──────────────────
 let _articleCatalog = null;
 async function getArticleCatalog() {
@@ -1254,12 +1277,8 @@ async function processSentMail(parsed, mailData, imap) {
     let solicitudTarget = null;
 
     // 1. Por hilo de email (In-Reply-To → el mail del cliente = la SOLICITUD)
-    if (inReplyTo) {
-      solicitudTarget = await prisma.quote.findFirst({
-        where: { emailMessageId: inReplyTo, mailType: 'SOLICITUD', linkedQuoteId: null },
-      });
-      if (solicitudTarget) console.log(`   🔗 Hilo email → SOLICITUD: ${solicitudTarget.code}`);
-    }
+    solicitudTarget = await solicitudDelHilo(inReplyTo, client?.id);
+    if (solicitudTarget) console.log(`   🔗 Hilo email → SOLICITUD: ${solicitudTarget.code}`);
 
     // 2. Fallback: cliente con SOLICITUD abierta (últimos 90 días)
     if (!solicitudTarget && client) {
@@ -1466,6 +1485,14 @@ async function processEmail(mailData, imap) {
 
     // ── Mejora 2: respuesta del cliente a un PRESUPUESTO/OC → crear Nota ────
     // En lugar de ignorar silenciosamente, registramos el contenido como actividad.
+    //
+    // OJO: esta búsqueda compara el In-Reply-To limpio contra el Message-ID con
+    // <…>, así que hoy nunca encuentra nada (ver mismoMensaje arriba). Se dejó así
+    // A PROPÓSITO el 14/09/2026: medido en producción, varias plataformas de
+    // compras mandan cada pedido nuevo como respuesta al anterior ("Solicitud
+    // N° 12517" responde a la 12516) y son negocios reales con presupuesto
+    // propio. Si esto empezara a coincidir, esos pedidos quedarían escondidos
+    // como una nota. Antes de arreglarlo hay que distinguir respuesta de pedido.
     if (inReplyTo) {
       const replyTarget = await prisma.quote.findFirst({
         where: { emailMessageId: inReplyTo, mailType: { in: ['PRESUPUESTO', 'OC', 'SOLICITUD'] } },
@@ -1859,12 +1886,8 @@ async function processEmail(mailData, imap) {
         let solicitudTarget = null;
 
         // 1. Match por hilo de email (In-Reply-To → emailMessageId) ← más fuerte
-        if (inReplyTo) {
-          solicitudTarget = await prisma.quote.findFirst({
-            where: { emailMessageId: inReplyTo, mailType: 'SOLICITUD', linkedQuoteId: null },
-          });
-          if (solicitudTarget) console.log(`   🔗 Match por hilo email: ${solicitudTarget.code}`);
-        }
+        solicitudTarget = await solicitudDelHilo(inReplyTo, client?.id);
+        if (solicitudTarget) console.log(`   🔗 Match por hilo email: ${solicitudTarget.code}`);
 
         // 2. Fallback: mismo cliente, solicitud abierta, últimos 90 días
         if (!solicitudTarget && client) {
@@ -2199,4 +2222,4 @@ async function resyncQuoteEmail(quoteId) {
   });
 }
 
-module.exports = { syncMails, syncAccount, listRecentMails, resyncQuoteEmail, heredarVendedorDeSolicitud, buscarPresupuestoDuplicado, buscarPresupuestoARevisar, buscarNotaPedidoDuplicada, absorberEnCotizacion };
+module.exports = { syncMails, syncAccount, listRecentMails, resyncQuoteEmail, heredarVendedorDeSolicitud, buscarPresupuestoDuplicado, buscarPresupuestoARevisar, buscarNotaPedidoDuplicada, absorberEnCotizacion, solicitudDelHilo };

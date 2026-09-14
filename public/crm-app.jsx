@@ -235,6 +235,7 @@ function App() {
           <div key={screen} className="animate-fade-in">
           {screen === 'dashboard'  && <Dashboard setScreen={setScreen}/>}
           {screen === 'quotes'     && <KanbanQuotes onOpen={(c)=>openDetail(c,'quote')}/>}
+          {screen === 'quotes-detail' && <QuotesByStage onOpen={(c)=>openDetail(c,'quote')}/>}
           {screen === 'orders'     && <KanbanOrders onOpen={(c,k)=>openDetail(c,k||'order')}/>}
           {screen === 'my-quotes'  && <MySalesView user={user} initialTab="quotes" onOpen={openDetail}/>}
           {screen === 'my-orders'  && <MySalesView user={user} initialTab="orders" onOpen={openDetail}/>}
@@ -1014,6 +1015,7 @@ function Sidebar({ role, screen, setScreen, user, onProfileOpen, collapsed, onTo
   const navAdmin = [
     { id:'dashboard', label:'Dashboard',             icon:'layout-dashboard' },
     { id:'quotes',    label:'Cotizaciones',          icon:'clipboard-list', sub:'Solicitud · Presupuesto · NP' },
+    { id:'quotes-detail', label:'Vista detallada',   icon:'list',           sub:'Por etapa, en lista', child:true },
     { id:'clients',   label:'Clientes',              icon:'building-2' },
     { id:'comparativa', label:'Comparativa',           icon:'git-compare', sub:'Pres. vs NP' },
     { id:'team',        label:'Equipo',                icon:'users' },
@@ -1023,6 +1025,7 @@ function Sidebar({ role, screen, setScreen, user, onProfileOpen, collapsed, onTo
   const navSeller = [
     { id:'my-quotes',   label:'Mis Cotizaciones',      icon:'clipboard-list' },
     { id:'quotes',      label:'Pipeline Cotizaciones', icon:'layout',     sub:'Kanban Fase 1' },
+    { id:'quotes-detail', label:'Vista detallada',     icon:'list',       sub:'Por etapa, en lista', child:true },
     { id:'clients',     label:'Clientes',              icon:'building-2', sub:'solo lectura' },
     { id:'comparativa', label:'Comparativa',           icon:'git-compare', sub:'Pres. vs NP' },
     { id:'feedback',    label:'Foro',                  icon:'message-circle', sub:'Soporte interno' },
@@ -1078,7 +1081,7 @@ function Sidebar({ role, screen, setScreen, user, onProfileOpen, collapsed, onTo
               className={cx(
                 'w-full flex items-center rounded-lg text-[13px] relative',
                 'transition-all duration-200 active:scale-[0.97]',
-                collapsed ? 'justify-center px-0 py-2.5' : 'gap-3 px-3 py-[9px] text-left',
+                collapsed ? 'justify-center px-0 py-2.5' : cx('gap-3 py-[9px] text-left', n.child ? 'pl-7 pr-3' : 'px-3'),
                 isActive
                   ? 'bg-white/[0.12] text-white font-medium'
                   : 'text-white/65 hover:bg-white/[0.06] hover:text-white/90'
