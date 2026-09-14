@@ -991,6 +991,7 @@ function QuoteDetail({ code, onClose, canReassign }) {
   const stg = STAGES_F1.find(s=>s.id===q.stage);
   const isSolicitud = q.mailType === 'SOLICITUD' || (q.source === 'EMAIL' && !q.mailType);
   const isOC = q.mailType === 'OC';
+  const isNotaPedido = q.mailType === 'NOTA_PEDIDO';
   const isManual = q.source !== 'EMAIL';
   // emailMessageId solo lo tienen las que entraron por correo. Las cargadas a
   // mano guardan el pedido del cliente en los mismos campos, pero se muestran
@@ -1412,7 +1413,7 @@ function QuoteDetail({ code, onClose, canReassign }) {
           <Badge tone={stg?.tone || 'gray'} dot>{stg?.label || q.stage}</Badge>
           {q.mailType && (
             <Badge tone={q.mailType==='SOLICITUD'?'sky':q.mailType==='PRESUPUESTO'?'blue':'purple'}>
-              {q.mailType}
+              <span className="whitespace-nowrap">{{ SOLICITUD: 'Solicitud', PRESUPUESTO: 'Presupuesto', NOTA_PEDIDO: 'Nota de Pedido' }[q.mailType] || q.mailType}</span>
             </Badge>
           )}
           {q.flexxus && (
@@ -1514,12 +1515,16 @@ function QuoteDetail({ code, onClose, canReassign }) {
             onChange={e => handleUploadFiles(e.target.files)}/>
           <div className="flex-1"/>
           {q.mailType !== 'SOLICITUD' && (<>
-            <button className="btn-ghost text-bad border-red-200 hover:bg-red-50" onClick={() => setRejectPending(true)}>
-              Marcar rechazada
-            </button>
-            <button className="btn-accent" onClick={() => handleQuoteStage('aceptada')}>
-              <Icon name="check" size={14}/>Marcar aceptada
-            </button>
+            {q.stage !== 'rechazada' && (
+              <button className="btn-ghost text-bad border-red-200 hover:bg-red-50" onClick={() => setRejectPending(true)}>
+                Marcar rechazada
+              </button>
+            )}
+            {q.stage !== 'aceptada' && (
+              <button className="btn-accent" onClick={() => handleQuoteStage('aceptada')}>
+                <Icon name="check" size={14}/>Marcar aceptada
+              </button>
+            )}
           </>)}
         </>
       }
@@ -1901,7 +1906,7 @@ function QuoteDetail({ code, onClose, canReassign }) {
               </span>
             )
           }/>}
-          {!isSolicitud && <Field label="Cod. Flexxus PR" mono value={q.flexxus || '—'}/>}
+          {!isSolicitud && <Field label={isNotaPedido ? 'Cod. Flexxus NP' : 'Cod. Flexxus PR'} mono value={q.flexxus || '—'}/>}
           {!isSolicitud && <Field label="Zona de entrega" value={cli?.zone || '—'}/>}
           {!esDeMail && isSolicitud && <Field label="Origen" value={SOURCE_LABELS[q.source] || 'Carga manual'}/>}
           <Field label="Contacto">
@@ -2033,6 +2038,110 @@ function QuoteDetail({ code, onClose, canReassign }) {
         // Cards: siempre muestran el vínculo primario (con botón vincular si falta),
         // la NP solo aparece cuando existe. La OC salió del paquete: era un espejo
         // vacío y confundía más de lo que ayudaba.
+        // ── Paquete: todos los documentos del negocio, desde cualquiera de ellos ──
+        // La tarjeta del tablero abre el documento más avanzado (la NP), y esa ficha
+        // no tenía cómo llegar a su presupuesto ni a su solicitud: la solicitud está
+        // vinculada al presupuesto, no a la NP, así que ni venía en el detalle
+        // (Diego, 14/09/2026). El paquete ya viene armado en la lista con los
+        // códigos de todos, y con eso alcanza para listar y navegar.
+        if (q.paquete) {
+          const p = q.paquete;
+          const docs = [
+            p.solicitud   && { tipo: 'Solicitud',      icon: 'inbox',          bg: 'bg-sky-50 text-sky-600',       code: p.solicitud.code },
+            p.presupuesto && { tipo: 'Presupuesto',    icon: 'file-text',      bg: 'bg-blue-50 text-blue-600',     code: p.presupuesto.code, amount: p.presupuesto.amount, currency: p.presupuesto.currency },
+            ...(p.notasPedido || []).map(n => ({ tipo: 'Nota de Pedido', icon: 'clipboard-list', bg: 'bg-orange-50 text-orange-600', code: n.code, amount: n.amount, currency: n.currency })),
+          ].filter(Boolean);
+          // Vínculo directo con esta ficha: es el único que se puede desvincular desde acá
+          const directos = [linkedQuotes.linkedQuote, ...(linkedQuotes.linkedBy || [])].filter(Boolean);
+          const faltaSolicitud = q.mailType === 'PRESUPUESTO' && !p.solicitud;
+          return (
+            <div className="mx-6 mb-3 space-y-2">
+              <div className="bg-white border border-line rounded-xl overflow-hidden">
+                <div className="px-4 pt-3 pb-1.5 text-[11px] uppercase tracking-wider font-semibold text-ink-500">
+                  Documentos del negocio
+                </div>
+                {docs.map(d => {
+                  const doc  = quotes.find(x => x.code === d.code);
+                  const esta = d.code === q.code;
+                  const stgD = doc && STAGES_F1.find(s => s.id === doc.stage);
+                  const directo = directos.find(x => x.code === d.code && ['SOLICITUD', 'PRESUPUESTO'].includes(x.mailType));
+                  return (
+                    <div key={d.code} className={cx('px-4 py-2.5 flex items-center gap-3 border-t border-line/70', esta && 'bg-brandSoft/40')}>
+                      <div className={cx('w-8 h-8 rounded-lg flex items-center justify-center shrink-0', d.bg)}>
+                        <Icon name={d.icon} size={15}/>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[10.5px] uppercase tracking-wider font-semibold text-ink-400">{d.tipo}</div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="mono text-[13px] font-semibold text-ink-900">{d.code}</span>
+                          {doc?.flexxus && <Badge tone="slate"><span className="mono">{doc.flexxus}</span></Badge>}
+                          {stgD && <Badge tone={stgD.tone} dot>{stgD.label}</Badge>}
+                          {d.amount != null && <span className="text-[12px] mono text-ink-500">{fmtMoney(d.amount, d.currency || 'USD', 2)}</span>}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {esta ? (
+                          <span className="text-[11.5px] font-semibold text-brand px-2">Estás acá</span>
+                        ) : doc ? (
+                          // Reemplaza la ficha en vez de apilarla: ir y volver entre los
+                          // documentos del negocio dejaba varias fichas una arriba de otra.
+                          <button className="btn-ghost text-[12px] py-1 px-2.5"
+                            onClick={() => { onClose(); setTimeout(() => openModal('quoteDetail', { code: d.code }), 80); }}>
+                            Ver <Icon name="arrow-right" size={11}/>
+                          </button>
+                        ) : (
+                          // De otro vendedor: no está en la lista de quien mira, y la ficha no abriría
+                          <span className="text-[11px] text-ink-400 px-2" title="Este documento no está en tu lista">Sin acceso</span>
+                        )}
+                        {directo && (
+                          <button onClick={() => setUnlinkTarget(directo)} className="w-7 h-7 rounded-lg hover:bg-red-50 text-ink-400 hover:text-bad flex items-center justify-center" title="Desvincular">
+                            <Icon name="x" size={12}/>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {faltaSolicitud && (
+                <div className="px-4 py-3 bg-white border border-line rounded-xl flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-sky-50 text-sky-600">
+                    <Icon name="inbox" size={15}/>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[11px] uppercase tracking-wider font-semibold text-ink-500 mb-0.5">Solicitud origen</div>
+                    <div className="text-[12px] text-ink-400">Sin vincular</div>
+                  </div>
+                  <div className="shrink-0">
+                    <button className="btn-ghost text-[12px] py-1 px-2.5" onClick={() => setLinkDropOpen(true)}>
+                      <Icon name="link" size={13}/>Vincular
+                    </button>
+                    {linkDropOpen && (
+                      <LinkQuotePicker
+                        onClose={() => setLinkDropOpen(false)}
+                        candidates={quotes
+                          .filter(x => x.id !== q.id && x.mailType === 'SOLICITUD' && !x.linkedQuoteId)
+                          .sort((a, b) => {
+                            const am = a.client && a.client === q.client ? 0 : 1;
+                            const bm = b.client && b.client === q.client ? 0 : 1;
+                            return am !== bm ? am - bm : new Date(b.ingreso) - new Date(a.ingreso);
+                          })}
+                        title="Vincular solicitud origen"
+                        subtitle={`${q.code} · ${q.clientName || 'sin cliente'}`}
+                        emptyText="No hay solicitudes sin vincular"
+                        clientCode={q.client}
+                        clientName={q.clientName}
+                        onConfirm={handleLinkQuote}
+                        saving={linkSaving}
+                      />
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        }
+
         const vcards = [];
         if (q.mailType === 'PRESUPUESTO') {
           vcards.push({ label:'Solicitud origen',      icon:'inbox',          bg:'bg-sky-50 text-sky-600',       data: solicitud   || null, modal:'quoteDetail', vincularTarget:'SOLICITUD'   });
@@ -2124,7 +2233,9 @@ function QuoteDetail({ code, onClose, canReassign }) {
           <div className="px-4 py-3 bg-surface border border-line rounded-xl flex items-start gap-3">
             <Icon name="mail" size={15} className="mt-0.5 text-ink-500 shrink-0"/>
             <div className="min-w-0 flex-1">
-              <div className="text-[11.5px] font-semibold text-ink-700 mb-0.5">Solicitud recibida por mail</div>
+              {/* Este bloque solo sale en presupuestos y notas de pedido (las solicitudes
+                  tienen el suyo): decía "Solicitud recibida" en todos los casos. */}
+              <div className="text-[11.5px] font-semibold text-ink-700 mb-0.5">{isNotaPedido ? 'Mail de la nota de pedido' : 'Mail del presupuesto'}</div>
               <div className="text-[12.5px] text-ink-900 truncate"><span className="text-ink-500">Asunto:</span> {q.emailSubject}</div>
               <div className="text-[12px] text-ink-500 mt-0.5"><span>De:</span> {q.emailFrom}</div>
               {detailEmailBody && (
@@ -2285,7 +2396,7 @@ function QuoteDetail({ code, onClose, canReassign }) {
           {detailItems.length > 0 ? (
             <div className="grid grid-cols-3 gap-5">
               <div className="col-span-2 bg-white border border-line rounded-xl p-5">
-                <div className="text-sm font-semibold mb-3 text-ink-900">{q.flexxus ? 'Presupuesto Flexxus' : 'Presupuesto'}</div>
+                <div className="text-sm font-semibold mb-3 text-ink-900">{isNotaPedido ? (q.flexxus ? 'Nota de Pedido Flexxus' : 'Nota de Pedido') : (q.flexxus ? 'Presupuesto Flexxus' : 'Presupuesto')}</div>
                 <table className="w-full text-[12.5px]">
                   <thead><tr className="text-left text-ink-500">
                     <th className="font-semibold pb-2">SKU</th>
@@ -2361,7 +2472,7 @@ function QuoteDetail({ code, onClose, canReassign }) {
                   <div className="text-[11px] uppercase tracking-wider text-ink-500 font-semibold mb-2">Resumen</div>
                   <ul className="text-[12.5px] space-y-1.5">
                     <li className="flex justify-between"><span className="text-ink-500">Cliente</span><span className="font-medium">{cli?.name || '—'}</span></li>
-                    {q.flexxus && <li className="flex justify-between"><span className="text-ink-500">Pres. Flexxus</span><span className="mono">{q.flexxus}</span></li>}
+                    {q.flexxus && <li className="flex justify-between"><span className="text-ink-500">{isNotaPedido ? 'NP Flexxus' : 'Pres. Flexxus'}</span><span className="mono">{q.flexxus}</span></li>}
                     {priceBreakdown?.subtotalNeto != null && (
                       <li className="flex justify-between"><span className="text-ink-500">Subtotal neto</span><span className="mono">{fmtMoney(priceBreakdown.subtotalNeto, q.currency, 2)}</span></li>
                     )}

@@ -151,8 +151,10 @@ function QuoteCard({ q, onOpen, compact }) {
 //
 // A propósito sin colores propios: el color de la tarjeta ya lo usa el semáforo
 // de seguimiento, y meter un segundo código de color acá los haría competir.
-function PaqueteCard({ q, paquete, onOpen }) {
-  const { clients, allUsers } = useApp();
+// onOpenDoc: tocar un renglón abre ESE documento. Tocar el resto de la tarjeta
+// abre el principal (la NP), como siempre.
+function PaqueteCard({ q, paquete, onOpen, onOpenDoc }) {
+  const { clients, allUsers, quotes } = useApp();
   const cli = clients.find(c => c.code === q.client);
   const sel = allUsers.find(u => u.id === q.seller);
   const prio = prioridadDe(q.priority);
@@ -191,8 +193,14 @@ function PaqueteCard({ q, paquete, onOpen }) {
       {displaySub && <div className="text-[11px] text-ink-500 truncate">{displaySub}</div>}
 
       <div className="mt-2.5 pt-2 border-t border-line/70 space-y-1">
-        {filas.map(f => (
-          <div key={f.etq} className="flex items-baseline gap-2" title={f.titulo || ''}>
+        {filas.map(f => {
+          // Solo si el documento está en la lista de quien mira (un vendedor no ve los ajenos)
+          const abrible = onOpenDoc && !f.montos && quotes.some(x => x.code === f.code);
+          return (
+          <div key={f.etq}
+            className={cx('flex items-baseline gap-2', abrible && 'rounded -mx-1 px-1 hover:bg-brandSoft/60 cursor-pointer')}
+            title={abrible ? `Abrir ${f.code}` : (f.titulo || '')}
+            onClick={abrible ? (e) => { e.stopPropagation(); onOpenDoc(f.code); } : undefined}>
             <span className="w-8 shrink-0 text-[9.5px] font-semibold tracking-wide text-ink-400">{f.etq}</span>
             <span className={cx('text-[11px] truncate', nps.length > 1 && f.etq === 'NP' ? '' : 'mono', f.fuerte ? 'text-navy-900 font-semibold' : 'text-ink-600')}>{f.code}</span>
             {f.monto != null && (
@@ -210,7 +218,8 @@ function PaqueteCard({ q, paquete, onOpen }) {
               </span>
             )}
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {sel && (
@@ -451,7 +460,7 @@ function KanbanBoard({ stages, items, kind, onOpen, title, subtitle, actions, lo
                               justDropped === it.code && 'card-drop-in'
                             )}>
                             {enPaquete
-                              ? <PaqueteCard q={it} paquete={it.paquete} onOpen={() => onOpen(it.code)}/>
+                              ? <PaqueteCard q={it} paquete={it.paquete} onOpen={() => onOpen(it.code)} onOpenDoc={onOpen}/>
                               : <QuoteCard q={it} onOpen={() => onOpen(it.code)}/>
                             }
                           </div>
