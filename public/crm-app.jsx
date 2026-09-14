@@ -1390,10 +1390,8 @@ function Dashboard({ setScreen }) {
   };
 
   const kpis = [
-    { label: 'Cotizaciones activas',  value: kv(kpisData?.cotizacionesActivas), sub: 'F1 + NP en curso' },
+    { label: 'Cotizaciones activas',  value: kv(kpisData?.cotizacionesActivas), sub: 'sin cerrar' },
     { label: 'Presupuestos enviados', value: kv(kpisData?.presupuestosEnviados) },
-    { label: 'NP en curso',           value: kv(kpisData?.npEnCurso) },
-    { label: 'Entregas este mes',     value: kv(kpisData?.entregasEsteMes) },
     { label: 'Monto cotizado',        value: kMoney(kpisData?.montoTotalUSD, kpisData?.montoTotalARS), sub: 'presupuestos' },
     { label: 'Monto confirmado',      value: kMoney(kpisData?.montoConfirmadoUSD, kpisData?.montoConfirmadoARS), sub: 'notas de pedido', highlight: true },
     { label: 'Tasa de conversión',    value: kpisLoading ? '...' : (kpisData?.tasaConversion != null ? `${Number(kpisData.tasaConversion).toFixed(0)}%` : '—') },
@@ -1554,7 +1552,7 @@ function Dashboard({ setScreen }) {
 
         {/* ── Semáforo de seguimiento ─────────────────────────────────────
              Lo que el equipo marcó a mano como que hay que empujar. No se
-             muestran las "Al día" ni las ya cerradas: no piden acción. */}
+             muestran las "Difícil de ganar" ni las ya cerradas: no piden acción. */}
         {(prioridadesLoading || prioridades.length > 0) && (
           <div className="bg-white rounded-xl border border-line shadow-card overflow-hidden">
             <div className="flex items-center gap-2 px-4 py-3 border-b border-line bg-surface">

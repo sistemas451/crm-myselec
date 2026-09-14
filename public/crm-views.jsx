@@ -2882,7 +2882,6 @@ function Config() {
   };
 
   const f1 = stagesData?.filter(s => s.phase === 'COTIZACION') || [];
-  const f2 = stagesData?.filter(s => s.phase === 'ORDEN_COMPRA') || [];
 
   const TonePicker = ({ value, onChange }) => (
     <div className="flex items-center gap-1">
@@ -3178,24 +3177,11 @@ function Config() {
           <div className="bg-white border border-line rounded-xl">
             {/* Phase selector header */}
             <div className="flex items-center justify-between px-5 py-3 border-b border-line">
-              <div className="flex items-center gap-1 bg-surface rounded-lg p-0.5">
-                <button
-                  onClick={() => setActivePhase('COTIZACION')}
-                  className={cx('px-3.5 py-1.5 rounded-md text-[12.5px] font-medium transition-all',
-                    activePhase === 'COTIZACION'
-                      ? 'bg-white text-ink-900 shadow-sm'
-                      : 'text-ink-500 hover:text-ink-700'
-                  )}
-                >Fase 1 · Cotizaciones</button>
-                <button
-                  onClick={() => setActivePhase('ORDEN_COMPRA')}
-                  className={cx('px-3.5 py-1.5 rounded-md text-[12.5px] font-medium transition-all',
-                    activePhase === 'ORDEN_COMPRA'
-                      ? 'bg-white text-ink-900 shadow-sm'
-                      : 'text-ink-500 hover:text-ink-700'
-                  )}
-                >Fase 2 · Notas de Pedido</button>
-              </div>
+              {/* Fase 2 ya no existe: las notas de pedido viven en el tablero de
+                  cotizaciones, dentro del paquete. Su pestaña se sacó porque además
+                  ofrecía como etapa de entrada de las NP etapas que ya no se ven:
+                  elegir cualquiera de esas escondía las notas de pedido nuevas. */}
+              <div className="text-[13px] font-semibold text-ink-900">Etapas del tablero</div>
               <button onClick={() => setNewStage({ label: '', tone: 'gray', phase: activePhase })}
                 className="btn-ghost text-[12px] flex items-center gap-1 text-brand">
                 <Icon name="plus" size={13}/> Agregar etapa
@@ -3204,21 +3190,13 @@ function Config() {
 
             {/* Active phase content */}
             <div className="p-5">
-              {activePhase === 'COTIZACION' ? (
-                <StageList stages={f1} phase="COTIZACION"
-                  entryKeys={[
-                    { key: 'default_stage_solicitud',              label: 'Solicitud' },
-                    { key: 'default_stage_solicitud_con_vendedor', label: 'Solicitud (con vendedor)' },
-                    { key: 'default_stage_presupuesto',            label: 'Presupuesto' },
-                  ]}
-                />
-              ) : (
-                <StageList stages={f2} phase="ORDEN_COMPRA"
-                  entryKeys={[
-                    { key: 'default_stage_nota_pedido', label: 'Nota de Pedido' },
-                  ]}
-                />
-              )}
+              <StageList stages={f1} phase="COTIZACION"
+                entryKeys={[
+                  { key: 'default_stage_solicitud',              label: 'Solicitud' },
+                  { key: 'default_stage_solicitud_con_vendedor', label: 'Solicitud (con vendedor)' },
+                  { key: 'default_stage_presupuesto',            label: 'Presupuesto' },
+                ]}
+              />
             </div>
           </div>
 

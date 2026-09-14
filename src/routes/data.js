@@ -105,18 +105,20 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     // contara, el mismo pedido figuraría dos veces en montos y en conversión.
     const VIVAS = { anuladaAt: null };
 
-    const [f1Active, sentQuotes, activeNPs, deliveredNPs] = await Promise.all([
-      prisma.quote.count({ where: { ...base, ...VIVAS, ...NO_PACKAGE_DUPES, ...F1_ONLY, stage: { notIn: ['aceptada', 'rechazada'] } } }),
-      prisma.quote.count({ where: { ...base, ...VIVAS, stage: 'enviado' } }),
-      prisma.quote.count({ where: { ...base, ...VIVAS, mailType: 'NOTA_PEDIDO', stage: { notIn: ['entregada'] } } }),
-      prisma.quote.count({ where: { ...base, ...VIVAS, mailType: 'NOTA_PEDIDO', stage: 'entregada' } }),
-    ]);
-    // "Total en el sistema" = todo lo activo, con el criterio de cierre de cada
-    // uno (F1: aceptada/rechazada · NP: entregada). Antes sumaba también las OC,
-    // que eran espejos de estas mismas NP — o sea que las contaba dos veces.
-    const totalEnSistema = f1Active + activeNPs;
-
     const PRESUPUESTO_ONLY = { OR: [{ mailType: 'PRESUPUESTO' }, { mailType: null }] };
+
+    // Con el paquete, la nota de pedido ya no tiene etapas propias: entra en
+    // "aceptada" y ahí queda. Por eso se sacaron "NP en curso" (daba siempre el
+    // total de NP) y "Entregas este mes" (daba siempre 0), y las NP dejaron de
+    // sumarse a las activas: una NP es un negocio ganado, no algo abierto.
+    const [f1Active, sentQuotes] = await Promise.all([
+      // Activas = sin cerrar. "No cotiza" también es un cierre.
+      prisma.quote.count({ where: { ...base, ...VIVAS, ...NO_PACKAGE_DUPES, ...F1_ONLY, stage: { notIn: ['aceptada', 'rechazada', 'no_cotiza'] } } }),
+      // Solo presupuestos: desde el paquete la solicitud se mueve junto con su
+      // presupuesto, y contar la etapa sin filtrar el tipo sumaba cada negocio dos veces.
+      prisma.quote.count({ where: { ...base, ...VIVAS, ...PRESUPUESTO_ONLY, stage: 'enviado' } }),
+    ]);
+    const totalEnSistema = f1Active;
 
     // "Monto cotizado" = solo Presupuestos (manuales o por mail). Antes sumaba
     // TODAS las cotizaciones con amount, incluidas las Notas de Pedido — lo que
@@ -174,10 +176,8 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     });
 
     res.json({
-      cotizacionesActivas:  totalEnSistema,   // panorama general: F1 + NP + OC activos
+      cotizacionesActivas:  totalEnSistema,   // sin cerrar: ni aceptada, ni rechazada, ni no cotiza
       presupuestosEnviados: sentQuotes,
-      npEnCurso:            activeNPs,
-      entregasEsteMes:      deliveredNPs,
       montoTotalUSD:        totalAmount._sum.amount    || 0,
       montoConfirmadoUSD:   montoConfirmado._sum.amount || 0,
       montoTotalARS:        totalAmountARS._sum.amount    || 0,
@@ -467,8 +467,8 @@ router.get('/alerts', authMiddleware, async (req, res) => {
 });
 
 // GET /data/priority — cotizaciones marcadas con el semáforo de seguimiento.
-// Solo las que piden acción ('alta' y 'media'); las 'baja' (Al día) ya están
-// controladas y no tienen por qué ocupar lugar en el dashboard. Tampoco entran
+// Solo las que hay que empujar ('alta' y 'media'); las 'baja' (difícil de ganar)
+// ya se evaluaron y no conviene perseguirlas, no ocupan lugar en el dashboard. Tampoco entran
 // las cerradas: si se aceptó o se rechazó, la marca ya no significa nada.
 // Acepta: ?sellerId=
 router.get('/priority', authMiddleware, async (req, res) => {

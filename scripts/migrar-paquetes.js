@@ -101,11 +101,14 @@ async function main() {
   const cambios = [];
   for (const [principalId, miembros] of grupos) {
     const tieneNP = miembros.some(m => m.mailType === 'NOTA_PEDIDO');
+    // "No cotiza" lo decidió una persona: no se arrastra (ver alinearPaquete).
+    const movibles = miembros.filter(m => m.stage !== 'no_cotiza');
+    if (movibles.length < 2) { alineados++; continue; }
     const destino = tieneNP
       ? 'aceptada'
-      : miembros.reduce((max, m) => (ORDEN.indexOf(m.stage) > ORDEN.indexOf(max) ? m.stage : max), miembros[0].stage);
+      : movibles.reduce((max, m) => (ORDEN.indexOf(m.stage) > ORDEN.indexOf(max) ? m.stage : max), movibles[0].stage);
 
-    const desalineados = miembros.filter(m => m.stage !== destino);
+    const desalineados = movibles.filter(m => m.stage !== destino);
     if (!desalineados.length) { alineados++; continue; }
 
     const tocaProtegida = desalineados.some(m => PROTEGIDAS.includes(m.stage));

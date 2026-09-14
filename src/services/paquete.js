@@ -124,18 +124,27 @@ async function alinearPaquete(quoteId, { userId = null } = {}) {
   const { todos, notaPedido } = await miembrosDelPaquete(quoteId);
   if (todos.length < 2) return null;
 
+  // "No cotiza" es una decisión que tomó una persona sobre ESA solicitud, y el
+  // paquete no la pisa. Antes no figuraba en ORDEN, así que contaba como la etapa
+  // más baja y cualquier alineación la sacaba de ahí: la migración del 13/09
+  // arrastró a "enviado" dos solicitudes que Santiago había marcado no cotiza.
+  // Si una no_cotiza queda en un paquete, casi siempre es un vínculo equivocado,
+  // y es mejor que se vea desalineado a que se mueva sola.
+  const movibles = todos.filter(q => q.stage !== 'no_cotiza');
+  if (movibles.length < 2) return null;
+
   let destino;
   if (notaPedido) {
     destino = 'aceptada';
   } else {
-    destino = todos.reduce((masAvanzado, q) => {
+    destino = movibles.reduce((masAvanzado, q) => {
       const i = ORDEN.indexOf(q.stage);
       const j = ORDEN.indexOf(masAvanzado);
       return i > j ? q.stage : masAvanzado;
-    }, todos[0].stage);
+    }, movibles[0].stage);
   }
 
-  const aMover = todos.filter(q => q.stage !== destino);
+  const aMover = movibles.filter(q => q.stage !== destino);
   if (!aMover.length) return null;
 
   const data = await datosDeEtapa(destino);

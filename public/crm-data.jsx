@@ -28,13 +28,17 @@ function Icon({ name, size = 16, className = '', strokeWidth = 2 }) {
   }, [name, size, strokeWidth]);
   return <span ref={ref} className={cx('inline-flex shrink-0', className)} aria-hidden="true" />;
 }
-// Semáforo de seguimiento: marca manual del vendedor sobre qué tan encima hay que
-// estar de una cotización. A propósito no reusa el rojo/ámbar del borde de la
-// tarjeta, que ya significan "vencido" — esto es otra cosa, la pone el vendedor.
+// Semáforo de seguimiento: marca manual del vendedor sobre qué chances hay de
+// ganar una cotización. Pedido de Diego: verde es la que hay que ganar, y sin
+// rojo — el rojo se lee como "problema", y una cotización difícil no es un
+// problema, es una que no conviene perseguir. Por eso la tercera es gris.
+// El amarillo es amarillo de verdad y no ámbar: el ámbar ya lo usa el borde de
+// la tarjeta para el seguimiento vencido (⏰) y no se tienen que confundir.
+// Sin marcar = todavía nadie la evaluó, que es distinto de "difícil de ganar".
 const PRIORIDADES = [
-  { id:'alta',  label:'Prioritaria',     desc:'Esta la tenemos que ganar',           dot:'#DC2626', wash:'#FEF2F2', line:'#FCA5A5' },
-  { id:'media', label:'Seguir de cerca', desc:'Requiere atención, sin ser crítica',  dot:'#D97706', wash:'#FFFBEB', line:'#FCD34D' },
-  { id:'baja',  label:'Al día',          desc:'Seguimiento hecho, está controlada',  dot:'#059669', wash:'#ECFDF5', line:'#6EE7B7' },
+  { id:'alta',  label:'Prioritaria',      desc:'Hay que ganarla sí o sí',          dot:'#16A34A', wash:'#F0FDF4', line:'#86EFAC' },
+  { id:'media', label:'Se puede ganar',   desc:'Hay chances, pero no es urgente',  dot:'#EAB308', wash:'#FEFCE8', line:'#FDE047' },
+  { id:'baja',  label:'Difícil de ganar', desc:'Ya se revisó, tiene pocas chances', dot:'#6B7280', wash:'#F3F4F6', line:'#D1D5DB' },
 ];
 const prioridadDe = (id) => PRIORIDADES.find(p => p.id === id) || null;
 

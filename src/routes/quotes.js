@@ -1277,7 +1277,7 @@ router.patch('/:id/priority', authMiddleware, async (req, res) => {
 
     await prisma.quote.update({ where: { id: quote.id }, data: { priority: valor } });
 
-    const NOMBRE = { alta: 'Prioritaria', media: 'Seguir de cerca', baja: 'Al día' };
+    const NOMBRE = { alta: 'Prioritaria', media: 'Se puede ganar', baja: 'Difícil de ganar' };
     await prisma.activity.create({
       data: {
         action:  'PRIORITY_CHANGED',
