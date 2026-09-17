@@ -324,10 +324,18 @@ async function marcarComoRevision(nuevoId, anteriorId, { motivo = null, userId =
     },
   });
 
-  // Lo que apuntaba al anterior (la solicitud, la nota de pedido) pasa al nuevo
+  // Lo que apuntaba al anterior (la solicitud, la nota de pedido) pasa al nuevo —
+  // pero solo si el nuevo no tenía YA su propio vínculo. Puede pasar que, entre el
+  // presupuesto viejo y esta revisión, haya entrado una segunda solicitud del mismo
+  // cliente que se vinculó sola a la revisión (es la única candidata libre, porque
+  // la primera solicitud sigue "tomada" por el presupuesto viejo). Si eso pasó, la
+  // revisión ya tiene dueño: forzar también a la solicitud vieja a apuntarle crea un
+  // vínculo de un solo lado que ningún chequeo detecta a tiempo (MYS: SFLIFESTYLE y
+  // RONZA, 17/09/2026). Mejor dejarla sin vínculo — visible para decidir a mano —
+  // que vinculada por la fuerza a algo que ya no es su presupuesto.
   await prisma.quote.updateMany({
     where: { linkedQuoteId: anterior.id, id: { not: nuevo.id } },
-    data:  { linkedQuoteId: nuevo.id },
+    data:  { linkedQuoteId: nuevo.linkedQuoteId ? null : nuevo.id },
   });
 
   await prisma.quote.update({
