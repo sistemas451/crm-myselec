@@ -529,9 +529,13 @@ async function applyGmailLabel(imap, mails, label) {
           console.warn(`   ⚠️  Label '${label}': no se pudo abrir "${folder}": ${err.message}`);
           return resolve();
         }
-        imap.addFlags(uids, [label], (err) => {
+        // Una etiqueta de Gmail no es un flag IMAP — addFlags la mandaba como
+        // "\crm-procesado" y el servidor la rechazaba siempre (Invalid Arguments:
+        // Unable to parse flag). addLabels usa la extensión X-GM-LABELS de Gmail,
+        // que es lo que hace falta acá; nunca había aplicado una sola etiqueta.
+        imap.addLabels(uids, [label], (err) => {
           if (err) {
-            console.warn(`   ⚠️  Label '${label}' no aplicado en "${folder}" (¿existe la etiqueta en Gmail?): ${err.message}`);
+            console.warn(`   ⚠️  Label '${label}' no aplicado en "${folder}": ${err.message}`);
           } else {
             console.log(`   🏷️  Label '${label}' aplicado a ${uids.length} mail(s) en "${folder}"`);
           }
