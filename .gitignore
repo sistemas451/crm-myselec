@@ -12,3 +12,6 @@ DA_MY-*.xlsx
 
 # Backups de migraciones de datos — nunca commitear
 backups/
+
+# Frontend compilado en cada deploy (scripts/build-frontend.js)
+public/build/

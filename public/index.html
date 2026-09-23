@@ -10,53 +10,6 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 
-<script src="https://cdn.tailwindcss.com"></script>
-<script>
-  tailwind.config = {
-    theme: {
-      extend: {
-        fontFamily: {
-          sans: ['"Helvetica Neue"', '-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'system-ui', 'sans-serif'],
-          mono: ['"JetBrains Mono"', 'monospace'],
-        },
-        colors: {
-          /* ── Myselec 2022 brand identity ── */
-          navy:    { 950: '#00304D', 900: '#004669', 800: '#0A5A82', 700: '#156D98' },
-          ink:     { 900: '#231F20', 700: '#3D393A', 500: '#939598', 400: '#BCBEC0', 300: '#D8D9DB' },
-          line:    '#E0E2E4',
-          surface: '#F4F5F6',
-          brand:   '#20759E',
-          brandSoft:'#E4F0F7',
-          ok:      '#16A76E',
-          warn:    '#E5930A',
-          bad:     '#D93636',
-          purple6: '#7C5AC7',
-          sky5:    '#20759E',
-          orange5: '#E5760A',
-        },
-        boxShadow: {
-          xs:   '0 1px 2px 0 rgba(0,70,105,0.03)',
-          card: '0 1px 3px 0 rgba(0,70,105,0.04), 0 1px 2px -1px rgba(0,70,105,0.06)',
-          lift: '0 4px 12px -2px rgba(0,70,105,0.10), 0 2px 4px -2px rgba(0,70,105,0.04)',
-          pop:  '0 12px 36px -10px rgba(0,70,105,0.22), 0 4px 10px -4px rgba(0,70,105,0.08)',
-          ring: '0 0 0 3px rgba(32,117,158,0.12)',
-        },
-        animation: {
-          'fade-up':    'fadeUp .4s cubic-bezier(.32,.72,0,1) both',
-          'fade-in':    'fadeIn .3s ease both',
-          'slide-in':   'slideIn .3s cubic-bezier(.32,.72,0,1) both',
-          'pulse-soft': 'pulseSoft 2s ease-in-out infinite',
-        },
-        keyframes: {
-          fadeUp:    { from: { opacity: 0, transform: 'translateY(8px)' },  to: { opacity: 1, transform: 'none' } },
-          fadeIn:    { from: { opacity: 0 },                                to: { opacity: 1 } },
-          slideIn:   { from: { opacity: 0, transform: 'translateX(-6px)' }, to: { opacity: 1, transform: 'none' } },
-          pulseSoft: { '0%,100%': { opacity: 1 }, '50%': { opacity: 0.5 } },
-        },
-      }
-    }
-  }
-</script>
 
 <style>
   /* ── Myselec CRM — global styles ── */
@@ -262,22 +215,24 @@
   .badge-purple { background: #F0EBF8; color: #5B3DA6; }
   .badge-gray   { background: #F0F1F2; color: #6B6D70; }
 </style>
+<!-- Tailwind compilado en el deploy (scripts/build-frontend.js). Va después de los estilos
+     propios, en el mismo lugar donde lo insertaba el CDN, para que el orden de la cascada no cambie. -->
+<link rel="stylesheet" href="/build/tailwind.css" />
 
-<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="/build/react.production.min.js"></script>
+<script src="/build/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
 <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
 <script src="https://unpkg.com/lucide@0.454.0/dist/umd/lucide.js"></script>
 </head>
 <body class="min-h-screen">
 <div id="root"></div>
-<script type="text/babel" src="./crm-api.jsx"></script>
-<script type="text/babel" src="./crm-interact.jsx"></script>
-<script type="text/babel" src="./crm-data.jsx"></script>
-<script type="text/babel" src="./crm-kanban.jsx"></script>
-<script type="text/babel" src="./crm-details.jsx"></script>
-<script type="text/babel" src="./crm-views.jsx"></script>
-<script type="text/babel" src="./crm-app.jsx"></script>
+<script src="/build/crm-api.js"></script>
+<script src="/build/crm-interact.js"></script>
+<script src="/build/crm-data.js"></script>
+<script src="/build/crm-kanban.js"></script>
+<script src="/build/crm-details.js"></script>
+<script src="/build/crm-views.js"></script>
+<script src="/build/crm-app.js"></script>
 </body>
 </html>
