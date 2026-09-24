@@ -225,6 +225,7 @@ Alerts support: `newCount` (new since last bell open), `dismissable` (server-sid
 2. Detects type by PDF: `isFlexxusPDF` → PRESUPUESTO, `isNotaPedidoPDF` → NOTA_PEDIDO
 3. Matches client by CUIT (from PDF) → email → domain
 4. Creates Quote, auto-links SOLICITUD↔PRESUPUESTO by thread (In-Reply-To) or client match
+   - NOTA_PEDIDO → PRESUPUESTO: **solo por el número de presupuesto que trae el PDF** (campo "Presupuesto:" del encabezado, o "PR Nº" del comentario si el encabezado difiere), vía `buscarPresupuestoDeNP()` en `quoteHelper.js` — número exacto, solo presupuestos. Sin número la NP queda sin vincular y se vincula a mano. Antes había un fallback por CUIT (último presupuesto aceptado del cliente) que colgaba NP ajenas; se sacó en sep 2026 (MYS-0021) y se corrigieron los datos (18 NP re-vinculadas, 68 desvinculadas, 21 presupuestos vueltos a "enviado"; respaldo en `backups/respaldo-np-2026-09-24T19-29-33-786Z.json`).
 5. Dedup via `emailMessageId` (index, not unique — known issue M-9)
 6. Unassigned digest: accumulates `unassigned: true` results, sends grouped mail per frequency setting
 

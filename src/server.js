@@ -317,11 +317,7 @@ app.post('/api/orders/:id/attachments', authMiddleware, upload.array('files', 10
           // Vincular al presupuesto si no tiene fromQuote
           let linkedPresId = order?.fromQuoteId || null;
           if (!order?.fromQuoteId && data.presupuestoNP) {
-            const pres = await prisma.quote.findFirst({
-              where: { flexxusCode: data.presupuestoNP },
-            }) || await prisma.quote.findFirst({
-              where: { flexxusCode: { contains: data.presupuestoNP.replace('PR-', '') } },
-            });
+            const pres = await require('./services/quoteHelper').buscarPresupuestoDeNP(prisma, data);
             if (pres) { updateData.fromQuoteId = pres.id; linkedPresId = pres.id; }
           }
 

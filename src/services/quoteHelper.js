@@ -17,4 +17,24 @@ async function autoAcceptPresupuesto(presupuestoId) {
   if (r) console.log(`   ✅ paquete alineado a "${r.destino}": ${r.movidos.join(', ')}`);
 }
 
-module.exports = { autoAcceptPresupuesto };
+/**
+ * El presupuesto del que sale una Nota de Pedido, por el número que trae su PDF
+ * (`presupuestoNP` y, si el comentario dice otro, `presupuestoNPAlt`; ver
+ * parseNotaPedidoPDF). Número exacto con o sin "PR-", nunca "contiene" (18850 no
+ * tiene que encontrar a 188501), y solo presupuestos: las solicitudes pueden
+ * tener el mismo número copiado. Sin número devuelve null — no se adivina
+ * (MYS-0021). La usan el ingreso por mail y las dos cargas manuales de NP.
+ */
+async function buscarPresupuestoDeNP(prisma, npData, select) {
+  for (const pr of [npData?.presupuestoNP, npData?.presupuestoNPAlt].filter(Boolean)) {
+    const num = pr.replace('PR-', '');
+    const p = await prisma.quote.findFirst({
+      where: { mailType: 'PRESUPUESTO', OR: [{ flexxusCode: pr }, { flexxusCode: num }, { flexxusCode: { endsWith: ` ${num}` } }] },
+      ...(select ? { select } : {}),
+    });
+    if (p) return p;
+  }
+  return null;
+}
+
+module.exports = { autoAcceptPresupuesto, buscarPresupuestoDeNP };

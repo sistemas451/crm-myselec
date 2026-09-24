@@ -676,41 +676,19 @@ async function processNotaPedido(parsed, mailData, att, imap) {
   let presupuesto = null;
   let presupuestoExactMatch = false;
 
-  // 1. Por NP del presupuesto extraído del COMENTARIO (ej: "PR-18009")
-  if (npData.presupuestoNP) {
-    presupuesto = await prisma.quote.findFirst({
-      where: { flexxusCode: npData.presupuestoNP, mailType: 'PRESUPUESTO' },
-    });
-    if (presupuesto) { presupuestoExactMatch = true; console.log(`   🔗 Presupuesto encontrado por NP Flexxus: ${presupuesto.code} (${npData.presupuestoNP})`); }
-  }
+  // Por el número que trae la NP (encabezado y, si difiere, comentario)
+  presupuesto = await require('./quoteHelper').buscarPresupuestoDeNP(prisma, npData);
+  if (presupuesto) { presupuestoExactMatch = true; console.log(`   🔗 Presupuesto encontrado por el número de la NP: ${presupuesto.code} (${presupuesto.flexxusCode})`); }
 
-  // 2. Fallback: por número raw (sin prefijo PR-) — por si el presupuesto quedó guardado distinto
-  if (!presupuesto && npData.presupuestoNP) {
-    const rawNum = npData.presupuestoNP.replace('PR-', '');
-    presupuesto = await prisma.quote.findFirst({
-      where: { flexxusCode: { contains: rawNum }, mailType: 'PRESUPUESTO' },
-    });
-    if (presupuesto) { presupuestoExactMatch = true; console.log(`   🔗 Presupuesto encontrado por NP raw: ${presupuesto.code}`); }
-  }
-
-  // 3. Fallback: por CUIT del cliente + presupuesto aceptado reciente (no activa auto-accept)
-  if (!presupuesto && npData.cuit) {
-    const clientByCuit = await prisma.client.findFirst({ where: { cuit: { equals: npData.cuit, mode: 'insensitive' } } });
-    if (clientByCuit) {
-      const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 180);
-      presupuesto = await prisma.quote.findFirst({
-        where: { clientId: clientByCuit.id, mailType: 'PRESUPUESTO', stage: 'aceptada', createdAt: { gte: cutoff } },
-        orderBy: { createdAt: 'desc' },
-      });
-      if (!presupuesto) {
-        // Sin stage aceptada, cualquier presupuesto reciente
-        presupuesto = await prisma.quote.findFirst({
-          where: { clientId: clientByCuit.id, mailType: 'PRESUPUESTO', createdAt: { gte: cutoff } },
-          orderBy: { createdAt: 'desc' },
-        });
-      }
-      if (presupuesto) console.log(`   🔗 Presupuesto por CUIT cliente: ${presupuesto.code}`);
-    }
+  // Sin número de presupuesto en la NP no se adivina: queda sin vincular y se
+  // vincula a mano. Antes se tomaba el último presupuesto aceptado del cliente
+  // (por CUIT) y con clientes que piden seguido colgaba NP ajenas del mismo
+  // presupuesto (MYS-0021). Tampoco sirve buscar artículos en común: esos
+  // clientes compran una y otra vez lo mismo.
+  if (!presupuesto) {
+    console.log(npData.presupuestoNP
+      ? `   ⚠️  La NP indica ${npData.presupuestoNP} pero ese presupuesto no está en el CRM — queda sin vincular`
+      : '   ⚠️  La NP no indica presupuesto — queda sin vincular (se vincula a mano)');
   }
 
   // ── Buscar cliente PRIMERO (necesario antes de crear la Order) ──────────

@@ -966,7 +966,8 @@ async function parseNotaPedidoPDF(buffer, opts) {
     clientName:    null,  // Razón social del cliente
     ocNumber:      null,  // Número de OC del cliente
     presupuestoRef: null, // Texto raw del COMENTARIO
-    presupuestoNP:  null, // Código PR del presupuesto extraído del COMENTARIO (ej: "PR-17680")
+    presupuestoNP:  null, // Código PR del presupuesto: del encabezado o, si no está, del COMENTARIO (ej: "PR-17680")
+    presupuestoNPAlt: null, // El del COMENTARIO cuando no coincide con el del encabezado
     date:          null,
     seller:        null,
     subtotalNeto:      null,   // subtotal neto
@@ -1019,6 +1020,23 @@ async function parseNotaPedidoPDF(buffer, opts) {
       }
     }
 
+    // ── Presupuesto de origen (encabezado) ──────────────────────────────────
+    // pdf-parse deja la etiqueta "Presupuesto:" sola en una línea y el número en
+    // la siguiente. Antes solo se buscaba el número en la misma línea, así que el
+    // campo del encabezado nunca se leía: solo se vinculaban las NP que además lo
+    // repetían en el COMENTARIO, y el resto caía en el fallback por CUIT, que
+    // colgaba la NP del último presupuesto aceptado del cliente (MYS-0021).
+    // Si el campo vino vacío, la línea siguiente es un ítem o una etiqueta, no
+    // solo dígitos, y no se toma.
+    for (let i = 0; i < lines.length; i++) {
+      const valor = (lines[i + 1] || '').trim();
+      if (/^Presupuesto:\s*$/i.test(lines[i]) && /^\d+$/.test(valor)) {
+        result.presupuestoRef = `Presupuesto: ${valor}`;
+        result.presupuestoNP  = `PR-${parseInt(valor, 10)}`;
+        break;
+      }
+    }
+
     // ── Presupuesto de referencia y OC del cliente (sección COMENTARIO) ─────
     // IMPORTANTE: pdf-parse concatena los valores sin espacio separador.
     // Ejemplos reales:
@@ -1027,24 +1045,33 @@ async function parseNotaPedidoPDF(buffer, opts) {
     //   "PRESUPUESTO18009"            (sin espacio)
     // La sección COMENTARIO puede aparecer antes o después de firma/forma de pago.
     // Buscamos todas las líneas del PDF completo, no solo las inmediatas al label.
+    let prComentario = null;
     for (const line of lines) {
       if (!result.ocNumber) {
         // "ORDEN DE COMPRA4500038388" o "ORDEN DE COMPRA 4500038388"
         const ocM = line.match(/ORDEN\s+DE\s+COMPRA\s*([A-Z0-9]+)/i);
         if (ocM) result.ocNumber = ocM[1];
       }
-      if (!result.presupuestoNP) {
-        // "Presupuesto: 18111" (header) o "PRESUPUESTO18009" (comentario viejo)
-        // "PR Nº: 000000018111" (comentario nuevo) o "PR-18009"
+      if (!prComentario) {
+        // "PRESUPUESTO18009" (comentario viejo), "PR Nº: 000000018111" (comentario
+        // nuevo) o "PR-18009". "PR Nº: 000000000" es el campo vacío: no cuenta.
         const prM = line.match(/PRESUPUESTO\s*:?\s*(\d+)/i)
           || line.match(/\bPR\s*N[°º]?\s*:?\s*0*(\d+)/i)
           || line.match(/\bPR[-\s](\d+)\b/i);
-        if (prM) {
-          result.presupuestoRef = line;
-          result.presupuestoNP  = `PR-${prM[1]}`;
-        }
+        if (prM && parseInt(prM[1], 10) > 0) prComentario = { ref: line, np: `PR-${parseInt(prM[1], 10)}` };
       }
-      if (result.ocNumber && result.presupuestoNP) break;
+      if (result.ocNumber && prComentario) break;
+    }
+
+    // Manda el del encabezado. Si el comentario dice otro número, se guarda como
+    // alternativa: a veces el del encabezado está mal tipeado (NP-21270 decía
+    // "1885" arriba y "PR Nº 18865" en el comentario) y quien busca el
+    // presupuesto prueba con los dos.
+    if (!result.presupuestoNP && prComentario) {
+      result.presupuestoRef = prComentario.ref;
+      result.presupuestoNP  = prComentario.np;
+    } else if (prComentario && prComentario.np !== result.presupuestoNP) {
+      result.presupuestoNPAlt = prComentario.np;
     }
 
     // ── Fecha ─────────────────────────────────────────────────────────────────

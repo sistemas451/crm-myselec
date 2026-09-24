@@ -100,21 +100,9 @@ router.post('/parse-np', authMiddleware, memUpload.single('file'), async (req, r
     if (!req.file) return res.status(400).json({ error: 'No se recibió archivo' });
     const data = await parseNotaPedidoPDF(req.file.buffer);
 
-    // Buscar presupuesto por código PR del COMENTARIO
-    let presupuesto = null;
-    if (data.presupuestoNP) {
-      presupuesto = await prisma.quote.findFirst({
-        where: { flexxusCode: data.presupuestoNP },
-        select: { id: true, code: true, flexxusCode: true, stage: true, amount: true },
-      });
-      if (!presupuesto) {
-        const rawNum = data.presupuestoNP.replace('PR-', '');
-        presupuesto = await prisma.quote.findFirst({
-          where: { flexxusCode: { contains: rawNum } },
-          select: { id: true, code: true, flexxusCode: true, stage: true, amount: true },
-        });
-      }
-    }
+    // Buscar presupuesto por el número que trae la NP
+    const presupuesto = await require('../services/quoteHelper').buscarPresupuestoDeNP(prisma, data,
+      { id: true, code: true, flexxusCode: true, stage: true, amount: true });
 
     // Buscar cliente por CUIT
     let client = null;
