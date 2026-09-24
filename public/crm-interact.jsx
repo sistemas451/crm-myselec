@@ -1983,6 +1983,7 @@ function NotificationsPopover({ onClose, setScreen }) {
           inboxAlerts, setInboxAlerts, snoozeAlert, markInboxSeen, ackAssigned, ackMention, setQuoteFilters } = useApp();
   const [tab, setTab] = useS(inboxAlerts.length > 0 ? 'inbox' : 'activity');
   const [dismissOpen, setDismissOpen] = useS(null); // alert.id with open dismiss dropdown
+  const [abiertas, setAbiertas] = useS(() => new Set()); // alertas con la lista desplegada ("+N más")
 
   // Llama mark-seen al abrir la pestaña inbox
   const switchToInbox = useCallback(() => {
@@ -2107,7 +2108,7 @@ function NotificationsPopover({ onClose, setScreen }) {
                           {/* Mini-lista: top 3 ítems de la alerta */}
                           {alert.items?.length > 0 && (
                             <div className="mt-1.5 space-y-0.5">
-                              {alert.items.slice(0, 3).map((item, i) => (
+                              {alert.items.slice(0, abiertas.has(alert.id) ? alert.items.length : 3).map((item, i) => (
                                 <div key={i} className="flex items-center gap-1.5 text-[10.5px] opacity-70 leading-snug">
                                   {item.code && alert.type !== 'MENTIONS' ? (
                                     <button title="Abrir"
@@ -2156,8 +2157,17 @@ function NotificationsPopover({ onClose, setScreen }) {
                                   )}
                                 </div>
                               ))}
+                              {/* "+N más" despliega el resto de la lista ahí mismo. El total
+                                  sale de count: el servidor manda como mucho MAX_ITEMS ítems. */}
                               {alert.items.length > 3 && (
-                                <div className="text-[10px] opacity-50">+{alert.items.length - 3} más</div>
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); setAbiertas(s => { const n = new Set(s); n.has(alert.id) ? n.delete(alert.id) : n.add(alert.id); return n; }); }}
+                                  className="text-[10px] opacity-60 hover:opacity-100 underline decoration-dotted underline-offset-2">
+                                  {abiertas.has(alert.id) ? 'Ver menos' : `+${(alert.count || alert.items.length) - 3} más`}
+                                </button>
+                              )}
+                              {abiertas.has(alert.id) && (alert.count || 0) > alert.items.length && (
+                                <div className="text-[10px] opacity-50">y {alert.count - alert.items.length} más en el tablero</div>
                               )}
                             </div>
                           )}

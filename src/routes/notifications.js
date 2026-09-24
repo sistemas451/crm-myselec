@@ -53,7 +53,7 @@ const EN_TRABAJO_INTERNO = {
 
 // Lista de una alerta: el total real, los primeros para mostrar y los ids para
 // que "Ver…" abra el tablero filtrado justo en esas cotizaciones.
-const MAX_ITEMS = 10;
+const MAX_ITEMS = 30;
 const paraAlerta = (lista, item) => ({
   count: lista.length,
   items: lista.slice(0, MAX_ITEMS).map(item),
