@@ -56,6 +56,8 @@
   .inp::placeholder { color: #BCBEC0; }
   .inp:hover { border-color: #D8D9DB; }
   .inp:focus { border-color: #20759E; box-shadow: 0 0 0 3px rgba(32,117,158,0.10); }
+  /* Edge agrega su propio "ojito" a los campos de contraseña; ya tenemos el nuestro (PasswordInput) */
+  input::-ms-reveal, input::-ms-clear { display: none; }
 
   /* ── Buttons ── */
   .btn-primary, .btn-ghost, .btn-accent, .btn-secondary {

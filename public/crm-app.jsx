@@ -701,10 +701,12 @@ function PasswordStrength({ password }) {
 function PasswordInput({ value, onChange, placeholder, autoComplete, className }) {
   const [show, setShow] = useState(false);
   return (
-    <div className="relative">
+    // className va en el contenedor (se usa para márgenes): si fuera en el input, el
+    // margen agranda el contenedor y el ojito deja de quedar centrado en el campo.
+    <div className={cx('relative', className)}>
       <input
         type={show ? 'text' : 'password'}
-        className={cx('inp w-full pr-10', className)}
+        className="inp w-full pr-10"
         value={value}
         onChange={onChange}
         placeholder={placeholder}
@@ -770,12 +772,6 @@ function Login({ onLogin }) {
     const corp = allowedDomains.filter(d => d !== 'gmail.com');
     const parts = corp.map(d => `@${d}`).join(', ');
     return `Solo se aceptan correos de ${parts ? parts + ', ' : ''}Gmail (únicamente autorizados por el administrador).`;
-  };
-
-  const bgStyle = {
-    background: '#00304D',
-    backgroundImage: 'radial-gradient(circle at 20% 30%, #20759E18 0, transparent 40%), radial-gradient(circle at 80% 70%, #20759E10 0, transparent 35%), linear-gradient(#ffffff06 1px, transparent 1px), linear-gradient(90deg, #ffffff06 1px, transparent 1px)',
-    backgroundSize: 'auto, auto, 48px 48px, 48px 48px',
   };
 
   const goTo = (s) => { setScreen(s); setError(''); setInfo(''); };
@@ -852,29 +848,16 @@ function Login({ onLogin }) {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center relative overflow-hidden" style={bgStyle}>
-      <div className="relative flex items-center justify-center p-8 w-full animate-fade-up">
-        <div className="w-full max-w-sm bg-white rounded-2xl p-8" style={{
-          boxShadow: '0 25px 50px -12px rgba(0,30,50,0.35), 0 0 0 1px rgba(255,255,255,0.06)',
-        }}>
-          <div className="flex flex-col items-center mb-8">
-            <div style={{
-              background: 'linear-gradient(145deg, #004669 0%, #0A5A82 100%)',
-              borderRadius: 16,
-              padding: '16px 26px',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: '0 6px 20px rgba(0,70,105,0.28)',
-            }}>
-              <img src="/Logo.png" alt="MySelec" style={{ height: 44, width: 'auto', objectFit: 'contain', display: 'block' }}/>
-            </div>
-          </div>
+    <div className="min-h-screen flex flex-col md:flex-row bg-white">
+      <LoginMarca/>
+      <div className="flex-1 min-w-0 flex items-center justify-center p-8 md:min-h-screen">
+        {/* Entra cuando el logo ya está casi armado (ver public/logo-plano.svg) */}
+        <div className="w-full max-w-sm animate-fade-up" style={{ animationDelay: '1.2s' }}>
 
           {screen === 'login' && (
             <form onSubmit={handleLogin}>
-              <h2 className="text-xl font-bold text-ink-900">Iniciar sesión</h2>
-              <p className="text-sm text-ink-500 mb-6">Ingresá con tu cuenta corporativa.</p>
+              <h2 className="text-[28px] leading-tight font-semibold text-navy-900">Bienvenido</h2>
+              <p className="text-sm text-ink-500 mt-1.5 mb-8">Ingresá con tu cuenta de MySelec.</p>
               {error && <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">{error}</div>}
               {info  && <div className="mb-4 p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm">{info}</div>}
               <label className="block text-xs font-medium text-ink-700 mb-1.5">Email</label>
@@ -882,7 +865,7 @@ function Login({ onLogin }) {
               <div className="flex items-center justify-between mb-1.5">
                 <label className="block text-xs font-medium text-ink-700">Contraseña</label>
                 <button type="button" onClick={()=>goTo('forgot')}
-                  className="text-[11px] text-brand hover:underline">¿Olvidaste tu contraseña?</button>
+                  className="text-xs text-brand hover:underline">¿Olvidaste tu contraseña?</button>
               </div>
               <PasswordInput value={pass} onChange={e=>setPass(e.target.value)} placeholder="••••••••" autoComplete="current-password" className="mb-4"/>
               <label className="flex items-center gap-2 mb-5 cursor-pointer select-none">
@@ -890,7 +873,7 @@ function Login({ onLogin }) {
                   className="w-4 h-4 rounded accent-brand cursor-pointer"/>
                 <span className="text-xs text-ink-600">Recordarme por 7 días</span>
               </label>
-              <button className="btn-primary w-full justify-center" disabled={loading}>
+              <button className="btn-primary w-full justify-center h-11" disabled={loading}>
                 {loading ? 'Ingresando...' : 'Iniciar sesión'}
               </button>
               <div className="mt-4 text-center text-xs text-ink-500">
@@ -908,7 +891,7 @@ function Login({ onLogin }) {
                 className="flex items-center gap-1 text-ink-400 hover:text-ink-700 text-xs mb-4">
                 <Icon name="arrow-left" size={13}/> Volver
               </button>
-              <h2 className="text-xl font-bold text-ink-900">Recuperar contraseña</h2>
+              <h2 className="text-[28px] leading-tight font-semibold text-navy-900 mb-1.5">Recuperar contraseña</h2>
               <p className="text-sm text-ink-500 mb-6">Te enviaremos un link para restablecer tu contraseña.</p>
               {error && <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">{error}</div>}
               {info  && <div className="mb-4 p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm">{info}</div>}
@@ -922,7 +905,7 @@ function Login({ onLogin }) {
 
           {screen === 'reset' && (
             <form onSubmit={handleReset}>
-              <h2 className="text-xl font-bold text-ink-900">Nueva contraseña</h2>
+              <h2 className="text-[28px] leading-tight font-semibold text-navy-900 mb-1.5">Nueva contraseña</h2>
               <p className="text-sm text-ink-500 mb-4">Elegí una contraseña segura.</p>
               {error && <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">{error}</div>}
               <label className="block text-xs font-medium text-ink-700 mb-1.5">Nueva contraseña</label>
@@ -943,7 +926,7 @@ function Login({ onLogin }) {
                 className="flex items-center gap-1 text-ink-400 hover:text-ink-700 text-xs mb-4">
                 <Icon name="arrow-left" size={13}/> Volver
               </button>
-              <h2 className="text-xl font-bold text-ink-900">Crear cuenta</h2>
+              <h2 className="text-[28px] leading-tight font-semibold text-navy-900 mb-1.5">Crear cuenta</h2>
               <p className="text-sm text-ink-500 mb-5">Un administrador revisará tu solicitud y te avisará por mail.</p>
               {error && <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">{error}</div>}
               <div className="grid grid-cols-2 gap-3 mb-3">
@@ -984,7 +967,7 @@ function Login({ onLogin }) {
               <div className="w-14 h-14 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-4">
                 <Icon name="check" size={28} className="text-emerald-600"/>
               </div>
-              <h2 className="text-xl font-bold text-ink-900 mb-2">¡Solicitud enviada!</h2>
+              <h2 className="text-[28px] leading-tight font-semibold text-navy-900 mb-2">¡Solicitud enviada!</h2>
               <p className="text-sm text-ink-500 mb-6">
                 Tu cuenta está siendo revisada por un administrador. Te enviaremos un mail cuando esté lista para usar.
               </p>
@@ -993,13 +976,40 @@ function Login({ onLogin }) {
               </button>
             </div>
           )}
-
-          <div className="mt-6 pt-5 border-t border-line text-center">
-            <div className="text-[11px] uppercase tracking-wider text-ink-400">Sistema de Gestión Comercial</div>
-            <div className="text-xs text-ink-500 mt-0.5">MySelec · v2026.04</div>
-          </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// Panel izquierdo del login: el logo se arma como un plano técnico. El SVG se inserta
+// inline (no como <img>) para que el brillo al pasar el mouse funcione.
+function LoginMarca() {
+  const [svg,  setSvg]  = useState('');
+  const [tilt, setTilt] = useState('');
+
+  React.useEffect(() => {
+    fetch('/logo-plano.svg').then(r => r.ok ? r.text() : '').then(setSvg).catch(() => {});
+  }, []);
+
+  const mover = (e) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const x = (e.clientX - r.left) / r.width - 0.5, y = (e.clientY - r.top) / r.height - 0.5;
+    setTilt(`rotateY(${x * 12}deg) rotateX(${-y * 12}deg)`);
+  };
+
+  return (
+    <div className="relative flex items-center justify-center overflow-hidden h-56 md:h-screen md:sticky md:top-0 md:flex-[1.25]"
+      onMouseMove={mover} onMouseLeave={() => setTilt('')}
+      style={{
+        perspective: 1000,
+        background: '#004669',
+        backgroundImage: 'radial-gradient(circle at 30% 40%, #20759E30 0, transparent 55%), linear-gradient(#ffffff08 1px, transparent 1px), linear-gradient(90deg, #ffffff08 1px, transparent 1px)',
+        backgroundSize: 'auto, 48px 48px, 48px 48px',
+      }}>
+      <div style={{ width: 'min(680px, 82%)', transform: tilt, transition: 'transform .25s ease-out' }}
+        dangerouslySetInnerHTML={{ __html: svg }}/>
+      <div className="absolute bottom-7 inset-x-0 text-center text-xs hidden md:block" style={{ color: '#ffffff55' }}>© MySelec</div>
     </div>
   );
 }
