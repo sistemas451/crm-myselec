@@ -294,6 +294,15 @@ Two email services coexist:
 
 2. **`mailSender.js`** — Quote/presupuesto emails. Uses Nodemailer SMTP with auto-detect by domain. Supports multiple accounts (`MAIL_ACCOUNTS` env JSON array or `mail_accounts` AppSetting). Template system with `{cliente}`, `{codigo}`, `{vendedor}`, etc. On send: logs activity, advances stage to `enviado`, sets `followUpDate` +4 days.
 
+### Respaldos (bucket de Neon Object Storage)
+
+Bucket privado `respaldos` en el proyecto de Neon (branch production), S3-compatible. Variables: `AWS_ENDPOINT_URL_S3`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` (credencial de Neon con scopes storage:read/write).
+
+- **Base** — `backup/respaldo-base.js`, servicio cron aparte en Railway (`backup/Dockerfile` con `pg_dump` 18 de PGDG, `backup/railway.json`, 06:00 UTC = 3 am ARG). Sube `base/AAAA-MM-DD.dump`, controla con `pg_restore --list` que estén los datos de todas las tablas, y aplica retención (7 diarias + 4 semanales + 12 mensuales). A mano: `PG_BIN=C:/PostgreSQL18/bin railway run node -r dotenv/config backup/respaldo-base.js`.
+- **Adjuntos** — `src/services/respaldo.js`, lo corre el propio server a las 3 am ARG (es el único que ve el Volume). Sube a `adjuntos/` lo que falta o cambió de tamaño; nunca borra del bucket. Solo corre con `RAILWAY_ENVIRONMENT_NAME=production`, para que un CRM local con las mismas credenciales no mezcle archivos de prueba.
+- **Estado** — `estado/base.json` y `estado/adjuntos.json` en el bucket (no en la base, para no despertar a Neon de noche). Se ve en Config → 🛠 Desarrolladores → Respaldos (`GET /api/admin/respaldos`, botón `POST /api/admin/respaldos/adjuntos`).
+- **Restaurar** — bajar el `.dump` del bucket y `pg_restore --no-owner --no-privileges --single-transaction --dbname <URL de una base vacía>`; nunca directo sobre producción.
+
 ### Build & Deploy (Railway)
 
 - Build script: `node scripts/build-frontend.js && npx prisma generate && npx prisma db push --accept-data-loss`

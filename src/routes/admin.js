@@ -272,4 +272,24 @@ router.get('/storage-report', authMiddleware, requireDeveloper, async (req, res)
   }
 });
 
+// GET /api/admin/respaldos — estado de los respaldos en el bucket (base + adjuntos)
+router.get('/respaldos', authMiddleware, requireDeveloper, async (req, res) => {
+  try {
+    res.json(await require('../services/respaldo').estadoRespaldos());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/admin/respaldos/adjuntos — dispara ya el respaldo de adjuntos. Responde
+// enseguida y sigue en segundo plano: el primero sube todo el disco y tarda minutos
+// (más que el timeout del proxy de Railway). El resultado queda en GET /respaldos.
+router.post('/respaldos/adjuntos', authMiddleware, requireDeveloper, (req, res) => {
+  const respaldo = require('../services/respaldo');
+  if (!respaldo.configurado()) return res.status(400).json({ error: 'Respaldo sin configurar (faltan variables AWS_*)' });
+  if (!respaldo.esProduccion()) return res.status(400).json({ error: 'El respaldo de adjuntos solo corre en el servidor de producción' });
+  respaldo.respaldarAdjuntos().catch(e => console.error('❌ Respaldo de adjuntos falló:', e.message));
+  res.json({ iniciado: true });
+});
+
 module.exports = router;

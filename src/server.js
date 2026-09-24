@@ -535,6 +535,23 @@ app.listen(PORT, () => {
     runStageAlerts().catch(e => console.error('stage alerts initial error:', e.message));
   }, 60 * 1000);
 
+  // Respaldo nocturno de adjuntos al bucket (src/services/respaldo.js). Corre a las
+  // 3 am Argentina; el de la base lo hace el servicio cron aparte (backup/). Solo
+  // compara el disco con el bucket: no toca la base, así que no despierta a Neon.
+  const respaldo = require('./services/respaldo');
+  if (respaldo.configurado() && respaldo.esProduccion()) {
+    let ultimoDiaRespaldo = null;
+    setInterval(() => {
+      const ahoraArg = new Date(Date.now() - 3 * 3600e3);
+      const dia = ahoraArg.toISOString().slice(0, 10);
+      if (ahoraArg.getUTCHours() !== 3 || ultimoDiaRespaldo === dia) return;
+      ultimoDiaRespaldo = dia;
+      respaldo.respaldarAdjuntos().catch(e => console.error('❌ Respaldo de adjuntos falló:', e.message));
+    }, 10 * 60 * 1000);
+  } else if (!respaldo.configurado()) {
+    console.warn('⚠️  Respaldo de adjuntos sin configurar (faltan variables AWS_*)');
+  }
+
   // Nota: el envío automático del resumen semanal (antes un setInterval acá) se sacó —
   // nunca llegó a mandarse en la práctica y el chequeo periódico mantenía el cómputo
   // de Neon siempre despierto, sin dejarlo suspender (ver CLAUDE.md). El envío manual

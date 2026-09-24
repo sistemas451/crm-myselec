@@ -5213,6 +5213,21 @@ function DeveloperSettings() {
       .finally(() => setStorageLoading(false));
   };
 
+  // Respaldos en el bucket de Neon (base cada noche + adjuntos cada noche)
+  const [respaldos,        setRespaldos]        = useState(null);
+  const [respaldosError,   setRespaldosError]   = useState('');
+  const [respaldoEnviado,  setRespaldoEnviado]  = useState(false);
+  const loadRespaldos = () => {
+    setRespaldosError('');
+    CrmApi.getRespaldos().then(setRespaldos).catch(e => setRespaldosError(e.message || 'No se pudo leer el estado'));
+  };
+  useEffect(() => { loadRespaldos(); }, []);
+  const doRespaldarAdjuntos = async () => {
+    try { await CrmApi.respaldarAdjuntos(); setRespaldoEnviado(true); }
+    catch (e) { alert(e.message || 'No se pudo iniciar el respaldo'); }
+  };
+  const fmtFechaHora = (iso) => iso ? new Date(iso).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
+
   const fmtBytes = (n) => {
     if (!n) return '0 B';
     const u = ['B', 'KB', 'MB', 'GB'];
@@ -5395,6 +5410,60 @@ function DeveloperSettings() {
               <div className={cx('absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all', maintenanceOn ? 'left-[22px]' : 'left-0.5')}/>
             </div>
           </button>
+        </div>
+      </div>
+
+      {/* Sección: respaldos en el bucket de Neon */}
+      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+        <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
+          <Icon name="shield-check" size={14} className="text-brand"/>
+          <span className="font-semibold text-sm text-slate-700">Respaldos</span>
+          <button onClick={loadRespaldos} className="ml-auto text-[11px] text-slate-400 hover:text-slate-600 flex items-center gap-1">
+            <Icon name="refresh-cw" size={11}/> Actualizar
+          </button>
+        </div>
+        <div className="px-5 py-4 space-y-3">
+          <p className="text-[12.5px] text-slate-500 leading-relaxed">
+            Todas las noches a las 3 se guarda una copia completa de la base y de los adjuntos nuevos en el
+            bucket <strong>{respaldos?.bucket || 'respaldos'}</strong> de Neon. De la base quedan los últimos 7 días,
+            una por semana del último mes y una por mes del último año.
+          </p>
+          {respaldosError && (
+            <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-2.5 text-[12.5px] text-red-700">{respaldosError}</div>
+          )}
+          {respaldos && !respaldos.configurado && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-[12.5px] text-amber-800">
+              Sin configurar: faltan las variables AWS_* del bucket en el servidor.
+            </div>
+          )}
+          {respaldos?.configurado && (
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { titulo: 'Base de datos', e: respaldos.base,
+                  detalle: e => `${e.archivo} · ${fmtBytes(e.bytes)} · ${e.tablas} tablas · ${e.copiasGuardadas} copias guardadas` },
+                { titulo: 'Adjuntos', e: respaldos.adjuntos,
+                  detalle: e => `${e.archivosEnDisco} archivos (${fmtBytes(e.bytesEnDisco)}) · ${e.subidos} nuevos subidos${e.cantErrores ? ` · ${e.cantErrores} con error` : ''}` },
+              ].map(({ titulo, e, detalle }) => (
+                <div key={titulo} className={cx('border rounded-lg px-4 py-3',
+                  !e ? 'bg-slate-50 border-slate-200' : e.ok ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200')}>
+                  <div className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">{titulo}</div>
+                  <div className={cx('text-sm font-semibold mt-0.5', !e ? 'text-slate-500' : e.ok ? 'text-emerald-700' : 'text-red-700')}>
+                    {!e ? 'Todavía no se hizo ninguno' : `${e.ok ? 'OK' : 'Falló'} · ${fmtFechaHora(e.fecha)}`}
+                  </div>
+                  {e && <div className="text-[11px] text-slate-500 mt-0.5">{e.ok || e.subidos != null ? detalle(e) : e.error}</div>}
+                </div>
+              ))}
+            </div>
+          )}
+          {respaldos?.configurado && (
+            <div className="flex items-center gap-3">
+              <button onClick={doRespaldarAdjuntos} disabled={respaldoEnviado}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-brand text-white rounded-lg text-xs font-medium hover:bg-brand/90 disabled:opacity-50">
+                <Icon name="upload-cloud" size={12}/> Respaldar adjuntos ahora
+              </button>
+              {respaldoEnviado && <span className="text-[11px] text-slate-500">En curso — puede tardar unos minutos. Tocá "Actualizar" para ver el resultado.</span>}
+            </div>
+          )}
         </div>
       </div>
 

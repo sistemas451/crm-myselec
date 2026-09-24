@@ -15,6 +15,7 @@
     "build:frontend": "node scripts/build-frontend.js"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "3.1139.0",
     "@babel/standalone": "7.29.0",
     "@prisma/client": "^6.6.0",
     "bcryptjs": "^2.4.3",

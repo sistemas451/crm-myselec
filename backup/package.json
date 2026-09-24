@@ -1,0 +1,8 @@
+{
+  "name": "myselec-crm-respaldo-base",
+  "private": true,
+  "description": "Servicio cron de Railway: respaldo nocturno de la base al bucket de Neon (ver respaldo-base.js)",
+  "dependencies": {
+    "@aws-sdk/client-s3": "3.1139.0"
+  }
+}

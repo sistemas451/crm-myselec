@@ -253,6 +253,8 @@ const CrmApi = {
 
   // Admin — reparseo de PDFs Flexxus
   getStorageReport: () => apiFetch('/admin/storage-report'),
+  getRespaldos: () => apiFetch('/admin/respaldos'),
+  respaldarAdjuntos: () => apiFetch('/admin/respaldos/adjuntos', { method: 'POST' }),
   getReparseCandidates: () => apiFetch('/admin/reparse-candidates'),
   reparsePreview: (quoteIds) => apiFetch('/admin/reparse-preview', {
     method: 'POST', body: JSON.stringify({ quoteIds }),
