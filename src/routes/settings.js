@@ -128,6 +128,9 @@ router.patch('/', authMiddleware, adminOrDevMiddleware, async (req, res) => {
     }
     const rows = await prisma.appSetting.findMany();
     const map  = Object.fromEntries(rows.map(r => [r.key, r.value]));
+    // El reloj de tareas automáticas guarda la ventana horaria en memoria para no
+    // consultar la base fuera de horario: se le avisa cada vez que cambia algo.
+    require('../services/tareasProgramadas').recargarConfig({ ...DEFAULTS, ...map });
     res.json({ ...DEFAULTS, ...map });
   } catch (err) {
     res.status(500).json({ error: 'Error al guardar configuración' });

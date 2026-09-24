@@ -23,8 +23,6 @@ const helmet    = require('helmet');
 const rateLimit = require('express-rate-limit');
 const prisma    = require('./db');
 const { authMiddleware } = require('./middleware/auth');
-const { runIdleCheck, runStageAlerts } = require('./services/notifier');
-const { syncMails }    = require('./services/mailReader');
 const { parseFlexxusPDF, isFlexxusPDF } = require('./services/flexxusParser');
 
 const app  = express();
@@ -521,93 +519,17 @@ app.listen(PORT, () => {
   console.log(`   API: http://localhost:${PORT}/api/health`);
   console.log(`   Frontend: http://localhost:${PORT}\n`);
 
-  // Checker de notificaciones idle — corre cada hora
-  setInterval(() => {
-    runIdleCheck().catch(e => console.error('idle check error:', e.message));
-  }, 60 * 60 * 1000);
-
-  // Alertas por tiempo de etapa — corre una vez al día
-  setInterval(() => {
-    runStageAlerts().catch(e => console.error('stage alerts error:', e.message));
-  }, 24 * 60 * 60 * 1000);
-  // Primera ejecución 1 minuto después del arranque (deja tiempo para conectar DB)
-  setTimeout(() => {
-    runStageAlerts().catch(e => console.error('stage alerts initial error:', e.message));
-  }, 60 * 1000);
-
-  // Respaldo nocturno de adjuntos al bucket (src/services/respaldo.js). Corre a las
-  // 3 am Argentina; el de la base lo hace el servicio cron aparte (backup/). Solo
-  // compara el disco con el bucket: no toca la base, así que no despierta a Neon.
-  const respaldo = require('./services/respaldo');
-  if (respaldo.configurado() && respaldo.esProduccion()) {
-    let ultimoDiaRespaldo = null;
-    setInterval(() => {
-      const ahoraArg = new Date(Date.now() - 3 * 3600e3);
-      const dia = ahoraArg.toISOString().slice(0, 10);
-      if (ahoraArg.getUTCHours() !== 3 || ultimoDiaRespaldo === dia) return;
-      ultimoDiaRespaldo = dia;
-      respaldo.respaldarAdjuntos().catch(e => console.error('❌ Respaldo de adjuntos falló:', e.message));
-    }, 10 * 60 * 1000);
-  } else if (!respaldo.configurado()) {
-    console.warn('⚠️  Respaldo de adjuntos sin configurar (faltan variables AWS_*)');
-  }
+  // Tareas automáticas (sync de mails, chequeo de inactividad, alertas de etapa y
+  // respaldo de adjuntos) con un solo reloj que respeta la ventana laboral sin
+  // consultar la base fuera de horario — ver src/services/tareasProgramadas.js.
+  // El sync automático es solo la red de respaldo: el disparador principal es cuando
+  // alguien abre el CRM o aprieta "Sincronizar" (routes/mail.js).
+  require('./services/tareasProgramadas').iniciar();
+  if (!require('./services/respaldo').configurado()) console.warn('⚠️  Respaldo de adjuntos sin configurar (faltan variables AWS_*)');
 
   // Nota: el envío automático del resumen semanal (antes un setInterval acá) se sacó —
   // nunca llegó a mandarse en la práctica y el chequeo periódico mantenía el cómputo
   // de Neon siempre despierto, sin dejarlo suspender (ver CLAUDE.md). El envío manual
   // sigue disponible: botón "Probar" en Config → Alertas (DEVELOPER) y el endpoint
   // POST /notifications/cron/weekly-report para un cron externo si algún día se usa.
-
-  // true si "ahora" (hora Argentina, UTC-3) cae dentro de los días/horario configurados
-  function isWithinSyncWindow(days, startHour, endHour) {
-    const now     = new Date();
-    const argTime = new Date(now.getTime() - 3 * 3600 * 1000);
-    const curDay  = argTime.getUTCDay();  // 0=domingo … 6=sábado
-    const curHour = argTime.getUTCHours();
-    return days.includes(curDay) && curHour >= startHour && curHour < endHour;
-  }
-
-  // Sync automático de mails — intervalo y ventana horaria configurables desde AppSetting.
-  // Es solo la red de respaldo: el disparador principal es cuando alguien abre el CRM
-  // (login o pestaña con sesión recordada) o aprieta "Sincronizar" — ver routes/mail.js.
-  async function scheduleMailSync() {
-    try {
-      const [settingInterval, settingEnabled, winEnabled, winDays, winStart, winEnd] = await Promise.all([
-        prisma.appSetting.findUnique({ where: { key: 'mail_sync_interval_hours' } }),
-        prisma.appSetting.findUnique({ where: { key: 'mail_sync_enabled' } }),
-        prisma.appSetting.findUnique({ where: { key: 'mail_sync_window_enabled' } }),
-        prisma.appSetting.findUnique({ where: { key: 'mail_sync_window_days' } }),
-        prisma.appSetting.findUnique({ where: { key: 'mail_sync_window_start_hour' } }),
-        prisma.appSetting.findUnique({ where: { key: 'mail_sync_window_end_hour' } }),
-      ]);
-      const hours   = parseFloat(settingInterval?.value || '2');
-      const enabled = settingEnabled?.value !== 'false'; // default true
-      const ms      = Math.max(0.25, hours) * 60 * 60 * 1000; // mínimo 15 min
-      if (!enabled) {
-        console.log(`📧 Mail sync automático DESACTIVADO — reintentando en ${hours}h`);
-        setTimeout(scheduleMailSync, ms);
-        return;
-      }
-
-      const windowEnabled = winEnabled?.value !== 'false'; // default true
-      const windowDays    = (winDays?.value || '1,2,3,4,5').split(',').map(d => parseInt(d, 10));
-      const windowStart   = parseInt(winStart?.value ?? '8', 10);
-      const windowEnd     = parseInt(winEnd?.value ?? '20', 10);
-
-      console.log(`📧 Mail sync automático cada ${hours}h${windowEnabled ? ` · restringido a horario laboral (${windowStart}-${windowEnd}hs)` : ''}`);
-      setTimeout(async () => {
-        if (!windowEnabled || isWithinSyncWindow(windowDays, windowStart, windowEnd)) {
-          console.log('📧 Auto-sync de mails...');
-          try { await syncMails(); } catch (e) { console.error('Auto-sync error:', e.message); }
-        } else {
-          console.log('📧 Auto-sync omitido — fuera de la ventana laboral configurada');
-        }
-        scheduleMailSync(); // releer el intervalo/ventana en cada ciclo
-      }, ms);
-    } catch (e) {
-      console.error('scheduleMailSync error:', e.message);
-      setTimeout(scheduleMailSync, 2 * 60 * 60 * 1000); // retry en 2h
-    }
-  }
-  scheduleMailSync();
 });

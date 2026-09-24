@@ -387,6 +387,7 @@ Bucket privado `respaldos` en el proyecto de Neon (branch production), S3-compat
 - Disparador principal: `crm-interact.jsx` (`AppProvider`) llama `CrmApi.syncMail()` en segundo plano al montar la app si hay un token válido — cubre tanto login fresco como reabrir la pestaña con sesión recordada (7 días). No bloquea el login.
 - Botón manual "Sincronizar" en el topbar (`crm-app.jsx`, `Topbar`), visible para todos los roles.
 - El timer automático de fondo (`scheduleMailSync()` en `server.js`) sigue siendo la red de respaldo, pero ahora respeta una ventana configurable de días + horario (`mail_sync_window_*`, ver Settings arriba) — fuera de la ventana no corre. Toggle para desactivar la restricción y volver al comportamiento de siempre (correr sin importar hora/día).
+- **Actualización (sep 2026):** todas las tareas automáticas (sync de mails, chequeo de inactividad, alertas de etapa, respaldo de adjuntos) viven en `src/services/tareasProgramadas.js`, con un solo reloj de 10 min. La ventana se guarda en memoria (se lee al arrancar y `PATCH /api/settings` llama a `recargarConfig`): antes el scheduler leía la ventana de la base en cada ciclo solo para decidir no correr, y el chequeo de inactividad corría cada hora 24/7 — las dos cosas despertaban a Neon de noche. Fuera de la ventana el server no consulta la base salvo que alguien use el CRM.
 - Sync siempre procesa **todas** las cuentas configuradas — no existe el concepto de "cuenta propia" por vendedor, las casillas son compartidas por la empresa.
 
 ### Known issues / audit backlog
