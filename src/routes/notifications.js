@@ -26,6 +26,40 @@ function userInappPref(prefs, key) {
   return inapp[key] !== false; // default true si no está definido
 }
 
+// Etapas donde ya no hay nada que hacer. "No cotiza" es una decisión tomada:
+// antes no se excluía y 70 solicitudes resueltas quedaban para siempre en las
+// alertas de "sin presupuesto" y "fecha límite vencida" (MYS-0022).
+const CERRADAS = ['aceptada', 'rechazada', 'no_cotiza'];
+
+// Solicitud que todavía no tiene presupuesto. El vínculo puede estar guardado de
+// cualquiera de los dos lados (ver services/paquete.js), así que se miran ambos.
+// Las que están en "enviado" ya se respondieron: si no tienen el presupuesto
+// vinculado es un tema de datos, no algo que alguien tenga que hacer hoy.
+const SOLICITUD_SIN_PRESUPUESTO = {
+  mailType: 'SOLICITUD', isDraft: false,
+  stage: { notIn: ['enviado', ...CERRADAS] },
+  OR: [{ linkedQuoteId: null }, { linkedQuote: { mailType: { not: 'PRESUPUESTO' } } }],
+  linkedBy: { none: { mailType: 'PRESUPUESTO' } },
+};
+
+// Cotización trabada en una etapa de trabajo interno (armado, proveedor…). Las
+// enviadas esperan al cliente y de eso se ocupan el seguimiento y "sin
+// respuesta": contarlas acá daba "996 cotizaciones sin actividad".
+const EN_TRABAJO_INTERNO = {
+  isDraft: false,
+  stage: { notIn: ['enviado', ...CERRADAS] },
+  OR: [{ mailType: null }, { mailType: { in: ['SOLICITUD', 'PRESUPUESTO'] } }],
+};
+
+// Lista de una alerta: el total real, los primeros para mostrar y los ids para
+// que "Ver…" abra el tablero filtrado justo en esas cotizaciones.
+const MAX_ITEMS = 10;
+const paraAlerta = (lista, item) => ({
+  count: lista.length,
+  items: lista.slice(0, MAX_ITEMS).map(item),
+  ids:   lista.map(q => q.id),
+});
+
 // GET /api/notifications/inbox — alertas accionables según el rol del usuario
 router.get('/inbox', authMiddleware, async (req, res) => {
   try {
@@ -93,16 +127,22 @@ router.get('/inbox', authMiddleware, async (req, res) => {
     if (isAdmin(req.user)) {
       // 1. Solicitudes sin vendedor asignado
       if (sysUnassigned && userInappPref(prefs, 'unassigned_quotes')) {
-        const unassigned = await prisma.quote.count({
+        const sinAsignar = await prisma.quote.findMany({
           where: { stage: 'recibida', sellerId: null, isDraft: false },
+          select: { id: true, code: true, createdAt: true, client: { select: { name: true } } },
+          orderBy: { createdAt: 'asc' },
         });
-        if (unassigned > 0) alerts.push({
-          id: 'unassigned-quotes', type: 'UNASSIGNED_QUOTES', severity: 'high', icon: 'user-x',
-          title: `${unassigned} solicitud${unassigned > 1 ? 'es' : ''} sin asignar`,
-          description: 'Cotizaciones en "Solicitud Recibida" sin vendedor asignado.',
-          action: { label: 'Ver solicitudes', view: 'quotes', filter: { stage: 'recibida' } },
-          count: unassigned,
-        });
+        if (sinAsignar.length > 0) {
+          const titulo = `${sinAsignar.length} solicitud${sinAsignar.length > 1 ? 'es' : ''} sin asignar`;
+          const l = paraAlerta(sinAsignar, q => ({ id: q.id, code: q.code, clientName: q.client?.name, daysOld: Math.floor((now - q.createdAt) / 86400000) }));
+          alerts.push({
+            id: 'unassigned-quotes', type: 'UNASSIGNED_QUOTES', severity: 'high', icon: 'user-x',
+            title: titulo,
+            description: 'Cotizaciones en "Solicitud Recibida" sin vendedor asignado.',
+            action: { label: 'Ver solicitudes', view: 'quotes', filter: { ids: l.ids, label: titulo } },
+            count: l.count, items: l.items,
+          });
+        }
       }
 
       // 2. Usuarios pendientes de aprobación
@@ -123,71 +163,59 @@ router.get('/inbox', authMiddleware, async (req, res) => {
         if (overdueResult.total > 0) {
           const nc = overdueResult.newCount;
           const stageDesc = _formatByStage(overdueResult.byStage);
+          const titulo = nc > 0
+            ? `${nc} nueva${nc > 1 ? 's' : ''} con tiempo de etapa excedido`
+            : `${overdueResult.total} ítem${overdueResult.total > 1 ? 's' : ''} con tiempo de etapa excedido`;
           alerts.push({
             id: 'overdue-stages', type: 'OVERDUE_STAGES', severity: 'medium', icon: 'clock-alert',
-            title: nc > 0
-              ? `${nc} nueva${nc > 1 ? 's' : ''} con tiempo de etapa excedido`
-              : `${overdueResult.total} ítem${overdueResult.total > 1 ? 's' : ''} con tiempo de etapa excedido`,
+            title: titulo,
             description: stageDesc || (nc > 0
               ? `${nc} nueva${nc > 1 ? 's' : ''} desde tu última visita (${overdueResult.total} en total).`
               : overdueResult.detail),
-            action: { label: 'Ver cotizaciones', view: 'quotes' },
-            count: overdueResult.total, newCount: nc, items: overdueResult.items,
+            action: { label: 'Ver cotizaciones', view: 'quotes', filter: { ids: overdueResult.items.filter(i => i.kind === 'quote').map(i => i.id), label: titulo } },
+            count: overdueResult.total, newCount: nc, items: overdueResult.items.slice(0, MAX_ITEMS),
             dismissable: true, dismissKey: 'overdue_stages',
           });
         }
       }
 
-      // 4. Cotizaciones activas sin actividad en X días — con newCount + dismissable
+      // 4. Cotizaciones trabadas en una etapa interna sin movimiento en X días
       if (sysIdle && userInappPref(prefs, 'idle_quotes') && !isDismissed('idle_quotes')) {
-        const idleBase = { isDraft: false, stage: { notIn: ['aceptada', 'rechazada'] }, updatedAt: { lte: idleCutoff } };
-        const [total, newIdle] = await Promise.all([
-          prisma.quote.count({ where: idleBase }),
-          lastCheck
-            ? prisma.quote.count({
-                where: { ...idleBase, updatedAt: { gt: new Date(lastCheck.getTime() - idleInboxDays * 86400 * 1000), lte: idleCutoff } },
-              })
-            : Promise.resolve(0),
-        ]);
-        if (total > 0) {
+        const trabadas = await prisma.quote.findMany({
+          where: { ...EN_TRABAJO_INTERNO, updatedAt: { lte: idleCutoff } },
+          select: { id: true, code: true, updatedAt: true, client: { select: { name: true } } },
+          orderBy: { updatedAt: 'asc' },
+        });
+        if (trabadas.length > 0) {
+          const titulo = `${trabadas.length} ${trabadas.length > 1 ? 'cotizaciones' : 'cotización'} sin movimiento (>${idleInboxDays} días)`;
+          const l = paraAlerta(trabadas, q => ({ id: q.id, code: q.code, clientName: q.client?.name, daysOld: Math.floor((now - q.updatedAt) / 86400000) }));
           alerts.push({
             id: 'idle-quotes', type: 'IDLE_QUOTES', severity: 'low', icon: 'clock',
-            title: newIdle > 0
-              ? `${newIdle} cotización${newIdle > 1 ? 'es' : ''} nueva${newIdle > 1 ? 's' : ''} sin actividad`
-              : `${total} cotización${total > 1 ? 'es' : ''} sin actividad (>${idleInboxDays} días)`,
-            description: newIdle > 0
-              ? `${newIdle} nueva${newIdle > 1 ? 's' : ''} desde tu última visita (${total} en total, >${idleInboxDays} días sin movimiento).`
-              : `Cotizaciones activas que no tuvieron movimiento en más de ${idleInboxDays} días.`,
-            action: { label: 'Ver cotizaciones', view: 'quotes' },
-            count: total, newCount: newIdle,
+            title: titulo,
+            description: `En armado, esperando proveedor o asignadas, sin movimiento hace más de ${idleInboxDays} días.`,
+            action: { label: 'Ver cotizaciones', view: 'quotes', filter: { ids: l.ids, label: titulo } },
+            count: l.count, items: l.items,
             dismissable: true, dismissKey: 'idle_quotes',
           });
         }
       }
 
-      // 5. Solicitudes sin presupuesto vinculado en más de X días
+      // 5. Solicitudes sin presupuesto en más de X días
       if (sysUnlinkedSol && userInappPref(prefs, 'unlinked_solicitudes') && !isDismissed('unlinked_solicitudes')) {
-        const unlinkedSolicitudes = await prisma.quote.findMany({
-          where: {
-            mailType: 'SOLICITUD', linkedQuoteId: null, isDraft: false,
-            stage: { notIn: ['aceptada', 'rechazada'] },
-            createdAt: { lte: solCutoff },
-          },
+        const sinPres = await prisma.quote.findMany({
+          where: { ...SOLICITUD_SIN_PRESUPUESTO, createdAt: { lte: solCutoff } },
           select: { id: true, code: true, createdAt: true, client: { select: { name: true } } },
-          take: 10,
+          orderBy: { createdAt: 'asc' },
         });
-        if (unlinkedSolicitudes.length > 0) {
+        if (sinPres.length > 0) {
+          const titulo = `${sinPres.length} solicitud${sinPres.length > 1 ? 'es' : ''} sin presupuesto (>${solSinPresDays}d)`;
+          const l = paraAlerta(sinPres, q => ({ id: q.id, code: q.code, clientName: q.client?.name, daysOld: Math.floor((now - q.createdAt) / 86400000) }));
           alerts.push({
             id: 'unlinked-solicitudes', type: 'UNLINKED_SOLICITUDES', severity: 'high', icon: 'file-question',
-            title: `${unlinkedSolicitudes.length} solicitud${unlinkedSolicitudes.length > 1 ? 'es' : ''} sin presupuesto (>${solSinPresDays}d)`,
-            description: `Solicitudes sin presupuesto vinculado hace más de ${solSinPresDays} días.`,
-            action: { label: 'Ver solicitudes', view: 'quotes' },
-            count: unlinkedSolicitudes.length,
-            items: unlinkedSolicitudes.map(q => ({
-              code: q.code,
-              clientName: q.client?.name,
-              daysOld: Math.floor((now - new Date(q.createdAt)) / 86400000),
-            })),
+            title: titulo,
+            description: `Solicitudes que llegaron hace más de ${solSinPresDays} días y todavía no tienen presupuesto.`,
+            action: { label: 'Ver solicitudes', view: 'quotes', filter: { ids: l.ids, label: titulo } },
+            count: l.count, items: l.items,
             dismissable: true, dismissKey: 'unlinked_solicitudes',
           });
         }
@@ -195,27 +223,20 @@ router.get('/inbox', authMiddleware, async (req, res) => {
 
       // 6. Solicitudes con fecha límite de armado vencida (todas)
       if (sysDeadlineOverdue && userInappPref(prefs, 'deadline_overdue') && !isDismissed('deadline_overdue')) {
-        const deadlineOverdueQuotes = await prisma.quote.findMany({
-          where: {
-            mailType: 'SOLICITUD', linkedQuoteId: null, isDraft: false,
-            stage: { notIn: ['enviado', 'aceptada', 'rechazada'] },
-            deadline: { lte: now },
-          },
+        const vencidas = await prisma.quote.findMany({
+          where: { ...SOLICITUD_SIN_PRESUPUESTO, deadline: { lte: now } },
           select: { id: true, code: true, deadline: true, client: { select: { name: true } } },
-          take: 10,
+          orderBy: { deadline: 'asc' },
         });
-        if (deadlineOverdueQuotes.length > 0) {
+        if (vencidas.length > 0) {
+          const titulo = `${vencidas.length} solicitud${vencidas.length > 1 ? 'es' : ''} con fecha límite vencida`;
+          const l = paraAlerta(vencidas, q => ({ id: q.id, code: q.code, clientName: q.client?.name, daysOld: Math.floor((now - q.deadline) / 86400000) }));
           alerts.push({
             id: 'deadline-overdue', type: 'DEADLINE_OVERDUE', severity: 'high', icon: 'flag',
-            title: `${deadlineOverdueQuotes.length} solicitud${deadlineOverdueQuotes.length > 1 ? 'es' : ''} con fecha límite vencida`,
+            title: titulo,
             description: 'Solicitudes que pasaron la fecha límite para tener el presupuesto listo, sin enviar todavía.',
-            action: { label: 'Ver solicitudes', view: 'quotes' },
-            count: deadlineOverdueQuotes.length,
-            items: deadlineOverdueQuotes.map(q => ({
-              code: q.code,
-              clientName: q.client?.name,
-              daysOld: Math.floor((now - new Date(q.deadline)) / 86400000),
-            })),
+            action: { label: 'Ver solicitudes', view: 'quotes', filter: { ids: l.ids, label: titulo } },
+            count: l.count, items: l.items,
             dismissable: true, dismissKey: 'deadline_overdue',
           });
         }
@@ -242,7 +263,7 @@ router.get('/inbox', authMiddleware, async (req, res) => {
             const creatorStr = creators.length === 1 ? creators[0] : creators.length > 1 ? `${creators[0]} y otros` : 'Un administrador';
             alerts.push({
               id: 'assigned-quotes', type: 'ASSIGNED_QUOTES', severity: 'high', icon: 'user-plus',
-              title: `${assignedQuotes.length} cotización${assignedQuotes.length > 1 ? 'es' : ''} nueva${assignedQuotes.length > 1 ? 's' : ''} asignada${assignedQuotes.length > 1 ? 's' : ''}`,
+              title: `${assignedQuotes.length} ${assignedQuotes.length > 1 ? 'cotizaciones' : 'cotización'} nueva${assignedQuotes.length > 1 ? 's' : ''} asignada${assignedQuotes.length > 1 ? 's' : ''}`,
               description: `${creatorStr} te asignó${assignedQuotes.length === 1 ? ' una nueva cotización' : ` ${assignedQuotes.length} cotizaciones`}. Confirmá cada una cuando la hayas revisado.`,
               action: { label: 'Ver mis cotizaciones', view: 'quotes' },
               count: assignedQuotes.length,
@@ -263,7 +284,7 @@ router.get('/inbox', authMiddleware, async (req, res) => {
         });
         if (followUps > 0) alerts.push({
           id: 'follow-up-due', type: 'FOLLOW_UP_DUE', severity: 'high', icon: 'calendar-clock',
-          title: `${followUps} cotización${followUps > 1 ? 'es' : ''} con seguimiento vencido`,
+          title: `${followUps} ${followUps > 1 ? 'cotizaciones' : 'cotización'} con seguimiento vencido`,
           description: 'Clientes que deberían haber respondido el presupuesto.',
           action: { label: 'Ver mis cotizaciones', view: 'quotes' },
           count: followUps,
@@ -276,73 +297,58 @@ router.get('/inbox', authMiddleware, async (req, res) => {
         if (overdueResult.total > 0) {
           const nc = overdueResult.newCount;
           const stageDesc = _formatByStage(overdueResult.byStage);
+          const titulo = nc > 0
+            ? `${nc} nueva${nc > 1 ? 's' : ''} con tiempo de etapa excedido`
+            : `${overdueResult.total} ítem${overdueResult.total > 1 ? 's' : ''} con tiempo de etapa excedido`;
           alerts.push({
             id: 'overdue-stages', type: 'OVERDUE_STAGES', severity: 'medium', icon: 'clock-alert',
-            title: nc > 0
-              ? `${nc} nueva${nc > 1 ? 's' : ''} con tiempo de etapa excedido`
-              : `${overdueResult.total} ítem${overdueResult.total > 1 ? 's' : ''} con tiempo de etapa excedido`,
+            title: titulo,
             description: stageDesc || (nc > 0
               ? `${nc} nueva${nc > 1 ? 's' : ''} desde tu última visita (${overdueResult.total} en total).`
               : overdueResult.detail),
-            action: { label: 'Ver mis cotizaciones', view: 'quotes' },
-            count: overdueResult.total, newCount: nc, items: overdueResult.items,
+            action: { label: 'Ver mis cotizaciones', view: 'quotes', filter: { ids: overdueResult.items.filter(i => i.kind === 'quote').map(i => i.id), label: titulo } },
+            count: overdueResult.total, newCount: nc, items: overdueResult.items.slice(0, MAX_ITEMS),
             dismissable: true, dismissKey: 'overdue_stages',
           });
         }
       }
 
-      // 3. Cotizaciones del vendedor sin actividad en X días — con newCount + dismissable
+      // 3. Cotizaciones del vendedor trabadas en una etapa interna sin movimiento en X días
       if (sysIdle && userInappPref(prefs, 'idle_quotes') && !isDismissed('idle_quotes')) {
-        const idleBase = {
-          sellerId: userId, isDraft: false,
-          stage: { notIn: ['aceptada', 'rechazada'] }, updatedAt: { lte: idleCutoff },
-        };
-        const [total, newIdle] = await Promise.all([
-          prisma.quote.count({ where: idleBase }),
-          lastCheck
-            ? prisma.quote.count({
-                where: { ...idleBase, updatedAt: { gt: new Date(lastCheck.getTime() - idleInboxDays * 86400 * 1000), lte: idleCutoff } },
-              })
-            : Promise.resolve(0),
-        ]);
-        if (total > 0) {
+        const trabadas = await prisma.quote.findMany({
+          where: { ...EN_TRABAJO_INTERNO, sellerId: userId, updatedAt: { lte: idleCutoff } },
+          select: { id: true, code: true, updatedAt: true, client: { select: { name: true } } },
+          orderBy: { updatedAt: 'asc' },
+        });
+        if (trabadas.length > 0) {
+          const titulo = `${trabadas.length} ${trabadas.length > 1 ? 'cotizaciones' : 'cotización'} sin movimiento (>${idleInboxDays} días)`;
+          const l = paraAlerta(trabadas, q => ({ id: q.id, code: q.code, clientName: q.client?.name, daysOld: Math.floor((now - q.updatedAt) / 86400000) }));
           alerts.push({
             id: 'idle-quotes', type: 'IDLE_QUOTES', severity: 'low', icon: 'clock',
-            title: newIdle > 0
-              ? `${newIdle} cotización${newIdle > 1 ? 'es' : ''} nueva${newIdle > 1 ? 's' : ''} sin actividad`
-              : `${total} cotización${total > 1 ? 'es' : ''} sin actividad (>${idleInboxDays} días)`,
-            description: newIdle > 0
-              ? `${newIdle} nueva${newIdle > 1 ? 's' : ''} desde tu última visita (${total} en total, >${idleInboxDays} días sin movimiento).`
-              : `Tus cotizaciones activas que no tuvieron movimiento en más de ${idleInboxDays} días.`,
-            action: { label: 'Ver mis cotizaciones', view: 'quotes' },
-            count: total, newCount: newIdle,
+            title: titulo,
+            description: `Tus cotizaciones en armado, esperando proveedor o asignadas, sin movimiento hace más de ${idleInboxDays} días.`,
+            action: { label: 'Ver mis cotizaciones', view: 'quotes', filter: { ids: l.ids, label: titulo } },
+            count: l.count, items: l.items,
             dismissable: true, dismissKey: 'idle_quotes',
           });
         }
       }
       // 4. Solicitudes del vendedor sin presupuesto en más de X días
       if (sysUnlinkedSol && userInappPref(prefs, 'unlinked_solicitudes') && !isDismissed('unlinked_solicitudes')) {
-        const unlinkedSolicitudes = await prisma.quote.findMany({
-          where: {
-            sellerId: userId, mailType: 'SOLICITUD', linkedQuoteId: null, isDraft: false,
-            stage: { notIn: ['aceptada', 'rechazada'] },
-            createdAt: { lte: solCutoff },
-          },
+        const sinPres = await prisma.quote.findMany({
+          where: { ...SOLICITUD_SIN_PRESUPUESTO, sellerId: userId, createdAt: { lte: solCutoff } },
           select: { id: true, code: true, createdAt: true, client: { select: { name: true } } },
-          take: 10,
+          orderBy: { createdAt: 'asc' },
         });
-        if (unlinkedSolicitudes.length > 0) {
+        if (sinPres.length > 0) {
+          const titulo = `${sinPres.length} solicitud${sinPres.length > 1 ? 'es' : ''} sin presupuesto (>${solSinPresDays}d)`;
+          const l = paraAlerta(sinPres, q => ({ id: q.id, code: q.code, clientName: q.client?.name, daysOld: Math.floor((now - q.createdAt) / 86400000) }));
           alerts.push({
             id: 'unlinked-solicitudes', type: 'UNLINKED_SOLICITUDES', severity: 'high', icon: 'file-question',
-            title: `${unlinkedSolicitudes.length} solicitud${unlinkedSolicitudes.length > 1 ? 'es' : ''} sin presupuesto (>${solSinPresDays}d)`,
-            description: `Tenés solicitudes sin presupuesto enviado hace más de ${solSinPresDays} días.`,
-            action: { label: 'Ver mis cotizaciones', view: 'quotes' },
-            count: unlinkedSolicitudes.length,
-            items: unlinkedSolicitudes.map(q => ({
-              code: q.code,
-              clientName: q.client?.name,
-              daysOld: Math.floor((now - new Date(q.createdAt)) / 86400000),
-            })),
+            title: titulo,
+            description: `Tenés solicitudes que llegaron hace más de ${solSinPresDays} días y todavía no tienen presupuesto.`,
+            action: { label: 'Ver mis cotizaciones', view: 'quotes', filter: { ids: l.ids, label: titulo } },
+            count: l.count, items: l.items,
             dismissable: true, dismissKey: 'unlinked_solicitudes',
           });
         }
@@ -350,27 +356,20 @@ router.get('/inbox', authMiddleware, async (req, res) => {
 
       // 4b. Solicitudes del vendedor con fecha límite de armado vencida
       if (sysDeadlineOverdue && userInappPref(prefs, 'deadline_overdue') && !isDismissed('deadline_overdue')) {
-        const deadlineOverdueQuotes = await prisma.quote.findMany({
-          where: {
-            sellerId: userId, mailType: 'SOLICITUD', linkedQuoteId: null, isDraft: false,
-            stage: { notIn: ['enviado', 'aceptada', 'rechazada'] },
-            deadline: { lte: now },
-          },
+        const vencidas = await prisma.quote.findMany({
+          where: { ...SOLICITUD_SIN_PRESUPUESTO, sellerId: userId, deadline: { lte: now } },
           select: { id: true, code: true, deadline: true, client: { select: { name: true } } },
-          take: 10,
+          orderBy: { deadline: 'asc' },
         });
-        if (deadlineOverdueQuotes.length > 0) {
+        if (vencidas.length > 0) {
+          const titulo = `${vencidas.length} solicitud${vencidas.length > 1 ? 'es' : ''} con fecha límite vencida`;
+          const l = paraAlerta(vencidas, q => ({ id: q.id, code: q.code, clientName: q.client?.name, daysOld: Math.floor((now - q.deadline) / 86400000) }));
           alerts.push({
             id: 'deadline-overdue', type: 'DEADLINE_OVERDUE', severity: 'high', icon: 'flag',
-            title: `${deadlineOverdueQuotes.length} solicitud${deadlineOverdueQuotes.length > 1 ? 'es' : ''} con fecha límite vencida`,
+            title: titulo,
             description: 'Tenés solicitudes que pasaron la fecha límite para tener el presupuesto listo.',
-            action: { label: 'Ver mis cotizaciones', view: 'quotes' },
-            count: deadlineOverdueQuotes.length,
-            items: deadlineOverdueQuotes.map(q => ({
-              code: q.code,
-              clientName: q.client?.name,
-              daysOld: Math.floor((now - new Date(q.deadline)) / 86400000),
-            })),
+            action: { label: 'Ver mis cotizaciones', view: 'quotes', filter: { ids: l.ids, label: titulo } },
+            count: l.count, items: l.items,
             dismissable: true, dismissKey: 'deadline_overdue',
           });
         }
@@ -395,7 +394,7 @@ router.get('/inbox', authMiddleware, async (req, res) => {
             action: { label: 'Ver mis cotizaciones', view: 'quotes' },
             count: upcoming.length,
             items: upcoming.map(q => ({
-              code: q.code,
+              id: q.id, code: q.code,
               clientName: q.client?.name,
               followUpDate: q.followUpDate,
             })),
@@ -480,7 +479,7 @@ router.get('/inbox', authMiddleware, async (req, res) => {
             action: { label: 'Ver órdenes', view: 'orders' },
             count: orderItems.length,
             newCount: nc,
-            dismissable: true,
+            dismissable: true, dismissKey: 'overdue_stages',
             items: orderItems.slice(0, 5).map(i => ({ id: i.id, code: i.code, clientName: i.clientName, stage: i.stage })),
           });
         }
@@ -517,7 +516,7 @@ router.post('/dismiss', authMiddleware, async (req, res) => {
     const { id: userId } = req.user;
     const { key, days } = req.body;
     if (!key || !days) return res.status(400).json({ error: 'key y days son requeridos' });
-    const allowedKeys = ['overdue_stages', 'idle_quotes', 'unlinked_solicitudes'];
+    const allowedKeys = ['overdue_stages', 'idle_quotes', 'unlinked_solicitudes', 'deadline_overdue'];
     if (!allowedKeys.includes(key)) return res.status(400).json({ error: 'key inválida' });
     const allowedDays = [3, 7, 30];
     const d = parseInt(days, 10);

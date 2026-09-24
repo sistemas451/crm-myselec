@@ -608,6 +608,16 @@ function QuoteFiltersBar({ hidePeriod, hideSort } = {}) {
 
   return (
     <>
+      {quoteFilters.ids && (
+        <div className="flex items-center gap-1.5 pl-2.5 pr-1 py-1 text-[12px] font-medium text-navy-900 bg-brandSoft border border-brand/30 rounded-lg max-w-[320px]">
+          <Icon name="bell" size={13} className="text-brand shrink-0"/>
+          <span className="truncate" title={quoteFilters.idsLabel}>{quoteFilters.idsLabel || 'Desde notificaciones'}</span>
+          <button onClick={()=>setQuoteFilters(s=>({...s, ids:null, idsLabel:''}))} title="Quitar filtro"
+            className="p-0.5 rounded hover:bg-white text-ink-500 hover:text-ink-900 shrink-0">
+            <Icon name="x" size={13}/>
+          </button>
+        </div>
+      )}
       {roleKey === 'vendedor' ? (
         <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-[12.5px] font-medium text-ink-700 bg-surface border border-line rounded-lg">
           <Icon name="user" size={13} className="text-ink-500"/>

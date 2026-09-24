@@ -262,7 +262,7 @@ function AppProvider({ children }) {
   }, []);
 
   // Quote-level filters (shared by board)
-  const [quoteFilters, setQuoteFilters] = useS({ seller:'', client:'', period:'30d', zone:'', activity:'', min:'', max:'', sort:'recent', priority:'' });
+  const [quoteFilters, setQuoteFilters] = useS({ seller:'', client:'', period:'30d', zone:'', activity:'', min:'', max:'', sort:'recent', priority:'', ids:null, idsLabel:'' });
   const [orderFilters, setOrderFilters] = useS({ seller:'', client:'', period:'30d', min:'', max:'' });
 
   // Logged-in user (for notes)
@@ -1980,7 +1980,7 @@ const MODAL_REGISTRY = {
 // ---------- Notifications Popover ----------
 function NotificationsPopover({ onClose, setScreen }) {
   const { notifications, markNotificationRead, markAllNotificationsRead, openModal,
-          inboxAlerts, setInboxAlerts, snoozeAlert, markInboxSeen, ackAssigned, ackMention } = useApp();
+          inboxAlerts, setInboxAlerts, snoozeAlert, markInboxSeen, ackAssigned, ackMention, setQuoteFilters } = useApp();
   const [tab, setTab] = useS(inboxAlerts.length > 0 ? 'inbox' : 'activity');
   const [dismissOpen, setDismissOpen] = useS(null); // alert.id with open dismiss dropdown
 
@@ -2023,6 +2023,12 @@ function NotificationsPopover({ onClose, setScreen }) {
   const handleAlertAction = (alert) => {
     onClose();
     const view = alert.action?.view;
+    // Antes solo cambiaba de pantalla: si ya estabas en Cotizaciones parecía no
+    // hacer nada (MYS-0022). Ahora el tablero queda filtrado en esas cotizaciones.
+    const ids = alert.action?.filter?.ids;
+    if (view === 'quotes' && ids?.length) {
+      setQuoteFilters(s => ({ ...s, ids, idsLabel: alert.action.filter.label || alert.title }));
+    }
     if (view === 'quotes' && setScreen) setScreen('quotes');
     else if (view === 'team' && setScreen) setScreen('team');
     else if (view === 'orders' && setScreen) setScreen('orders');
@@ -2103,7 +2109,13 @@ function NotificationsPopover({ onClose, setScreen }) {
                             <div className="mt-1.5 space-y-0.5">
                               {alert.items.slice(0, 3).map((item, i) => (
                                 <div key={i} className="flex items-center gap-1.5 text-[10.5px] opacity-70 leading-snug">
-                                  <span className="font-mono font-medium">{item.code}</span>
+                                  {item.code && alert.type !== 'MENTIONS' ? (
+                                    <button title="Abrir"
+                                      onClick={(e) => { e.stopPropagation(); onClose(); openModal(item.kind === 'order' ? 'orderDetail' : 'quoteDetail', { code: item.code }); }}
+                                      className="font-mono font-medium shrink-0 underline decoration-dotted underline-offset-2 hover:decoration-solid">
+                                      {item.code}
+                                    </button>
+                                  ) : <span className="font-mono font-medium">{item.code}</span>}
                                   {item.clientName && <span className="truncate">· {item.clientName}</span>}
                                   {item.daysSent !== undefined && <span className="shrink-0 text-[10px]">· {item.daysSent}d</span>}
                                   {item.daysOld !== undefined && <span className="shrink-0 text-[10px]">· {item.daysOld}d</span>}
@@ -2407,12 +2419,17 @@ function countActiveFilters(f) {
   if (f.priority) n++;
   if (f.delivery) n++;
   if (f.transport) n++;
+  if (f.ids) n++;
   return n;
 }
 
 function applyQuoteFilters(list, filters, clientsArr) {
-  const periodStart = filters.period ? periodStartDate(filters.period) : null;
+  // Filtro que pone una alerta de la campanita ("Ver solicitudes"): solo esas
+  // cotizaciones, sin mirar el período — las más viejas son justo las que avisa.
+  const soloIds = filters.ids ? new Set(filters.ids) : null;
+  const periodStart = filters.period && !soloIds ? periodStartDate(filters.period) : null;
   return list.filter(q => {
+    if (soloIds && !soloIds.has(q.id)) return false;
     // Una anulada fue reemplazada por una revisión: mostrarla sería tener dos
     // presupuestos vivos del mismo negocio. Se abre desde la ficha de la nueva.
     if (q.anulada) return false;
